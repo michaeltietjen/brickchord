@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+brickchord/_vendor/
+brickchord/brickchord_config.json
+brickchord/*.log
+*.zip
