@@ -920,7 +920,7 @@ class App:
             status.append("LATCH")
         left = self.eng.remaining
         if left:
-            status.append("warming up %d" % left)
+            status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, 444))
         self.text(c, "SELECT menu   START beat   SEL+START quit", self.f_small, DIM, (BASE_W - 20, 444), right=True)

@@ -192,7 +192,8 @@ class LocalHost:
     disk cache when they have been made before; otherwise one note is rendered
     right away and background worker processes render the rest while you play.
     Until a note's real render arrives, a pitch-shifted neighbour stands in."""
-    WORKERS = 2
+    WORKERS = 1
+    IDLE_SEC = 4.0              # only render after this long with nothing sounding
     KEEP_SOUNDS = 10            # sound folders kept in the disk cache
 
     def __init__(self, sr, block):
@@ -211,6 +212,8 @@ class LocalHost:
         self.pending = {}           # key -> file path the worker will write
         self.workers = []
         self.job_patch = None
+        self.paused = False
+        self.last_play = 0.0
         self.root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
         self.kind = "local"
 
@@ -237,6 +240,7 @@ class LocalHost:
         try:
             dirs = [os.path.join(self.root, x) for x in os.listdir(self.root)]
             dirs = sorted((x for x in dirs if os.path.isdir(x)), key=os.path.getmtime, reverse=True)
+            dirs = [x for x in dirs if not os.path.exists(os.path.join(x, "factory"))]
             for x in dirs[self.KEEP_SOUNDS:]:
                 if x != keep_dir:
                     for f in os.listdir(x):
@@ -292,6 +296,22 @@ class LocalHost:
             if w.poll() is None:
                 w.kill()
         self.workers = []
+        self.paused = False
+
+    def _pause_workers(self, pause):
+        """Background rendering competes with the audio thread for CPU and memory
+        bandwidth, which crackles. So workers are frozen whenever anything is
+        sounding and only run while the Brick is quiet."""
+        if pause == self.paused:
+            return
+        import signal
+        for w in self.workers:
+            if w.poll() is None:
+                try:
+                    os.kill(w.pid, signal.SIGSTOP if pause else signal.SIGCONT)
+                except Exception:
+                    pass
+        self.paused = pause
 
     def _start_workers(self, keys):
         """Render keys (all one sound) in background processes, spread-out
@@ -319,10 +339,15 @@ class LocalHost:
         for k in keys:
             self.pending[k] = self._path(k)
         self.job_patch = pjson
+        self.paused = False
+        if self.eng.voices or time.time() - self.last_play < self.IDLE_SEC:
+            self._pause_workers(True)
         _log("background render: %d notes, %d workers" % (len(keys), len(self.workers)))
 
     def poll(self):
         """Swap in notes the workers have finished. Cheap; call a few times a second."""
+        quiet = not self.eng.voices and time.time() - self.last_play > self.IDLE_SEC
+        self._pause_workers(not quiet)
         got = 0
         done = bool(self.workers) and all(w.poll() is not None for w in self.workers)
         for k, path in list(self.pending.items()):
@@ -344,6 +369,8 @@ class LocalHost:
         self.eng.post(name, *args)
 
     def chord(self, notes, keys, revoice):
+        self.last_play = time.time()
+        self._pause_workers(True)
         snd = {}
         missing = []
         for m, k in keys.items():

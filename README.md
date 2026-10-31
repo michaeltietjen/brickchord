@@ -52,3 +52,6 @@ chord instruments like those. The release zip bundles NumPy (BSD-3-Clause); see 
 
 ## License
 MIT, see `LICENSE`.
+
+## Instant sound loading (optional)
+On a computer with Python 3 and NumPy, run `python3 brickchord/factory_render.py` from the release folder before copying it to the SD card. It pre-renders all 15 stock sounds (about 355 MB) into `brickchord/cache`, so every stock sound opens instantly. Without it, the Brick renders each sound the first time you use it, during quiet moments, and keeps it for next time.
