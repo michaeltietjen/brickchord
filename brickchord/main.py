@@ -994,7 +994,7 @@ class App:
     def run(self):
         clock = pygame.time.Clock()
         last_draw = 0
-        last_hb = time.perf_counter()
+        last_hb = last_poll = time.perf_counter()
         while self.running:
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
@@ -1011,6 +1011,9 @@ class App:
                 self.audition_until = 0
                 self.stop_chord()
             now = time.perf_counter()
+            if now - last_poll > 0.3 and hasattr(self.eng, "poll"):
+                last_poll = now
+                self.eng.poll()
             if now - last_hb > 20:
                 last_hb = now
                 self.heartbeat()
