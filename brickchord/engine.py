@@ -548,7 +548,9 @@ class Engine:
         if el > N / sr:
             self.underruns += 1
         self.load = 0.9 * self.load + 0.1 * (el / (N / sr))
-        return out.astype(np.float32)
+        out = out.astype(np.float32)
+        self.scope = out[::2, 0]            # for the on-screen oscilloscope
+        return out
 
     def _take(self, v, n):
         a, l = v.a, v.l
