@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/brickchord-lockup.png" alt="brickchord" width="480"></p>
+
 # Brickchord (alpha)
 
 A pocket chord machine with an analog-style synth voice, built for the **TrimUI Brick Pro** running **KNULLI**.

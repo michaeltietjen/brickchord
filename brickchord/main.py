@@ -366,11 +366,22 @@ class App:
         if hasattr(self.eng, "preload") and hasattr(self, "canvas"):
             self.eng.preload(self.loading)
 
+    def draw_mark(self, c, cx, cy, k):
+        """The Brickchord logo: seven chord keys and one lit key (4 x 2 grid)."""
+        gap = max(3, k // 7)
+        x0 = cx - (4 * k + 3 * gap) // 2
+        y0 = cy - (2 * k + gap) // 2
+        for i in range(8):
+            col = (255, 90, 31) if i == 6 else (233, 231, 226)     # dark-screen version of the logo
+            r = pygame.Rect(x0 + (i % 4) * (k + gap), y0 + (i // 4) * (k + gap), k, k)
+            pygame.draw.rect(c, col, r, border_radius=max(2, k // 8))
+
     def loading(self, done, total):
         c = self.canvas
         c.fill(BG)
-        self.text(c, "BRICKCHORD", self.f_med, ACCENT, (BASE_W // 2, 170), center=True)
-        self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 215), center=True)
+        self.draw_mark(c, BASE_W // 2, 105, 34)
+        self.text(c, "brickchord", self.f_big, INK, (BASE_W // 2, 180), center=True)
+        self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218), center=True)
         w = 360
         pygame.draw.rect(c, PANEL, ((BASE_W - w) // 2, 250, w, 14), border_radius=7)
         pygame.draw.rect(c, ACCENT, ((BASE_W - w) // 2, 250, int(w * done / max(1, total)), 14), border_radius=7)

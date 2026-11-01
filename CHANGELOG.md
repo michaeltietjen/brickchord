@@ -15,3 +15,6 @@ First public alpha.
 - Right stick: up = more reverb and delay together, down = dry, left = live filter sweep, right = resonance sweep; click the stick to hold the effects
 - Play modes: Chord, Strum Folk/Pop/Skank, Slop, Harp Up/Down, 5 arpeggiators
 - Quantize, latch, spread, latency settings; per-launch log files
+
+## Logo
+- New button-grid logo (eight keys, one orange), shown on the loading screen and in the EmulationStation ports list. Source SVGs in docs/.
