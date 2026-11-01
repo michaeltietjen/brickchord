@@ -20,6 +20,19 @@ PLAY MODES (Settings > Play)
   Slop         loose, human timing and velocity
   Harp Up / Harp Down                    glissando sweep through the chord
   Arp ...      5 arpeggiator patterns
+  Arp Octaves (Settings) runs arps over 1 to 4 octaves (default 2)
+
+BASS (Settings > Bass, Bass Level)
+  A dedicated synth bass, an octave under the chords. It skips the reverb,
+  delay and filter (like the drums) so it stays tight.
+  Synth        holds the root under every chord (default)
+  Pulse        root on every 8th
+  Octaves      8ths jumping root / octave
+  Walk         root, root, fifth, octave
+  Sub + Patch  the sound's own bass note with the synth sub under it
+  Patch        the sound's own bass note only (the old behaviour)
+  Off          no bass
+  Bass Level   0 to 200%
 
 SOUND EDITOR (Settings > Edit Sound)
   Osc wave, detune, sub osc, cutoff, resonance, filter envelope (A/D/S),
@@ -29,9 +42,12 @@ SOUND EDITOR (Settings > Edit Sound)
   Dark Sync-ish, Wide Supersaw, Prophet Poly, Electric Piano, Glass Bells,
   Choir Pad, Acid Chord, Lofi Strings, Sub Pad, Soft Tri Organ.
 
-SETTINGS: key, scale, sound, filter, resonance, octave, play mode, reverb,
-delay, delay time (synced to tempo), beat, tempo, spread, latch, quantize,
-volume, latency.
+SETTINGS: key, scale, sound, filter, resonance, octave, play mode, arp octaves,
+bass, bass level, reverb, reverb type, delay, delay type, delay time (synced to
+tempo), beat, tempo, spread, latch, quantize, volume, latency.
+  Filter / Resonance  baked into the sound. Leave them at 0 to use the
+             pre-rendered sound pack (instant loading); use the right stick
+             for live filter moves instead.
   Quantize   with the beat on, chords/strums/arps start on the next beat
   Latency    Low / Normal / Safe audio buffer (takes effect next launch).
              Use Safe if you ever hear crackles.
@@ -48,3 +64,11 @@ Beats (27): Four Floor, Boom Bap, Synthpop, Half Time, House, Disco, Lo-fi, Trap
   Jungle, Techno, Minimal Techno, 2-Step Garage, UK Funky, Neo-Soul, Nu-Disco,
   Afro House, Footwork. Set Tempo to taste (Jungle/D&B/Footwork love 160-175).
 Bundled NumPy is BSD-licensed (see _vendor/numpy-*.dist-info).
+
+SCREEN
+The logo animates at launch and plays the home chord of your key. Chord names
+drop in letter by letter, struck tiles shatter into bricks, and a self-playing
+Tetris well behind the chord name drops a piece on every chord (shape = chord
+degree), clears lines in a burst of bricks and falls in time with the beat.
+A live oscilloscope shows the output. The screen drops to 15 fps when nothing
+moves and backs off further if the audio gets busy, so sound always wins.
