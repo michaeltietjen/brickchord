@@ -21,6 +21,25 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CFG_PATH = os.path.join(APP_DIR, "brickchord_config.json")
 BASE_W, BASE_H = 640, 480
 
+# Screen layouts. 4:3 (TrimUI Brick) and square (R36Max and other 720x720
+# handhelds: the extra height goes to a bigger brick well, taller keys and
+# keyboard). set_layout() picks one from the real screen before the UI starts.
+LAYOUTS = {
+    "4:3": dict(H=480, name_y=128, roman_y=200, mark_y=122, pills_y=236, tiles_y=280, tile_h=96,
+                kb_y=392, kb_h=40, status_y=444, steps_y=472, msg_y=466, stick_cy=132, fx_top=70,
+                fx_half=46, well_rows=15, list_rows=13, hint_y=462, dy=0),
+    "square": dict(H=640, name_y=150, roman_y=262, mark_y=150, pills_y=318, tiles_y=362, tile_h=120,
+                   kb_y=500, kb_h=56, status_y=574, steps_y=632, msg_y=604, stick_cy=165, fx_top=92,
+                   fx_half=56, well_rows=22, list_rows=18, hint_y=620, dy=80),
+}
+L = LAYOUTS["4:3"]
+
+
+def set_layout(name):
+    global L, BASE_H
+    L = LAYOUTS[name]
+    BASE_H = L["H"]
+
 NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 SCALES = {"Major": [0, 2, 4, 5, 7, 9, 11], "Minor": [0, 2, 3, 5, 7, 8, 10],
           "Dorian": [0, 2, 3, 5, 7, 9, 10], "Mixolydian": [0, 2, 4, 5, 7, 9, 10]}
@@ -531,8 +550,8 @@ class App:
                 self.ensure_bass(self.bass_range(), budget=0.008)   # a few notes per frame
             c = self.canvas
             c.fill(BG)
-            self.draw_mark(c, BASE_W // 2, 105, 34, t)
-            self.draw_title(c, 180, t)
+            self.draw_mark(c, BASE_W // 2, 105 + L["dy"], 34, t)
+            self.draw_title(c, 180 + L["dy"], t)
             self.present()
             clock.tick(60)
 
@@ -540,13 +559,14 @@ class App:
         c = self.canvas
         c.fill(BG)
         t = time.perf_counter() - getattr(self, "t0", time.perf_counter() - 9)
-        self.draw_mark(c, BASE_W // 2, 105, 34, max(t, 1.5))
-        self.draw_title(c, 180)
-        self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218), center=True)
+        d = L["dy"]
+        self.draw_mark(c, BASE_W // 2, 105 + d, 34, max(t, 1.5))
+        self.draw_title(c, 180 + d)
+        self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218 + d), center=True)
         w = 360
-        pygame.draw.rect(c, PANEL, ((BASE_W - w) // 2, 250, w, 14), border_radius=7)
-        pygame.draw.rect(c, ACCENT, ((BASE_W - w) // 2, 250, int(w * done / max(1, total)), 14), border_radius=7)
-        self.text(c, "%d / %d" % (done, total), self.f_small, DIM, (BASE_W // 2, 290), center=True)
+        pygame.draw.rect(c, PANEL, ((BASE_W - w) // 2, 250 + d, w, 14), border_radius=7)
+        pygame.draw.rect(c, ACCENT, ((BASE_W - w) // 2, 250 + d, int(w * done / max(1, total)), 14), border_radius=7)
+        self.text(c, "%d / %d" % (done, total), self.f_small, DIM, (BASE_W // 2, 290 + d), center=True)
         self.present()
         pygame.event.pump()
 
@@ -652,12 +672,12 @@ class App:
                     break
             c = self.canvas
             c.fill(BG)
-            self.text(c, "BUTTON SETUP", self.f_med, ACCENT, (BASE_W // 2, 70), center=True)
-            self.text(c, "Press", self.f_med, DIM, (BASE_W // 2, 170), center=True)
+            self.text(c, "BUTTON SETUP", self.f_med, ACCENT, (BASE_W // 2, 70 + L["dy"]), center=True)
+            self.text(c, "Press", self.f_med, DIM, (BASE_W // 2, 170 + L["dy"]), center=True)
             if i < len(order):
-                self.text(c, order[i], self.f_huge, INK, (BASE_W // 2, 250), center=True)
-            self.text(c, "%d / %d" % (min(i + 1, len(order)), len(order)), self.f_small, DIM, (BASE_W // 2, 340), center=True)
-            self.text(c, "This happens once. Relearn any time from the menu.", self.f_small, DIM, (BASE_W // 2, 420), center=True)
+                self.text(c, order[i], self.f_huge, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
+            self.text(c, "%d / %d" % (min(i + 1, len(order)), len(order)), self.f_small, DIM, (BASE_W // 2, 340 + L["dy"]), center=True)
+            self.text(c, "This happens once. Relearn any time from the menu.", self.f_small, DIM, (BASE_W // 2, 420 + L["dy"]), center=True)
             self.present()
             clock.tick(60)
         if mapping:
@@ -719,17 +739,17 @@ class App:
                     armed = True
             c = self.canvas
             c.fill(BG)
-            self.text(c, "STICK SETUP", self.f_med, ACCENT, (BASE_W // 2, 70), center=True)
+            self.text(c, "STICK SETUP", self.f_med, ACCENT, (BASE_W // 2, 70 + L["dy"]), center=True)
             if i < len(steps):
-                self.text(c, steps[i][1], self.f_med, DIM, (BASE_W // 2, 170), center=True)
-                self.text(c, steps[i][2], self.f_huge, INK, (BASE_W // 2, 250), center=True)
+                self.text(c, steps[i][1], self.f_med, DIM, (BASE_W // 2, 170 + L["dy"]), center=True)
+                self.text(c, steps[i][2], self.f_huge, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
                 if steps[i][0] != "R3":
-                    self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320), center=True)
+                    self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320 + L["dy"]), center=True)
             if only:
                 self.text(c, "New: right stick LEFT/RIGHT = filter / resonance, click = hold effects",
-                          self.f_small, ACCENT2, (BASE_W // 2, 385), center=True)
+                          self.f_small, ACCENT2, (BASE_W // 2, 385 + L["dy"]), center=True)
             self.text(c, "Press START to skip a step (or if you have no sticks)", self.f_small, DIM,
-                      (BASE_W // 2, 420), center=True)
+                      (BASE_W // 2, 420 + L["dy"]), center=True)
             self.present()
             clock.tick(60)
         self.cfg["sticks"] = result
@@ -1161,13 +1181,13 @@ class App:
         if self.cur:
             deg, pc, iv, name = self.cur
             font = self.f_huge if self.f_huge.size(name)[0] < 330 else self.f_big
-            self.draw_name(c, name, font, BASE_W // 2 - 10, 128, x)
+            self.draw_name(c, name, font, BASE_W // 2 - 10, L["name_y"], x)
             ry = int(14 * (1 - min(1, x * 1.6)) ** 3)
-            self.text(c, roman_for(deg, iv), self.f_big, ACCENT, (BASE_W // 2, 200 + ry), center=True)
+            self.text(c, roman_for(deg, iv), self.f_big, ACCENT, (BASE_W // 2, L["roman_y"] + ry), center=True)
         else:
-            self.draw_mark(c, BASE_W // 2, 122, 22, 1.5 + now - getattr(self, "t0", now))
+            self.draw_mark(c, BASE_W // 2, L["mark_y"], 22, 1.5 + now - getattr(self, "t0", now))
             b = 0.5 + 0.5 * math.sin(now * 2.2)
-            self.text(c, "press a chord", self.f_med, self.mix(DIM, INK, b * 0.5), (BASE_W // 2, 200), center=True)
+            self.text(c, "press a chord", self.f_med, self.mix(DIM, INK, b * 0.5), (BASE_W // 2, L["roman_y"]), center=True)
 
         # ---- modifier pills fill from the middle when held
         m = self.mods()
@@ -1177,7 +1197,7 @@ class App:
         x = 40
         for n, (lab, on) in enumerate(labels):
             lv = self.sm("pill%d" % n, 1.0 if on else 0.0, 22 if on else 9)
-            r = pygame.Rect(x, 236, 128, 26)
+            r = pygame.Rect(x, L["pills_y"], 128, 26)
             pygame.draw.rect(c, PANEL, r, border_radius=6)
             if lv > 0.02:
                 fw = max(6, int(r.w * lv))
@@ -1206,9 +1226,10 @@ class App:
             lv = self.sm("tile%d" % i, 1.0 if active else 0.0, 30 if active else 6)
             hit = active and self.since(self.hit_t, 0.16) < 1
             dip = int(5 * (1 - self.since(self.hit_t, 0.16))) if hit else (2 if active else 0)
-            r = pygame.Rect(x0 + i * (tw + gap), 280 + dip, tw, 96)
+            th = L["tile_h"]
+            r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"] + dip, tw, th)
             if dip:
-                pygame.draw.rect(c, (8, 7, 10), (r.x, 280 + 96 - 4, tw, 4 + dip), border_radius=10)
+                pygame.draw.rect(c, (8, 7, 10), (r.x, L["tiles_y"] + th - 4, tw, 4 + dip), border_radius=10)
             col = self.mix(PANEL, ACCENT, lv)
             if hit:
                 col = self.mix((255, 226, 200), ACCENT, self.since(self.hit_t, 0.16))
@@ -1219,13 +1240,13 @@ class App:
                                    random.choice((ACCENT, (255, 226, 200), self.PIECE_COL[i % 7])), 1, 220, up=260)
             pygame.draw.rect(c, col, r, border_radius=10)
             ink = self.mix(INK, BG, lv)
-            self.text(c, roman_for(i, iv), self.f_med, self.mix(ACCENT2, BG, lv), (r.centerx, r.y + 20), center=True)
+            self.text(c, roman_for(i, iv), self.f_med, self.mix(ACCENT2, BG, lv), (r.centerx, r.y + th * 21 // 100), center=True)
             nm_font = self.f_med if len(name) < 6 else self.f_small
-            self.text(c, name, nm_font, ink, (r.centerx, r.y + 52), center=True)
-            self.text(c, BUTTON_GLYPH[btn], self.f_small, self.mix(DIM, BG, lv), (r.centerx, r.y + 80), center=True)
+            self.text(c, name, nm_font, ink, (r.centerx, r.y + th * 54 // 100), center=True)
+            self.text(c, BUTTON_GLYPH[btn], self.f_small, self.mix(DIM, BG, lv), (r.centerx, r.y + th * 83 // 100), center=True)
 
         # ---- keyboard: sounding keys light, then fade out
-        kx, ky, kw, kh = 20, 392, BASE_W - 40, 40
+        kx, ky, kw, kh = 20, L["kb_y"], BASE_W - 40, L["kb_h"]
         lo, hi = 36, 96
         nwhite = sum(1 for n in range(lo, hi) if n % 12 in (0, 2, 4, 5, 7, 9, 11))
         ww = kw / nwhite
@@ -1286,10 +1307,10 @@ class App:
         if left:
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
-        sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, 444))
+        sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
         hint = "SELECT menu   START beat   SEL+START quit"
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
-            self.text(c, hint, self.f_small, DIM, (BASE_W - 20, 444), right=True)
+            self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
         on = self.sm("beatrow", 1.0 if self.drums_on else 0.0, 10)
         if on > 0.02:
             cur = (st - 1) % 16
@@ -1298,13 +1319,13 @@ class App:
                 lit = self.drums_on and i == cur
                 hgt = 6 + (int(5 * pop) if lit else 0)
                 col = ACCENT if lit else (PANEL if i % 4 else DIM)
-                pygame.draw.rect(c, col, (20 + i * 12, 472 - hgt, 9, hgt))
+                pygame.draw.rect(c, col, (20 + i * 12, L["steps_y"] - hgt, 9, hgt))
         if self.msg:
             k = self.since(self.msg_t, 1.5)
             if k < 1:
                 rise = int(8 * (1 - min(1, k * 6)) ** 2)
                 a = min(1, k * 6) * (1 - max(0, (k - 0.75) / 0.25))
-                self.text(c, self.msg, self.f_small, self.mix(BG, MOD_ON, a), (BASE_W // 2, 466 + rise), center=True)
+                self.text(c, self.msg, self.f_small, self.mix(BG, MOD_ON, a), (BASE_W // 2, L["msg_y"] + rise), center=True)
 
         self.draw_parts(c)
 
@@ -1340,6 +1361,7 @@ class App:
         return [(x - mx, y - my) for x, y in cells]
 
     def well_reset(self):
+        self.WR = L["well_rows"]
         self.grid = [[None] * self.WC for _ in range(self.WR)]
         self.well_dirty = True
         self.well_surf = None
@@ -1550,7 +1572,7 @@ class App:
             pygame.draw.lines(c, self.mix(BG, (70, 120, 116), lv), False, pts, 2)
 
     def draw_stick(self, c):
-        cx, cy, rad = 556, 132, 62
+        cx, cy, rad = 556, L["stick_cy"], 62
         pygame.draw.circle(c, PANEL, (cx, cy), rad + 14)
         for sector, mod in STICK_SECTORS.items():
             ang = math.radians(sector * 45)
@@ -1569,7 +1591,7 @@ class App:
         self.text(c, "L STICK", self.f_small, DIM, (cx, cy + rad + 26), center=True)
 
     def draw_fx(self, c):
-        mx, top, half = 72, 70, 46
+        mx, top, half = 72, L["fx_top"], L["fx_half"]
         h = half * 2
         rev = self.sm("rev", self.rev, 16)
         dly = self.sm("dly", self.dly, 16)
@@ -1613,12 +1635,13 @@ class App:
         opening = self.menu or self.editor
         off = int((1 - a) ** 2 * 60) if opening else 0
         self.text(c, title, self.f_med, self.mix(BG, ACCENT, a), (BASE_W // 2, 30 + off), center=True)
-        top = max(0, min(sel_i - 6, len(rows) - 13))
+        nr = L["list_rows"]
+        top = max(0, min(sel_i - nr // 2, len(rows) - nr))
         ty = self.sm(key + "_sel", 58 + (sel_i - top) * 30, 24)
         pygame.draw.rect(c, self.mix(BG, PANEL, a), (xin - 20, int(ty) - 3, BASE_W - 2 * (xin - 20), 28), border_radius=6)
         nt, nd = self.nudge
         kick = int(8 * nd * (1 - self.since(nt, 0.18)) ** 2)
-        for r, row in enumerate(rows[top:top + 13]):
+        for r, row in enumerate(rows[top:top + nr]):
             label, val, col = row
             i = top + r
             if opening:                        # rows drop in one after another, like pieces
@@ -1639,13 +1662,13 @@ class App:
         rows = [(label, val, MOD_ON if edited else INK) for key, label, val, edited in self.editor_items()]
         self.draw_list(c, a, "EDIT  " + synth.PATCHES[self.patch]["name"].upper(), rows, self.ed_i, "ed", 90)
         hint = "LEFT/RIGHT tweak   START audition   B done" + ("   (changes apply on exit)" if self.ed_dirty else "")
-        self.text(c, hint, self.f_small, self.mix(BG, DIM, a), (BASE_W // 2, 462), center=True)
+        self.text(c, hint, self.f_small, self.mix(BG, DIM, a), (BASE_W // 2, L["hint_y"]), center=True)
 
     def draw_menu(self, c, a=1.0):
         rows = [(name, val, INK) for name, val in self.menu_items()]
         self.draw_list(c, a, "SETTINGS", rows, self.menu_i, "menu", 100)
         self.text(c, "UP/DOWN pick   LEFT/RIGHT change   A select   B close", self.f_small, self.mix(BG, DIM, a),
-                  (BASE_W // 2, 462), center=True)
+                  (BASE_W // 2, L["hint_y"]), center=True)
 
     # ---------------- main loop
 
@@ -1722,6 +1745,18 @@ def load_cfg():
 def main():
     # let the audio thread grab the interpreter quickly even while the UI draws
     sys.setswitchinterval(0.001)
+    lay = os.environ.get("BRICKCHORD_LAYOUT")
+    if not lay:
+        try:
+            pygame.display.init()
+            inf = pygame.display.Info()
+            w, h = inf.current_w, inf.current_h
+            lay = "square" if (w > 0 and h > 0 and max(w, h) / float(min(w, h)) < 1.2) else "4:3"
+            print("screen %dx%d -> %s layout" % (w, h, lay), flush=True)
+        except Exception as e:
+            print("screen size unknown (%s), using 4:3" % e, flush=True)
+            lay = "4:3"
+    set_layout(lay if lay in LAYOUTS else "4:3")
     cfg = load_cfg()
     s = cfg["settings"]
     block = s.get("latency", 1024) if s.get("latency") in (512, 1024, 2048) else 1024

@@ -23,3 +23,8 @@ First public alpha.
 - Everything animates: chord names drop in letter by letter, struck tiles shatter into bricks, a self-playing Tetris well behind the chord name hard-drops a piece on every chord (shape = chord degree), clears lines in a burst of bricks and falls in time with the beat. Live oscilloscope, gliding FX bars, keys that fade out, menus whose rows drop in.
 - Faster drawing: cached text, bricks and keyboard, a much cheaper Tetris AI, 15 fps at rest, and the UI backs off when the audio gets busy. Fixes the lag and crackles the animations caused.
 - Bass: a dedicated synth bass on the dry bus (plucky saw + solid sine fundamental), with Bass modes Synth, Pulse, Octaves, Walk, Sub + Patch, Patch, Off and a Bass Level. Arp Octaves setting (1 to 4, default 2).
+
+## R36Max port
+- Square 720x720 layout (bigger brick well, taller keys and keyboard, more menu rows), picked automatically from the screen size.
+- `vendor.py` finds NumPy and pygame: bundled wheels for aarch64 Python 3.7-3.12 are unpacked on first launch; system pygame is preferred.
+- `r36/` holds the ArkOS-family launcher, install notes and `build_zip.sh`.

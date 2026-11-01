@@ -7,11 +7,9 @@ import os
 import sys
 
 APP = os.path.dirname(os.path.abspath(__file__))
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-vendor = os.path.join(APP, "_vendor")
-if os.path.isdir(vendor):
-    sys.path.insert(0, vendor)
 sys.path.insert(0, APP)
+import vendor  # noqa: E402
+vendor.setup(need_pygame=False)
 
 
 def main():

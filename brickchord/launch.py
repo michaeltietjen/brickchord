@@ -1,12 +1,11 @@
-# Brickchord bootstrap: use the bundled ARM64 NumPy, KNULLI's system pygame.
+# Brickchord bootstrap: find NumPy and pygame (bundled or system), then start.
 import os, sys, traceback
 APP = os.path.dirname(os.path.abspath(__file__))
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-vendor = os.path.join(APP, "_vendor")
-if os.path.isdir(vendor):
-    sys.path.insert(0, vendor)
 sys.path.insert(0, APP)
+print("python", sys.version.split()[0], sys.executable, flush=True)
 try:
+    import vendor
+    vendor.setup(need_pygame=True)
     import main
     main.main()
 except SystemExit:

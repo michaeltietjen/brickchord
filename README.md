@@ -30,6 +30,14 @@ and everything plays on a single sample-accurate clock with a built-in drum mach
 3. On the device: Start → Game Settings → Update Gamelists, then open **Ports → Brickchord**.
 4. On first launch, press each button once and push each stick once so Brickchord learns your controls.
 
+## Install (R36Max, R36S and other ArkOS-family handhelds)
+1. Download `brickchord-r36max-*.zip` from **[Releases](https://github.com/michaeltietjen/brickchord/releases)**.
+2. Copy `Brickchord.sh` and the `brickchord/` folder from its `ports/` folder into `ports/` on the SD card.
+3. Restart EmulationStation and open **Ports → Brickchord**. The screen layout adapts to the square 720×720 display.
+4. First launch unpacks the NumPy (and, only if the firmware has none, pygame) that matches the device's Python, then runs button setup. If it doesn't start, see `brickchord/brickchord.log` and `INSTALL-R36.txt`.
+
+Untested on hardware so far: feedback welcome. Build the zip yourself with `r36/build_zip.sh`.
+
 ### Instant sound loading (optional)
 On a computer with Python 3 and NumPy, run `python3 brickchord/factory_render.py` from the release folder before copying it to the SD card. It pre-renders all 15 stock sounds (about 355 MB) into `brickchord/cache`, so every stock sound opens instantly. Without it, the Brick renders each sound in quiet moments the first time you use it and keeps it for next time. The pack matches sounds with Filter and Resonance at 0 in Settings; use the right stick for live filter moves.
 
