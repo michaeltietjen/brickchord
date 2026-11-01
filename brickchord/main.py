@@ -448,16 +448,37 @@ class App:
             cx = x + part.get_width() + 3
             pygame.draw.rect(c, self.ORANGE, (cx, y - 14, 4, 28))
 
+    def chime(self):
+        """Startup chord in your key: the home chord with its 7th, openly voiced."""
+        try:
+            pc, iv, _ = build_chord(self.key, self.scale, 0, {"seventh": True})
+            r = 36 + (pc % 12) + 12 * self.octave
+            while r < 43:
+                r += 12
+            while r > 54:
+                r -= 12
+            # open voicing: root, fifth, then 3rd, 7th and 5th an octave up
+            notes = [r, r + iv[2], r + 12 + iv[1], r + 12 + iv[3], r + 24 + iv[2]]
+            self.eng.post("chime", [int(n) for n in notes])
+        except Exception:
+            self.eng.post("chime")
+
     def intro(self, secs=1.5):
         """Short logo animation at launch. Any button skips it."""
         self.t0 = time.perf_counter()
         clock = pygame.time.Clock()
+        struck = False
         while True:
             t = time.perf_counter() - self.t0
+            if not struck and t >= 1.0:          # the chord lands when the keys are struck
+                self.chime()
+                struck = True
             if t >= secs:
                 return
             for ev in pygame.event.get():
                 if ev.type in (pygame.KEYDOWN, pygame.JOYBUTTONDOWN):
+                    if not struck:
+                        self.chime()
                     return
                 if ev.type == pygame.QUIT:
                     self.running = False

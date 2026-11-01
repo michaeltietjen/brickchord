@@ -35,7 +35,6 @@ def _engine_main(cmd_q, req_q, sh, sr, block):
         eng = engine.Engine(sr, block, synth.reverb_ir(1.2))
         cache = collections.OrderedDict()
         eng.post("drums", False, None, synth.kit_arrays())
-        eng.post("chime")
         eng.start("stream")
         sh["sink"].value = 1 if eng.sink == "callback" else 2
         _log("engine process: sink", eng.sink, "block", block)
@@ -202,7 +201,6 @@ class LocalHost:
         self.synth = synth
         self.eng = engine.Engine(sr, block, synth.reverb_ir(1.2))
         self.eng.post("drums", False, None, synth.kit_arrays())
-        self.eng.post("chime")
         self.eng.start("stream")
         _log("local host: sink", self.eng.sink, "block", block)
         self.cache = {}

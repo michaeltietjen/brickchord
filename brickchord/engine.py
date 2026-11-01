@@ -317,14 +317,24 @@ class Engine:
             self.next16 = float(self.t)
         self.drums_on = on
 
-    def c_chime(self):
-        """Short two-note startup chime so you know audio is alive."""
+    def c_chime(self, midis=None):
+        """Startup chord, struck with the logo animation: a soft bell/e-piano
+        tone, strummed low to high, through the synth's reverb and delay."""
         sr = self.sr
-        for i, f in enumerate((660.0, 990.0)):
-            t = np.arange(int(0.35 * sr)) / sr
-            x = (np.sin(2 * np.pi * f * t) * np.exp(-t * 9) * 0.35).astype(np.float32)
-            self._voice((np.repeat(x[:, None], 2, 1), None), 1.0, 0.0, self.t + int(i * 0.12 * sr), "drum",
-                        srev=0.5, sdly=0, rel=int(0.02 * sr))
+        midis = list(midis or [48, 55, 59, 62, 64, 71])
+        n = int(1.8 * sr)
+        t = np.arange(n) / sr
+        att = np.minimum(1.0, t / 0.004)
+        for i, m in enumerate(midis):
+            f = 440.0 * 2 ** ((m - 69) / 12.0)
+            x = (np.sin(2 * np.pi * f * t) * np.exp(-t * 2.2)
+                 + 0.30 * np.sin(2 * np.pi * 2 * f * t) * np.exp(-t * 5.0)
+                 + 0.10 * np.sin(2 * np.pi * 3.01 * f * t) * np.exp(-t * 9.0)
+                 + 0.05 * np.sin(2 * np.pi * 7.1 * f * t) * np.exp(-t * 30.0))
+            x = (x * att * (0.24 if m >= 52 else 0.30)).astype(np.float32)
+            pan = 0.0 if len(midis) < 2 else -0.45 + 0.9 * i / (len(midis) - 1)
+            self._voice((np.repeat(x[:, None], 2, 1), None), 1.0, pan, self.t + int(i * 0.045 * sr),
+                        "chime", srev=1.0, sdly=0.6, rel=int(0.05 * sr))
 
     def c_click(self):
         if "click" in self.kit:
