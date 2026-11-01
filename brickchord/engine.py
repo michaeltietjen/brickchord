@@ -100,6 +100,7 @@ class Engine:
         L, N = self.FLT_L, self.N
         self.flt_nfft = 1 << int(math.ceil(math.log2(N + L - 1)))
         self.flt_hist = np.zeros((L - 1, 2), np.float32)
+        self.drum_hist = np.zeros(((L - 1) // 2, 2), np.float32)   # keeps dry drums in time with the filtered synth
         self.flt_t = (0.0, 0.0)          # target (filter, resonance), each 0..1
         self.flt_cur = None
         self.flt_S = self._flt_design(0.0, 0.0)
@@ -397,6 +398,7 @@ class Engine:
             fn(max(when, t), *args) if fn == self._ev_note else fn(*args)
 
         mix = np.zeros((N, 2), np.float32)
+        dmix = np.zeros((N, 2), np.float32)      # drums: dry, no effects
         rbus = np.zeros((N, 2), np.float32)
         dbus = np.zeros((N, 2), np.float32)
         T = np.arange(t, t + N)
@@ -421,6 +423,11 @@ class Engine:
             seg *= g[:, None]
             seg[:, 0] *= v.lg
             seg[:, 1] *= v.rg
+            if v.tag == "drum":
+                dmix[o:] += seg
+                if not v.done:
+                    live.append(v)
+                continue
             mix[o:] += seg
             if v.srev:
                 rbus[o:] += seg * v.srev
@@ -450,7 +457,9 @@ class Engine:
         mix += y
         rbus = rbus * rv + y * 0.35
         mix += self._reverb(rbus) * 1.1
-        out = np.tanh(self._filter(mix) * mv)
+        frame = np.concatenate([self.drum_hist, dmix])
+        self.drum_hist = frame[N:]
+        out = np.tanh((self._filter(mix) + frame[:N]) * mv)
 
         self.t += N
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)
