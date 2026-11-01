@@ -9,6 +9,6 @@ First public alpha.
 - Diatonic chord buttons, button and stick modifiers, 4 scales
 - Analog-VA engine, filter and resonance controls
 - Sample-accurate audio engine: shared clock for drums, strums, arps and harp sweeps
-- Reverb and tempo-synced ping-pong delay on the right stick
+- Right stick: up/down = reverb/delay, left = live filter sweep, right = resonance sweep; click the stick to hold the effects
 - Play modes: Chord, Strum Folk/Pop/Skank, Slop, Harp Up/Down, 5 arpeggiators
 - Quantize, latch, spread, latency settings; per-launch log files

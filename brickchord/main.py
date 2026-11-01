@@ -289,6 +289,9 @@ class App:
         self.stick_mod = None
         self.stick_xy = (0.0, 0.0)
         self.ry = 0.0
+        self.rx = 0.0
+        self.fx_hold = None             # (rx, ry) latched by clicking the right stick
+        self.flt = (0.0, 0.0)
         self.rev = self.base_rev
         self.dly = self.base_dly
 
@@ -300,8 +303,11 @@ class App:
 
         if self.inp.joys and not self.cfg.get("buttons"):
             self.learn()
-        if self.inp.joys and "sticks" not in self.cfg and self.inp.joys[0].get_numaxes() >= 2:
-            self.learn_sticks()
+        if self.inp.joys and self.inp.joys[0].get_numaxes() >= 2:
+            if "sticks" not in self.cfg:
+                self.learn_sticks()
+            elif not self.cfg.get("fx2_learned"):
+                self.learn_sticks(only=("rx", "R3"))       # new in this version
 
     # ---------------- engine glue
     def push_params(self):
@@ -463,57 +469,75 @@ class App:
             self.inp.map = mapping
             self.save_cfg()
 
-    def learn_sticks(self):
+    def learn_sticks(self, only=None):
         if not self.inp.joys:
             return
         j = self.inp.joys[0]
-        steps = [("lx", "LEFT stick", "RIGHT"), ("ly", "LEFT stick", "UP"), ("ry", "RIGHT stick", "UP")]
-        result = {}
+        steps = [("lx", "Push the LEFT stick", "RIGHT"), ("ly", "Push the LEFT stick", "UP"),
+                 ("ry", "Push the RIGHT stick", "UP"), ("rx", "Push the RIGHT stick", "RIGHT"),
+                 ("R3", "Click the RIGHT stick", "DOWN")]
+        if only:
+            steps = [st for st in steps if st[0] in only]
+        result = dict(self.cfg.get("sticks") or {}) if only else {}
         clock = pygame.time.Clock()
         start_btn = [s for s, n in self.inp.map.items() if n == "START"]
         i = 0
         rest = [j.get_axis(a) for a in range(j.get_numaxes())]
         armed = True
-        used = set()
+        used = set(v[0] for k, v in result.items() if k not in [st[0] for st in steps])
         while i < len(steps):
             skip = False
+            key = steps[i][0]
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     sys.exit(0)
                 for sig, down in self.inp.raw(ev):
                     if down and (sig in start_btn or sig == "k:START"):
                         skip = True
+                    elif down and key == "R3" and sig.startswith("b") and sig not in self.inp.map:
+                        mapping = {k: v for k, v in self.inp.map.items() if v != "R3"}
+                        mapping[sig] = "R3"
+                        self.inp.map = mapping
+                        self.cfg["buttons"] = mapping
+                        self.eng.post("click")
+                        skip = True
             if skip:
                 i += 1
                 armed = True
                 continue
-            best, bv = None, 0.0
-            for a in range(j.get_numaxes()):
-                if a in used:
-                    continue
-                d = j.get_axis(a) - rest[a]
-                if abs(d) > abs(bv):
-                    best, bv = a, d
-            if armed and best is not None and abs(bv) > 0.7:
-                result[steps[i][0]] = [best, 1 if bv > 0 else -1]
-                used.add(best)
-                self.eng.post("click")
-                i += 1
-                armed = False
-            if not armed and all(abs(j.get_axis(a) - rest[a]) < 0.3 for a in range(j.get_numaxes())):
-                armed = True
+            if key != "R3":
+                best, bv = None, 0.0
+                for a in range(j.get_numaxes()):
+                    if a in used:
+                        continue
+                    d = j.get_axis(a) - rest[a]
+                    if abs(d) > abs(bv):
+                        best, bv = a, d
+                if armed and best is not None and abs(bv) > 0.7:
+                    result[key] = [best, 1 if bv > 0 else -1]
+                    used.add(best)
+                    self.eng.post("click")
+                    i += 1
+                    armed = False
+                if not armed and all(abs(j.get_axis(a) - rest[a]) < 0.3 for a in range(j.get_numaxes())):
+                    armed = True
             c = self.canvas
             c.fill(BG)
             self.text(c, "STICK SETUP", self.f_med, ACCENT, (BASE_W // 2, 70), center=True)
             if i < len(steps):
-                self.text(c, "Push the %s" % steps[i][1], self.f_med, DIM, (BASE_W // 2, 170), center=True)
+                self.text(c, steps[i][1], self.f_med, DIM, (BASE_W // 2, 170), center=True)
                 self.text(c, steps[i][2], self.f_huge, INK, (BASE_W // 2, 250), center=True)
-                self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320), center=True)
+                if steps[i][0] != "R3":
+                    self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320), center=True)
+            if only:
+                self.text(c, "New: right stick LEFT/RIGHT = filter / resonance, click = hold effects",
+                          self.f_small, ACCENT2, (BASE_W // 2, 385), center=True)
             self.text(c, "Press START to skip a step (or if you have no sticks)", self.f_small, DIM,
                       (BASE_W // 2, 420), center=True)
             self.present()
             clock.tick(60)
         self.cfg["sticks"] = result
+        self.cfg["fx2_learned"] = True
         self.save_cfg()
 
     # ---------------- sound cache (dry first, reverb layer in the background)
@@ -545,7 +569,15 @@ class App:
                     self.play_chord(self.cur_btn, revoice=True)
         ry = self.axis_val(st.get("ry")) if st.get("ry") else 0.0
         ry = 0.0 if abs(ry) < 0.12 else ry
-        self.ry = ry
+        rx = self.axis_val(st.get("rx")) if st.get("rx") else 0.0
+        rx = 0.0 if abs(rx) < 0.12 else rx
+        if self.fx_hold:
+            rx, ry = self.fx_hold
+        self.rx, self.ry = rx, ry
+        flt = (round(max(0.0, -rx), 2), round(max(0.0, rx), 2))     # left = filter, right = resonance
+        if flt != self.flt:
+            self.flt = flt
+            self.eng.post("filter", *flt)
         rev = self.base_rev + max(0.0, ry) * (1 - self.base_rev)
         dly = self.base_dly + max(0.0, -ry) * (1 - self.base_dly)
         if abs(rev - self.rev) > 0.01 or abs(dly - self.dly) > 0.01:
@@ -651,6 +683,7 @@ class App:
             self.stop_chord()
             self.cfg["buttons"] = {}
             self.learn()
+            self.learn_sticks(only=("R3",))
             self.menu = False
         elif name == "Learn sticks":
             self.stop_chord()
@@ -809,6 +842,15 @@ class App:
             elif name == "START":
                 self.toggle_drums()
             return
+        if name == "R3":
+            if down:
+                if self.fx_hold:
+                    self.fx_hold = None
+                    self.flash("FX released")
+                elif self.rx or self.ry:
+                    self.fx_hold = (self.rx, self.ry)
+                    self.flash("FX held  (click R stick to release)")
+            return
         if name in CHORD_BUTTONS:
             if down:
                 self.play_chord(name)
@@ -949,7 +991,7 @@ class App:
         self.text(c, "L STICK", self.f_small, DIM, (cx, cy + rad + 26), center=True)
 
     def draw_fx(self, c):
-        mx, top, half = 72, 64, 64
+        mx, top, half = 72, 70, 46
         mid = top + half
         pygame.draw.rect(c, PANEL, (mx - 9, top, 18, half * 2), border_radius=7)
         rh = int(half * self.rev)
@@ -961,6 +1003,19 @@ class App:
         pygame.draw.line(c, DIM, (mx - 13, mid), (mx + 13, mid), 1)
         self.text(c, "REVERB", self.f_small, ACCENT2 if self.ry > 0 else DIM, (mx, top - 14), center=True)
         self.text(c, "DELAY", self.f_small, ACCENT if self.ry < 0 else DIM, (mx, top + half * 2 + 14), center=True)
+        # right stick X: filter (left) / resonance (right)
+        by, bw = top + half * 2 + 38, 52
+        pygame.draw.rect(c, PANEL, (mx - bw, by - 6, bw * 2, 12), border_radius=6)
+        f, r = self.flt
+        if f:
+            pygame.draw.rect(c, ACCENT, (mx - int(bw * f), by - 6, int(bw * f), 12), border_radius=6)
+        if r:
+            pygame.draw.rect(c, ACCENT2, (mx, by - 6, int(bw * r), 12), border_radius=6)
+        pygame.draw.line(c, DIM, (mx, by - 9), (mx, by + 9), 1)
+        self.text(c, "FILTER", self.f_small, ACCENT if f else DIM, (mx - bw // 2, by + 18), center=True)
+        self.text(c, "RES", self.f_small, ACCENT2 if r else DIM, (mx + bw // 2, by + 18), center=True)
+        if self.fx_hold:
+            self.text(c, "HOLD", self.f_small, MOD_ON, (mx + 40, top + half), center=True)
 
     def draw_menu(self, c):
         ov = pygame.Surface((BASE_W, BASE_H), pygame.SRCALPHA)

@@ -69,6 +69,7 @@ class Engine:
         self.dbuf = np.zeros((self.dbuf_len, 2), np.float32)
         self.dw = 0
         self._setup_reverb(ir)
+        self._setup_filter()
         # monitoring
         self.active = frozenset()
         self.load = 0.0
@@ -88,6 +89,63 @@ class Engine:
         self.H = np.fft.rfft(parts, 2 * N, axis=1).astype(np.complex64)      # (P, N+1, 2)
         self.FDL = np.zeros_like(self.H)
         self.rprev = np.zeros((N, 2), np.float32)
+
+    # ------------------------------------------------------------ live filter
+    # Notes are pre-rendered, so a filter you can sweep while playing has to run on
+    # the output. It is a linear-phase FIR applied with one FFT per block (cheap in
+    # NumPy), redesigned when the stick moves and crossfaded so sweeps are smooth.
+    FLT_L = 511                     # taps; constant 255-sample (11 ms) delay
+
+    def _setup_filter(self):
+        L, N = self.FLT_L, self.N
+        self.flt_nfft = 1 << int(math.ceil(math.log2(N + L - 1)))
+        self.flt_hist = np.zeros((L - 1, 2), np.float32)
+        self.flt_t = (0.0, 0.0)          # target (filter, resonance), each 0..1
+        self.flt_cur = None
+        self.flt_S = self._flt_design(0.0, 0.0)
+        self.flt_win = np.hanning(L).astype(np.float32)
+
+    def _flt_design(self, f, r):
+        L, sr = self.FLT_L, self.sr
+        M = 2048
+        fr = np.fft.rfftfreq(M, 1.0 / sr)
+        if f <= 0 and r <= 0:
+            H = np.ones_like(fr)
+        else:
+            if r > f:       # resonance side: a resonant peak that sweeps down as you push
+                fc = 5000.0 * (800.0 / 5000.0) ** r
+                q = 0.9 + 9.0 * r
+            else:           # filter side: low-pass closes as you push
+                fc = 14000.0 * (110.0 / 14000.0) ** f
+                q = 0.75 + 0.6 * f
+            w = fr / fc
+            H = 1.0 / np.sqrt((1 - w * w) ** 2 + (w / q) ** 2)
+            H /= max(1.0, H.max()) ** 0.65          # tame the peak so it doesn't jump in volume
+        h = np.fft.irfft(H, M)
+        h = np.roll(h, (L - 1) // 2)[:L] * np.hanning(L)
+        return np.fft.rfft(h, self.flt_nfft).astype(np.complex64)
+
+    def c_filter(self, f, r):
+        self.flt_t = (round(max(0.0, min(1.0, f)), 2), round(max(0.0, min(1.0, r)), 2))
+
+    def _filter(self, x):
+        L, N, nf = self.FLT_L, self.N, self.flt_nfft
+        frame = np.concatenate([self.flt_hist, x])
+        self.flt_hist = frame[-(L - 1):]
+        X = np.fft.rfft(frame, nf, axis=0)
+        y = np.fft.irfft(X * self.flt_S[:, None], nf, axis=0)[L - 1:L - 1 + N]
+        if self.flt_t != self.flt_cur:
+            first = self.flt_cur is None
+            self.flt_cur = self.flt_t
+            S_new = self._flt_design(*self.flt_t)
+            y_new = np.fft.irfft(X * S_new[:, None], nf, axis=0)[L - 1:L - 1 + N]
+            self.flt_S = S_new
+            if first:
+                y = y_new
+            else:
+                ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
+                y = y * (1 - ramp) + y_new * ramp
+        return y.astype(np.float32)
 
     def _reverb(self, x):
         N = self.N
@@ -392,7 +450,7 @@ class Engine:
         mix += y
         rbus = rbus * rv + y * 0.35
         mix += self._reverb(rbus) * 1.1
-        out = np.tanh(mix * mv)
+        out = np.tanh(self._filter(mix) * mv)
 
         self.t += N
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)

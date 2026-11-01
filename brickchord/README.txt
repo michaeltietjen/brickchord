@@ -8,6 +8,8 @@ PLAY
   LEFT STICK           up 7, up-right maj7, right 9, down-right aug,
                        down flip, down-left dim, left sus4, up-left sus2
   RIGHT STICK          up = more REVERB, down = more DELAY
+                       left = FILTER (darker), right = RESONANCE sweep
+  CLICK RIGHT STICK    hold the current effects; click again to release
   START                beat on/off
   SELECT               settings
   SELECT+START         quit
