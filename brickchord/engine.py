@@ -21,6 +21,8 @@ import traceback
 
 import numpy as np
 
+DRUM_GAIN = {"kick": 0.9, "snare": 0.75, "hat": 0.7, "ohat": 0.7, "clap": 0.8, "rim": 0.6, "tom": 0.8, "shk": 0.7}
+DRUM_PAN = {"hat": 0.15, "ohat": 0.15, "shk": -0.25, "rim": -0.15, "tom": 0.2}
 MAX_VOICES = 40      # hard cap on sounding voices (keeps the mixer inside its time budget)
 
 STRUM_PATTERNS = {"Strum Folk": "D.DU.UDU", "Strum Pop": "D.D.UDUd", "Strum Skank": ".D.D.D.D"}
@@ -430,10 +432,17 @@ class Engine:
 
     def _on_step(self, s, at):
         if self.drums_on and self.drum_pat:
-            for part, srev in (("kick", 0.12), ("snare", 0.3), ("hat", 0.15), ("ohat", 0.2)):
-                if self.drum_pat[part][s % 16] != "." and part in self.kit:
-                    self._voice(self.kit[part], 0.9 if part == "kick" else 0.75, 0.0, at, "drum",
-                                srev=srev, sdly=0.0, rel=int(0.02 * self.sr))
+            sw = self.drum_pat.get("swing", 0.0)
+            when = at + (int(sw * 60.0 / self.bpm / 4 * self.sr) if s % 2 else 0)
+            for part, pat in self.drum_pat.items():
+                if part == "swing" or part not in self.kit:
+                    continue
+                ch = pat[s % 16]
+                if ch == ".":
+                    continue
+                gain = DRUM_GAIN.get(part, 0.75) * (0.4 if ch == "g" else 1.0)
+                pan = DRUM_PAN.get(part, 0.0)
+                self._voice(self.kit[part], gain, pan, when, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
         if not self.chord:
             return
         mode = self.mode

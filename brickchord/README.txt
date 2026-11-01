@@ -7,7 +7,7 @@ PLAY
   hold Y / L1 / R1     flip / 7th / sus4   (L1+R1 = 9th)
   LEFT STICK           up 7, up-right maj7, right 9, down-right aug,
                        down flip, down-left dim, left sus4, up-left sus2
-  RIGHT STICK          up = more REVERB, down = more DELAY
+  RIGHT STICK          up = more REVERB + DELAY (wet), down = dry the synth out
                        left = FILTER (darker), right = RESONANCE sweep
   CLICK RIGHT STICK    hold the current effects; click again to release
   START                beat on/off
@@ -43,4 +43,8 @@ Reverb Type: Hall, Room, Plate, Big Hall, Spring, Reverse, Gated, Lo-fi Dark.
 Delay Type: Ping-Pong, Straight, Tape (repeats get darker), Dub (long dark trails),
   Slapback (one quick echo), Multi-Tap (rhythmic repeats).
 Delay Time adds 1/8 and 1/4 triplets.
+Beats (27): Four Floor, Boom Bap, Synthpop, Half Time, House, Disco, Lo-fi, Trap, Funk,
+  Breakbeat, Rock, Drum & Bass, Dembow, Bossa, Afrobeat, Shuffle, Electro, Tribal,
+  Jungle, Techno, Minimal Techno, 2-Step Garage, UK Funky, Neo-Soul, Nu-Disco,
+  Afro House, Footwork. Set Tempo to taste (Jungle/D&B/Footwork love 160-175).
 Bundled NumPy is BSD-licensed (see _vendor/numpy-*.dist-info).

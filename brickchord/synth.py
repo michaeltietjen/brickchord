@@ -385,6 +385,27 @@ def drum_kit():
     kit["ohat"] = (hp * np.exp(-tt * 12) * .35).astype(np.float32)
     tt = t(0.12)
     kit["click"] = (np.sin(2 * np.pi * 1800 * tt) * np.exp(-tt * 60) * .5).astype(np.float32)
+    # clap: three quick noise bursts and a short tail, band-limited
+    tt = t(0.3)
+    nz = _noise(len(tt), 4)
+    bp = nz - np.roll(nz, 2)
+    env = np.zeros(len(tt))
+    for d in (0.0, 0.011, 0.022):
+        env += np.where(tt >= d, np.exp(-(tt - d) * 140), 0)
+    env += np.where(tt >= 0.03, np.exp(-(tt - 0.03) * 18) * 0.5, 0)
+    kit["clap"] = (bp * env * 0.45).astype(np.float32)
+    # rimshot / side-stick
+    tt = t(0.07)
+    kit["rim"] = ((np.sin(2 * np.pi * 820 * tt) * 0.7 + _noise(len(tt), 5) * 0.4) * np.exp(-tt * 75) * 0.7).astype(np.float32)
+    # tom: pitched body with a downward bend
+    tt = t(0.4)
+    f = 95 + 70 * np.exp(-tt * 18)
+    kit["tom"] = (np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-tt * 9) * 0.9).astype(np.float32)
+    # shaker
+    tt = t(0.09)
+    nz = _noise(len(tt), 6)
+    hp = nz - np.roll(nz, 1)
+    kit["shk"] = (hp * (np.minimum(tt / 0.012, 1) * np.exp(-tt * 45)) * 0.28).astype(np.float32)
     return kit
 
 
@@ -397,11 +418,41 @@ def mono_to_bytes(x, gain=0.5):
     return np.repeat(y[:, None], 2, axis=1).tobytes()
 
 
-# 16-step patterns: K kick, S snare, h hat, o open hat
+# 16-step patterns. Any letter plays; "g" is a soft ghost note.
+# Parts: kick snare hat ohat clap rim tom shk.  "swing" delays the off 16ths (0..0.5 of a step).
+def _beat(name, swing=0.0, **parts):
+    p = {k: v for k, v in parts.items()}
+    p["swing"] = swing
+    return (name, p)
+
+
 BEATS = [
     ("Off", None),
-    ("Four Floor", {"kick": "K...K...K...K...", "snare": "....S.......S...", "hat": "..h...h...h...h.", "ohat": "................"}),
-    ("Boom Bap", {"kick": "K......K..K.....", "snare": "....S.......S...", "hat": "h.h.h.h.h.h.h.h.", "ohat": "................"}),
-    ("Synthpop", {"kick": "K.....K.K.......", "snare": "....S.......S...", "hat": "hhhhhhhhhhhhhhhh", "ohat": "......o.......o."}),
-    ("Half Time", {"kick": "K..........K....", "snare": "........S.......", "hat": "h...h...h...h...", "ohat": "..............o."}),
+    _beat("Four Floor", kick="K...K...K...K...", snare="....S.......S...", hat="..h...h...h...h."),
+    _beat("Boom Bap", 0.12, kick="K......K..K.....", snare="....S.......S...", hat="h.h.h.h.h.h.h.h."),
+    _beat("Synthpop", kick="K.....K.K.......", snare="....S.......S...", hat="hhhhhhhhhhhhhhhh", ohat="......o.......o."),
+    _beat("Half Time", kick="K..........K....", snare="........S.......", hat="h...h...h...h...", ohat="..............o."),
+    _beat("House", kick="K...K...K...K...", clap="....C.......C...", ohat="..o...o...o...o.", hat="g.g.g.g.g.g.g.g."),
+    _beat("Disco", kick="K...K...K...K...", snare="....S.......S...", hat="hhhhhhhhhhhhhhhh", ohat="..o...o...o...o."),
+    _beat("Lo-fi", 0.22, kick="K.....K...K.....", snare="....S.......S..g", hat="h.h.h.h.h.h.h.h.", rim="..........r....."),
+    _beat("Trap", kick="K......K.K......", clap="........C.......", hat="hhhhhhhhhhhhhhhh", ohat="...............o"),
+    _beat("Funk", 0.08, kick="K..K..K...K..K..", snare="....S..g.g..S..g", hat="hhhhhhhhhhhhhhhh"),
+    _beat("Breakbeat", kick="K.K.......KK....", snare="....S..g.g..S..S", hat="h.h.h.h.h.h.h.h."),
+    _beat("Rock", kick="K.......K.K.....", snare="....S.......S...", hat="h.h.h.h.h.h.h.h."),
+    _beat("Drum & Bass", kick="K.........K.....", snare="....S.......S..g", hat="h.h.h.h.h.h.h.h.", shk="gggggggggggggggg"),
+    _beat("Dembow", kick="K...K...K...K...", snare="...S..S....S..S.", hat="h.h.h.h.h.h.h.h."),
+    _beat("Bossa", kick="K..KK..KK..KK..K", rim="r..r..r...r..r..", shk="ssssssssssssssss"),
+    _beat("Afrobeat", 0.1, kick="K..K....K..K....", snare="....S..g....S...", shk="s.ss.ss.s.ss.ss.", ohat="..o.......o....."),
+    _beat("Shuffle", 0.33, kick="K.....K.K.....K.", snare="....S.......S...", hat="h.h.h.h.h.h.h.h."),
+    _beat("Electro", kick="K.....K...K.....", clap="....C.......C...", rim="..r...r....r..r.", hat="..h...h...h...h."),
+    _beat("Tribal", kick="K.......K..K....", tom="..T..T....T.T.T.", shk="s.s.s.s.s.s.s.s.", rim="....r.......r..."),
+    _beat("Jungle", 0.05, kick="K.K.......K.K...", snare="....S..g.gS.S..g", hat="h.hhh.hhh.hhh.hh", ohat="..............o."),
+    _beat("Techno", kick="K...K...K...K...", clap="....C.......C...", ohat="..o...o...o...o.", hat="ghhhghhhghhhghhh", rim="...r..r...r.r..."),
+    _beat("Minimal Techno", kick="K...K...K...K...", rim="..r..r....r..r..", hat="..g...g...g...g.", shk="g.g.g.g.g.g.g.g."),
+    _beat("2-Step Garage", 0.25, kick="K.....K...K..K..", clap="....C.......C...", hat="..h...h...h...h.", shk="gsgsgsgsgsgsgsgs"),
+    _beat("UK Funky", 0.15, kick="K...K...K...K...", clap="....C.......C...", tom="...T......T..T..", shk="gsgsgsgsgsgsgsgs", rim="..r..r....r....."),
+    _beat("Neo-Soul", 0.28, kick="K......K..K..g..", snare="....S..g....S.g.", hat="h.h.h.h.h.h.h.h."),
+    _beat("Nu-Disco", kick="K...K...K...K...", clap="....C.......C...", ohat="..o...o...o...o.", hat="hhhhhhhhhhhhhhhh", tom="..............T."),
+    _beat("Afro House", 0.1, kick="K...K...K...K...", rim="..r..r....r..r..", shk="s.ss.ss.s.ss.ss.", tom="......T.......T.", ohat="..o...o...o...o."),
+    _beat("Footwork", kick="K..K..K...K..K..", clap="....C.......C...", hat="hhhhhhhhhhhhhhhh", tom="......T.....T..."),
 ]

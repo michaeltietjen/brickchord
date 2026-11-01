@@ -589,8 +589,13 @@ class App:
         if flt != self.flt:
             self.flt = flt
             self.eng.post("filter", *flt)
-        rev = self.base_rev + max(0.0, ry) * (1 - self.base_rev)
-        dly = self.base_dly + max(0.0, -ry) * (1 - self.base_dly)
+        # up = more space (reverb and delay together), down = dry the synth out
+        if ry >= 0:
+            rev = self.base_rev + ry * (1 - self.base_rev)
+            dly = self.base_dly + ry * max(0.0, 0.8 - self.base_dly)
+        else:
+            rev = self.base_rev * (1 + ry)
+            dly = self.base_dly * (1 + ry)
         if abs(rev - self.rev) > 0.01 or abs(dly - self.dly) > 0.01:
             self.rev, self.dly = rev, dly
             self.push_fx()
@@ -1011,17 +1016,17 @@ class App:
 
     def draw_fx(self, c):
         mx, top, half = 72, 70, 46
-        mid = top + half
-        pygame.draw.rect(c, PANEL, (mx - 9, top, 18, half * 2), border_radius=7)
-        rh = int(half * self.rev)
-        dh = int(half * self.dly)
-        if rh:
-            pygame.draw.rect(c, ACCENT2, (mx - 9, mid - rh, 18, rh), border_radius=6)
-        if dh:
-            pygame.draw.rect(c, ACCENT, (mx - 9, mid, 18, dh), border_radius=6)
-        pygame.draw.line(c, DIM, (mx - 13, mid), (mx + 13, mid), 1)
-        self.text(c, "REVERB", self.f_small, ACCENT2 if self.ry > 0 else DIM, (mx, top - 14), center=True)
-        self.text(c, "DELAY", self.f_small, ACCENT if self.ry < 0 else DIM, (mx, top + half * 2 + 14), center=True)
+        h = half * 2
+        for x0, val, col, lab in ((mx - 16, self.rev, ACCENT2, "REV"), (mx + 4, self.dly, ACCENT, "DLY")):
+            pygame.draw.rect(c, PANEL, (x0, top, 12, h), border_radius=6)
+            vh = int(h * max(0.0, min(1.0, val)))
+            if vh:
+                pygame.draw.rect(c, col, (x0, top + h - vh, 12, vh), border_radius=6)
+            lx = x0 - 22 if lab == "REV" else x0 + 34
+            self.text(c, lab, self.f_small, col if val > 0.01 else DIM, (lx, top + h - 10), center=True)
+        self.text(c, "WET", self.f_small, INK if self.ry > 0 else DIM, (mx, top - 14), center=True)
+        if self.ry < 0:
+            self.text(c, "DRY", self.f_small, INK, (mx, top + h + 14), center=True)
         # right stick X: filter (left) / resonance (right)
         by, bw = top + half * 2 + 38, 52
         pygame.draw.rect(c, PANEL, (mx - bw, by - 6, bw * 2, 12), border_radius=6)
@@ -1034,7 +1039,7 @@ class App:
         self.text(c, "FILTER", self.f_small, ACCENT if f else DIM, (mx - bw // 2, by + 18), center=True)
         self.text(c, "RES", self.f_small, ACCENT2 if r else DIM, (mx + bw // 2, by + 18), center=True)
         if self.fx_hold:
-            self.text(c, "HOLD", self.f_small, MOD_ON, (mx + 40, top + half), center=True)
+            self.text(c, "HOLD", self.f_small, MOD_ON, (mx + 44, top + 18), center=True)
 
     def draw_menu(self, c):
         ov = pygame.Surface((BASE_W, BASE_H), pygame.SRCALPHA)
