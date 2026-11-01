@@ -18,3 +18,4 @@ First public alpha.
 
 ## Logo
 - New button-grid logo (eight keys, one orange), shown on the loading screen and in the EmulationStation ports list. Source SVGs in docs/.
+- The logo animates at launch: keys pop in like a strum, the chord is struck, then a step light walks the keys while sounds load. Any button skips it.

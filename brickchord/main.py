@@ -304,6 +304,7 @@ class App:
         self.push_params()
         self.push_fx()
         self.push_types()
+        self.intro()
         self.queue_precache()
 
         if self.inp.joys and not self.cfg.get("buttons"):
@@ -366,21 +367,114 @@ class App:
         if hasattr(self.eng, "preload") and hasattr(self, "canvas"):
             self.eng.preload(self.loading)
 
-    def draw_mark(self, c, cx, cy, k):
-        """The Brickchord logo: seven chord keys and one lit key (4 x 2 grid)."""
+    # ---------------- logo
+    ORANGE = (255, 90, 31)
+    KEY = (233, 231, 226)
+
+    @staticmethod
+    def _ease_back(x):
+        x = min(1.0, max(0.0, x))
+        c = 1.9
+        return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2
+
+    @staticmethod
+    def _mix(a, b, f):
+        f = min(1.0, max(0.0, f))
+        return tuple(int(a[j] + (b[j] - a[j]) * f) for j in range(3))
+
+    def draw_mark(self, c, cx, cy, k, t=None):
+        """The Brickchord logo: seven chord keys and one lit key (4 x 2 grid).
+        With t (seconds since the intro started) the keys pop in like a strum,
+        the chord gets struck, then a sequencer light walks the keys."""
         gap = max(3, k // 7)
         x0 = cx - (4 * k + 3 * gap) // 2
         y0 = cy - (2 * k + gap) // 2
+        rad = max(2, k // 8)
         for i in range(8):
-            col = (255, 90, 31) if i == 6 else (233, 231, 226)     # dark-screen version of the logo
-            r = pygame.Rect(x0 + (i % 4) * (k + gap), y0 + (i // 4) * (k + gap), k, k)
-            pygame.draw.rect(c, col, r, border_radius=max(2, k // 8))
+            col_i, row = i % 4, i // 4
+            base = self.ORANGE if i == 6 else self.KEY
+            ccx = x0 + col_i * (k + gap) + k // 2
+            ccy = y0 + row * (k + gap) + k // 2
+            scale, dip, colr = 1.0, 0, base
+            if t is not None:
+                # 1) pop in, column by column, top row first (a strum)
+                scale = self._ease_back((t - 0.07 * (col_i * 2 + row)) / 0.30)
+                # 2) the chord is struck: every key presses, staggered like a strum
+                hit = t - (1.0 + 0.045 * col_i)
+                if 0 <= hit < 0.22:
+                    d = 1 - abs(hit / 0.11 - 1)
+                    dip = int(round(d * k * 0.12))
+                    colr = self._mix(base, (255, 170, 120) if i == 6 else (255, 214, 190), d * 0.8)
+                # 3) idle: a step light walks the keys, the orange key breathes
+                if t > 1.45:
+                    step = int((t - 1.45) * 7) % 8
+                    if i == step and i != 6:
+                        frac = ((t - 1.45) * 7) % 1
+                        dip = max(dip, int(round((1 - frac) * k * 0.10)))
+                        colr = self._mix(base, (255, 196, 160), (1 - frac) * 0.9)
+                    if i == 6:
+                        b = 0.5 + 0.5 * math.sin((t - 1.45) * 3.0)
+                        colr = self._mix(base, (255, 140, 80), b * 0.6)
+            if scale <= 0.02:
+                continue
+            sz = max(2, int(k * scale))
+            r = pygame.Rect(0, 0, sz, sz)
+            r.center = (ccx, ccy + dip)
+            if t is not None and dip:
+                sh = r.copy(); sh.height = max(1, k // 12); sh.top = y0 + row * (k + gap) + k
+                pygame.draw.rect(c, (8, 7, 10), sh)
+            pygame.draw.rect(c, colr, r, border_radius=max(2, int(rad * scale)))
+            # glow ring when the orange key is struck
+            if t is not None and i == 6:
+                g = t - (1.0 + 0.045 * col_i)
+                if 0 <= g < 0.6:
+                    a = int(150 * (1 - g / 0.6))
+                    grow = int(g / 0.6 * k * 0.7)
+                    ring = pygame.Surface((k + 2 * grow + 4, k + 2 * grow + 4), pygame.SRCALPHA)
+                    pygame.draw.rect(ring, (255, 90, 31, a), ring.get_rect(), width=3,
+                                     border_radius=rad + grow // 2)
+                    c.blit(ring, ring.get_rect(center=(ccx, ccy)))
+
+    def draw_title(self, c, y, t=None):
+        word = "brickchord"
+        n = len(word) if t is None else max(0, min(len(word), int((t - 0.55) / 0.04)))
+        if n <= 0:
+            return
+        full = self.f_big.render(word, True, INK)
+        part = self.f_big.render(word[:n], True, INK)
+        x = BASE_W // 2 - full.get_width() // 2
+        c.blit(part, (x, y - full.get_height() // 2))
+        if t is not None and n < len(word):                 # blinking cursor while it types
+            cx = x + part.get_width() + 3
+            pygame.draw.rect(c, self.ORANGE, (cx, y - 14, 4, 28))
+
+    def intro(self, secs=1.5):
+        """Short logo animation at launch. Any button skips it."""
+        self.t0 = time.perf_counter()
+        clock = pygame.time.Clock()
+        while True:
+            t = time.perf_counter() - self.t0
+            if t >= secs:
+                return
+            for ev in pygame.event.get():
+                if ev.type in (pygame.KEYDOWN, pygame.JOYBUTTONDOWN):
+                    return
+                if ev.type == pygame.QUIT:
+                    self.running = False
+                    return
+            c = self.canvas
+            c.fill(BG)
+            self.draw_mark(c, BASE_W // 2, 105, 34, t)
+            self.draw_title(c, 180, t)
+            self.present()
+            clock.tick(60)
 
     def loading(self, done, total):
         c = self.canvas
         c.fill(BG)
-        self.draw_mark(c, BASE_W // 2, 105, 34)
-        self.text(c, "brickchord", self.f_big, INK, (BASE_W // 2, 180), center=True)
+        t = time.perf_counter() - getattr(self, "t0", time.perf_counter() - 9)
+        self.draw_mark(c, BASE_W // 2, 105, 34, max(t, 1.5))
+        self.draw_title(c, 180)
         self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218), center=True)
         w = 360
         pygame.draw.rect(c, PANEL, ((BASE_W - w) // 2, 250, w, 14), border_radius=7)
