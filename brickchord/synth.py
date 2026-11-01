@@ -456,3 +456,27 @@ BEATS = [
     _beat("Afro House", 0.1, kick="K...K...K...K...", rim="..r..r....r..r..", shk="s.ss.ss.s.ss.ss.", tom="......T.......T.", ohat="..o...o...o...o."),
     _beat("Footwork", kick="K..K..K...K..K..", clap="....C.......C...", hat="hhhhhhhhhhhhhhhh", tom="......T.....T..."),
 ]
+
+
+# ------------------------------------------------------------------ synth bass
+BASS_MODES = ["Synth", "Pulse", "Octaves", "Walk", "Sub + Patch", "Patch", "Off"]
+
+
+def render_bass(midi, sr=22050, secs=2.4):
+    """A round, punchy synth bass note: a saw whose upper harmonics close down
+    fast (a plucky filter envelope), a solid sine fundamental under it, and a
+    little drive. Stereo-identical (bass sits in the middle). Returns (a, None)."""
+    f = 440.0 * 2 ** ((midi - 69) / 12.0)
+    n = int(secs * sr)
+    t = np.arange(n, dtype=np.float32) / sr
+    ph = (2 * np.pi * f) * t
+    nh = int(min(14, (sr * 0.42) // f))
+    x = np.zeros(n, np.float32)
+    for h in range(1, nh + 1):
+        x += (np.sin(ph * h) * (0.55 / h)) * np.exp(-t * (4.0 + 5.5 * h))
+    x += np.sin(ph) * 0.75 + np.sin(ph * 2) * 0.10 * np.exp(-t * 2.0)
+    att = np.minimum(1.0, t / 0.003)
+    env = att * (0.62 + 0.38 * np.exp(-t * 7.0)) * np.exp(-t * 0.25)
+    x = np.tanh(x * env * 1.6) * 0.62
+    x = x.astype(np.float32)
+    return (np.repeat(x[:, None], 2, 1), None)

@@ -255,6 +255,10 @@ class App:
         self.rev_type = s.get("reverb_type", "Hall") if s.get("reverb_type") in synth.REVERBS else "Hall"
         self.dly_type = s.get("delay_type", "Ping-Pong") if s.get("delay_type") in DELAY_TYPES else "Ping-Pong"
         self.quantize = s.get("quantize", True)
+        self.bass = s.get("bass", 0) if 0 <= s.get("bass", 0) < len(synth.BASS_MODES) else 0
+        self.bass_lvl = s.get("bass_lvl", 1.0)
+        self.arp_oct = s.get("arp_oct", 2)
+        self.bass_ready = set()
         self.block = s.get("latency", 1024) if s.get("latency") in (512, 1024, 2048) else 1024
 
         # no pygame.init(): it would grab the audio device the engine needs
@@ -320,6 +324,7 @@ class App:
         self.push_params()
         self.push_fx()
         self.push_types()
+        self.push_bass()
         self.intro()
         self.queue_precache()
 
@@ -340,6 +345,29 @@ class App:
         if self.rev_type != "Hall":
             self.eng.post("reverb", synth.make_reverb(self.rev_type))
         self.eng.post("delay_type", self.dly_type)
+
+    def push_bass(self):
+        self.eng.post("bass", synth.BASS_MODES[self.bass], self.bass_lvl)
+        self.eng.post("arp_oct", self.arp_oct)
+
+    def bass_range(self):
+        lo = max(28, 28 + 12 * self.octave)
+        return range(lo, min(lo + 26, 80))
+
+    def ensure_bass(self, midis, budget=None):
+        """Render synth-bass notes the engine doesn't have yet (about 25 ms each on
+        the Brick), optionally stopping after `budget` seconds."""
+        t0 = time.perf_counter()
+        bank = {}
+        for m in midis:
+            if m in self.bass_ready or not 20 <= m <= 90:
+                continue
+            bank[m] = synth.render_bass(m, SR)
+            self.bass_ready.add(m)
+            if budget is not None and time.perf_counter() - t0 > budget:
+                break
+        if bank:
+            self.eng.post("bass", None, None, bank)
 
     def push_fx(self):
         self.eng.post("fx", self.rev, self.dly, DELAY_TIMES[self.dly_time][1], self.volume)
@@ -499,6 +527,8 @@ class App:
                 if ev.type == pygame.QUIT:
                     self.running = False
                     return
+            if synth.BASS_MODES[self.bass] not in ("Patch", "Off"):
+                self.ensure_bass(self.bass_range(), budget=0.008)   # a few notes per frame
             c = self.canvas
             c.fill(BG)
             self.draw_mark(c, BASE_W // 2, 105, 34, t)
@@ -545,6 +575,16 @@ class App:
             pcs = set(m % 12 for m in notes)
             lo = (notes[1] // 12) * 12 - 2
             need |= {m for m in range(lo, lo + 36) if m % 12 in pcs}
+        if self.mode().startswith("Arp"):
+            base = sorted(set(notes[1:]))
+            need |= {m + 12 * k for k in range(self.arp_oct) for m in base if m + 12 * k <= 118}
+            if base[0] + 12 * self.arp_oct <= 118:
+                need.add(base[0] + 12 * self.arp_oct)
+        if synth.BASS_MODES[self.bass] not in ("Patch", "Off"):
+            r = notes[0] - 12
+            while r < 28:
+                r += 12
+            self.ensure_bass((r, r + 7, r + 12))
         self.sounding = notes
         self.hit_t, self.hit_big = time.perf_counter(), not revoice
         self.new_hit = True
@@ -576,7 +616,8 @@ class App:
                                     latch=self.latch, spread=self.spread, volume=self.volume,
                                     reverb=self.base_rev, delay=self.base_dly, delay_time=self.dly_time,
                                     reverb_type=self.rev_type, delay_type=self.dly_type,
-                                    latency=self.block, quantize=self.quantize)
+                                    latency=self.block, quantize=self.quantize,
+                                    bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct)
         self.cfg["patch_edits"] = self.edits
         try:
             with open(CFG_PATH, "w") as f:
@@ -757,6 +798,9 @@ class App:
             ("Resonance", "%+.1f" % self.res),
             ("Octave", "%+d" % self.octave),
             ("Play", self.mode()),
+            ("Arp Octaves", "%d" % self.arp_oct),
+            ("Bass", synth.BASS_MODES[self.bass]),
+            ("Bass Level", "%d%%" % round(self.bass_lvl * 100)),
             ("Reverb", "%d%%" % round(self.base_rev * 100)),
             ("Reverb Type", self.rev_type),
             ("Delay", "%d%%" % round(self.base_dly * 100)),
@@ -796,6 +840,17 @@ class App:
         elif name == "Octave":
             self.octave = clamp(self.octave + d, -2, 2)
             recache = True
+        elif name == "Arp Octaves":
+            self.arp_oct = clamp(self.arp_oct + d, 1, 4)
+            self.push_bass()
+        elif name == "Bass":
+            self.bass = (self.bass + d) % len(synth.BASS_MODES)
+            self.push_bass()
+            if synth.BASS_MODES[self.bass] not in ("Patch", "Off"):
+                self.ensure_bass(self.bass_range())
+        elif name == "Bass Level":
+            self.bass_lvl = clamp(round(self.bass_lvl + 0.1 * d, 1), 0.0, 2.0)
+            self.push_bass()
         elif name == "Play":
             self.play = (self.play + d) % len(PLAY_MODES)
             self.stop_chord()

@@ -55,6 +55,12 @@ class Engine:
         self.chord_t = -10 ** 9
         self.pat_i = 0
         self.pat_dir = 1
+        # bass: its own synth voice on the dry bus (no filter/reverb = stays punchy)
+        self.bass_mode = "Synth"
+        self.bass_gain = 1.0
+        self.bass_bank = {}       # midi -> (a, None), rendered by the UI side
+        self.bass_root = None
+        self.arp_oct = 1
         self.rel_len = int(0.4 * sr)
         self.sustains = True
         self.spread = 0
@@ -227,6 +233,78 @@ class Engine:
             self._at(when, self._ev_note, snd, midi, tag, gain, pan, gate, rel)
 
     # ------------------------------------------------------------ command handlers (audio thread)
+    def c_bass(self, mode=None, level=None, bank=None):
+        if bank:
+            self.bass_bank.update(bank)
+        if level is not None:
+            self.bass_gain = float(level)
+        if mode is not None and mode != self.bass_mode:
+            self.bass_mode = mode
+            self._release(("bass",), self.t, int(0.03 * self.sr))
+
+    def c_arp_oct(self, n):
+        self.arp_oct = max(1, min(4, int(n)))
+        if self.chord:
+            self.chord["arp"] = self._arp_notes(self.chord["notes"], self.chord["snd"])
+
+    def _arp_notes(self, notes, snd):
+        base = sorted(set(notes[1:]))
+        out = [m + 12 * k for k in range(self.arp_oct) for m in base] + [base[0] + 12 * self.arp_oct]
+        out = [m for m in out if m in snd]
+        return out or base
+
+    def _bass(self, at, midi, gain=1.0, gate=None):
+        snd = self.bass_bank.get(midi)
+        if snd is None:
+            return
+        g = 0.75 * self.bass_gain * gain
+        rel = int(0.05 * self.sr)
+        if at <= self.t + self.N:
+            self._voice(snd, g, 0.0, max(at, self.t), "bass", midi, gate, rel, srev=0, sdly=0)
+        else:
+            self._at(at, self._ev_bass, snd, midi, g, gate, rel)
+
+    def _ev_bass(self, at, snd, midi, g, gate, rel):
+        self._voice(snd, g, 0.0, at, "bass", midi, gate, rel, srev=0, sdly=0)
+
+    def _bass_start(self, t, notes, revoice):
+        """Called on every chord: the bass modes that hold a note start it here;
+        the rhythmic ones are played by the clock (see _bass_step)."""
+        root = notes[0] - 12                     # an octave under the patch's bass note
+        while root < 28:
+            root += 12
+        changed = root != self.bass_root
+        self.bass_root = root
+        mode = self.bass_mode
+        if mode in ("Synth", "Sub + Patch"):
+            if changed or not revoice:
+                self._release(("bass",), t, int(0.02 * self.sr))
+                self._bass(t, root, 0.8 if mode == "Sub + Patch" else 1.0)
+        elif mode in ("Pulse", "Octaves", "Walk"):
+            if not revoice or changed:
+                self._release(("bass",), t, int(0.02 * self.sr))
+                self.bass_i = 0
+                if not (self.quantize and self.drums_on):
+                    self._bass_step(t, first=True)
+                    self.bass_t0 = t
+
+    def _bass_step(self, at, first=False):
+        mode = self.bass_mode
+        if self.bass_root is None:
+            return
+        r = self.bass_root
+        i = getattr(self, "bass_i", 0)
+        if mode == "Pulse":
+            m = r
+        elif mode == "Octaves":
+            m = r if i % 2 == 0 else r + 12
+        else:                                    # Walk: root, root, fifth, octave
+            m = r + (0, 0, 7, 12)[i % 4]
+        self.bass_i = i + 1
+        step = 60.0 / self.bpm / 2 * self.sr
+        self._release(("bass",), at, int(0.015 * self.sr))
+        self._bass(at, m, 1.0 if i % 2 == 0 else 0.8, int(step * 0.8))
+
     def c_params(self, bpm=None, rel=None, sustains=None, spread=None, mode=None, quantize=None):
         if quantize is not None:
             self.quantize = quantize
@@ -346,10 +424,16 @@ class Engine:
         t = int(self.next16) if (q and self.next16 >= self.t) else self.t
         prev = self.chord
         self.chord = {"notes": list(notes), "snd": snd, "pat": notes[1:] + [notes[1] + 12]}
+        self.chord["arp"] = self._arp_notes(notes, snd)
         xf = int(0.025 * self.sr)
+        bm = self.bass_mode
+        patch_bass = bm in ("Patch", "Sub + Patch")
+        self._bass_start(t, notes, revoice)
         if mode in ("Chord", "Slop"):
             self._release(("held",), t, xf if revoice else None)
             for i, m in enumerate(notes):
+                if i == 0 and not patch_bass:
+                    continue                     # the synth bass (or nothing) replaces it
                 when = t + int(i * self.spread * self.sr / 1000)
                 gain = 0.95
                 if mode == "Slop" and not revoice:
@@ -362,7 +446,8 @@ class Engine:
         old_bass = prev["notes"][0] if (prev and revoice) else None
         if not revoice or new_bass != old_bass:
             self._release(("held",), t, xf if revoice else None)
-            self._note(t, new_bass, "held", 0.7)
+            if patch_bass:
+                self._note(t, new_bass, "held", 0.7)
         if mode.startswith("Harp"):
             run = self._harp_run(notes)
             sr = self.sr
@@ -396,6 +481,8 @@ class Engine:
         self._release(("held",), t)
         self._release(("strum",), t, int(0.12 * self.sr))
         self._release(("arp",), t, int(0.06 * self.sr))
+        self._release(("bass",), t, int(0.08 * self.sr))
+        self.bass_root = None
         self.chord = None
 
     # ------------------------------------------------------------ patterns
@@ -419,7 +506,7 @@ class Engine:
         if not self.chord:
             return
         mode = self.mode
-        notes = self.chord["pat"]
+        notes = self.chord.get("arp") or self.chord["pat"]
         div = 2 if "1/8" in mode else 4
         step = 60.0 / self.bpm / div * self.sr
         if "Random" in mode:
@@ -456,6 +543,9 @@ class Engine:
         if not self.chord:
             return
         mode = self.mode
+        if self.bass_mode in ("Pulse", "Octaves", "Walk") and s % 2 == 0:
+            if at - getattr(self, "bass_t0", -10 ** 9) > int(0.09 * self.sr):
+                self._bass_step(at)
         fresh = at - self.chord_t < int(0.09 * self.sr)     # just played on press
         if mode.startswith("Strum") and s % 2 == 0 and not fresh:
             pat = STRUM_PATTERNS[mode]
@@ -484,7 +574,7 @@ class Engine:
             self.next16 += step_len
         while self.events and self.events[0][0] < t + N:
             when, _, fn, args = heapq.heappop(self.events)
-            fn(max(when, t), *args) if fn == self._ev_note else fn(*args)
+            fn(max(when, t), *args) if fn in (self._ev_note, self._ev_bass) else fn(*args)
 
         mix = np.zeros((N, 2), np.float32)
         dmix = np.zeros((N, 2), np.float32)      # drums: dry, no effects
@@ -512,7 +602,7 @@ class Engine:
             seg *= g[:, None]
             seg[:, 0] *= v.lg
             seg[:, 1] *= v.rg
-            if v.tag == "drum":
+            if v.tag == "drum" or v.tag == "bass":
                 dmix[o:] += seg
                 if not v.done:
                     live.append(v)
