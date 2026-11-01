@@ -21,3 +21,4 @@ First public alpha.
 - The logo animates at launch: keys pop in like a strum, the chord is struck, then a step light walks the keys while sounds load. Any button skips it.
 - Startup sound is now a strummed chord in your key (home chord with its 7th, bell/e-piano tone through reverb and delay), landing when the logo keys are struck. Replaces the two-tone beep.
 - Everything animates: chord names drop in letter by letter, struck tiles shatter into bricks, a self-playing Tetris well behind the chord name hard-drops a piece on every chord (shape = chord degree), clears lines in a burst of bricks and falls in time with the beat. Live oscilloscope, gliding FX bars, keys that fade out, menus whose rows drop in.
+- Faster drawing: cached text, bricks and keyboard, a much cheaper Tetris AI, 15 fps at rest, and the UI backs off when the audio gets busy. Fixes the lag and crackles the animations caused.

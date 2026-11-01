@@ -306,6 +306,8 @@ class App:
         self._ov = pygame.Surface((BASE_W, BASE_H))
         self._ov.fill((10, 8, 14))
         self.parts = []                 # flying bricks
+        self._tc = {}                   # text render cache
+        self._kb = None                 # keyboard drawn once, lit keys on top
         self.well_reset()
         self.grav_t = 0.0
         self.new_hit = False
@@ -1015,8 +1017,18 @@ class App:
             self.toggle_drums()
 
     # ---------------- drawing
+    def render(self, font, s, col):
+        """font.render with a cache: most labels are the same every frame."""
+        k = (id(font), s, col)
+        img = self._tc.get(k)
+        if img is None:
+            if len(self._tc) > 600:
+                self._tc.clear()
+            img = self._tc[k] = font.render(s, True, col)
+        return img
+
     def text(self, surf, s, font, col, pos, center=False, right=False):
-        img = font.render(s, True, col)
+        img = self.render(font, s, col)
         r = img.get_rect()
         if center:
             r.center = pos
@@ -1128,8 +1140,13 @@ class App:
         # ---- chord buttons: press down, flash, glow off slowly
         tw, gap = 82, 6
         x0 = (BASE_W - (7 * tw + 6 * gap)) // 2
+        ck = (self.key, self.scale, tuple(sorted(k for k, v in m.items() if v)))
+        if self.anim.get("_ck") != ck:
+            self.anim["_ck"] = ck
+            self.anim["_chords"] = [build_chord(self.key, self.scale, i, m) for i in range(7)]
+        chords = self.anim["_chords"]
         for i, btn in enumerate(CHORD_BUTTONS):
-            pc, iv, name = build_chord(self.key, self.scale, i, m)
+            pc, iv, name = chords[i]
             active = bool(self.cur and self.cur[0] == i)
             lv = self.sm("tile%d" % i, 1.0 if active else 0.0, 30 if active else 6)
             hit = active and self.since(self.hit_t, 0.16) < 1
@@ -1169,23 +1186,40 @@ class App:
             if n not in self.glow and lo <= n < hi:          # new note: a block hops off the key
                 self.anim.setdefault("_newnotes", []).append(n)
             self.glow[n] = 1.0
-        whites = {}
-        for n in range(lo, hi):
-            if n % 12 in (0, 2, 4, 5, 7, 9, 11):
-                g = self.glow.get(n, 0.0)
-                r = pygame.Rect(int(wx), ky + (2 if n in sounding else 0), int(ww) - 1, kh)
+        if self._kb is None:
+            self._kb = pygame.Surface((kw, kh + 2))
+            self._kb.fill(BG)
+            self._kbw, self._kbb = {}, {}
+            wx = 0.0
+            for n in range(lo, hi):
+                if n % 12 in (0, 2, 4, 5, 7, 9, 11):
+                    self._kbw[n] = pygame.Rect(int(wx), 0, int(ww) - 1, kh)
+                    wx += ww
+            for n in range(lo, hi):
+                if n % 12 in (1, 3, 6, 8, 10):
+                    px = self._kbw[n - 1].x + ww * 0.65
+                    self._kbb[n] = pygame.Rect(int(px), 0, int(ww * 0.7), int(kh * 0.6))
+            for r in self._kbw.values():
+                pygame.draw.rect(self._kb, (200, 194, 184), r)
+            for r in self._kbb.values():
+                pygame.draw.rect(self._kb, (30, 28, 34), r)
+        c.blit(self._kb, (kx, ky))
+        lit = [n for n in self.glow if lo <= n < hi]
+        for n in sorted(lit, key=lambda n: n in self._kbb):     # whites first, blacks on top
+            g = self.glow[n]
+            if n in self._kbw:
+                r = self._kbw[n].move(kx, ky + (2 if n in sounding else 0))
                 pygame.draw.rect(c, self.mix((200, 194, 184), ACCENT, g), r)
-                whites[n] = wx
-                wx += ww
-        for n in self.anim.pop("_newnotes", []):
-            bx = whites.get(n, whites.get(n - 1, kx)) + ww / 2
-            self.burst(bx, ky, ACCENT, 2, 60, up=330)
-        for n in range(lo, hi):
-            if n % 12 in (1, 3, 6, 8, 10):
-                g = self.glow.get(n, 0.0)
-                px = whites[n - 1] + ww * 0.65
-                r = pygame.Rect(int(px), ky + (2 if n in sounding else 0), int(ww * 0.7), int(kh * 0.6))
+                for b in (n - 1, n + 1):                         # redraw black keys this covered
+                    if b in self._kbb and b not in self.glow:
+                        pygame.draw.rect(c, (30, 28, 34), self._kbb[b].move(kx, ky))
+            else:
+                r = self._kbb[n].move(kx, ky + (2 if n in sounding else 0))
                 pygame.draw.rect(c, self.mix((30, 28, 34), ACCENT, g), r)
+        for n in self.anim.pop("_newnotes", []):
+            r = self._kbw.get(n) or self._kbb.get(n)
+            if r:
+                self.burst(kx + r.centerx, ky, ACCENT, 2, 60, up=330)
 
         # ---- status + beat steps
         status = []
@@ -1252,6 +1286,8 @@ class App:
 
     def well_reset(self):
         self.grid = [[None] * self.WC for _ in range(self.WR)]
+        self.well_dirty = True
+        self.well_surf = None
         self.piece = None
         self.spawn(random.randrange(7))
 
@@ -1265,35 +1301,36 @@ class App:
         return True
 
     def spawn(self, kind):
-        """New piece; a little AI picks where it should land (tidy stacks = lines clear)."""
+        """New piece; a quick heuristic picks where it lands (tidy stacks = lines clear).
+        Uses column heights only, so it costs well under a millisecond."""
+        WR, WC = self.WR, self.WC
+        heights = []
+        for cx in range(WC):
+            top = WR
+            for ry in range(WR):
+                if self.grid[ry][cx] is not None:
+                    top = ry
+                    break
+            heights.append(top)                 # first filled row (WR = empty column)
         best = None
         for r in range(4):
             cells = self._rot(self.PIECES[kind], r)
             w = max(x for x, _ in cells) + 1
-            for px in range(self.WC - w + 1):
-                if not self._fits(cells, px, 0):
+            bottoms = [max(y for x, y in cells if x == cx) for cx in range(w)]
+            for px in range(WC - w + 1):
+                py = min(heights[px + cx] - 1 - bottoms[cx] for cx in range(w))
+                if py + min(y for _, y in cells) < 0:
                     continue
-                py = 0
-                while self._fits(cells, px, py + 1):
-                    py += 1
-                g = [row[:] for row in self.grid]
-                for x, y in cells:
-                    if 0 <= py + y < self.WR:
-                        g[py + y][px + x] = 1
-                lines = sum(1 for row in g if all(v is not None for v in row))
-                heights, holes = [], 0
-                for cx in range(self.WC):
-                    col = [g[ry][cx] for ry in range(self.WR)]
-                    top = next((ry for ry, v in enumerate(col) if v is not None), self.WR)
-                    heights.append(self.WR - top)
-                    holes += sum(1 for ry in range(top, self.WR) if col[ry] is None)
-                bump = sum(abs(heights[k] - heights[k + 1]) for k in range(self.WC - 1))
-                score = -0.5 * sum(heights) - 3.5 * holes - 0.3 * bump + 8 * lines + random.random() * 0.4
+                holes = sum(heights[px + cx] - 1 - (py + bottoms[cx]) for cx in range(w))
+                land = py + sum(y for _, y in cells) / 4.0
+                flat = -abs((heights[px - 1] if px > 0 else heights[px]) - (heights[px + w] if px + w < WC else heights[px + w - 1]))
+                score = land * 1.0 - holes * 4.0 + flat * 0.3 + random.random() * 0.5
                 if best is None or score > best[0]:
                     best = (score, cells, px)
         if best is None:                       # stack topped out: blow it all up
             self.explode_well()
-            self.grid = [[None] * self.WC for _ in range(self.WR)]
+            self.grid = [[None] * WC for _ in range(WR)]
+            self.well_dirty = True
             return self.spawn(kind)
         _, cells, px = best
         self.piece = [cells, px, -2, kind]
@@ -1321,9 +1358,11 @@ class App:
             if py + y < 0:
                 self.explode_well()
                 self.grid = [[None] * self.WC for _ in range(self.WR)]
+                self.well_dirty = True
                 self.spawn(random.randrange(7) if next_kind is None else next_kind)
                 return
             self.grid[py + y][px + x] = kind
+        self.well_dirty = True
         full = [ry for ry in range(self.WR) if all(v is not None for v in self.grid[ry])]
         for ry in full:                        # line clear: the row bursts into bricks
             for cx in range(self.WC):
@@ -1374,12 +1413,23 @@ class App:
         fade = 0.26 if self.cur else 0.34
         cl = 1 - self.since(self.anim.get("_clear_t", -9), 0.3)
         C = self.CELL
-        for ry in range(self.WR):
-            row = self.grid[ry]
-            for cx in range(self.WC):
-                k = row[cx]
-                if k is not None:
-                    self.brick(c, self.WX + cx * C, self.WY + ry * C, self.PIECE_COL[k], fade + 0.4 * cl)
+        key = (fade, round(cl, 1))
+        if self.well_dirty or self.anim.get("_well_key") != key or self.well_surf is None:
+            if self.well_surf is None:
+                self.well_surf = pygame.Surface((self.WC * C, self.WR * C))
+                self.well_surf.set_colorkey((1, 2, 3))
+            ws = self.well_surf
+            ws.fill((1, 2, 3))
+            f = fade + 0.4 * cl
+            for ry in range(self.WR):
+                row = self.grid[ry]
+                for cx in range(self.WC):
+                    k = row[cx]
+                    if k is not None:
+                        self.brick(ws, cx * C, ry * C, self.PIECE_COL[k], f)
+            self.well_dirty = False
+            self.anim["_well_key"] = key
+        c.blit(self.well_surf, (self.WX, self.WY))
         cells, px, py, kind = self.piece
         for x, y in cells:
             if py + y >= 0:
@@ -1397,7 +1447,7 @@ class App:
         full = font.size(name)[0]
         xx = cx - full // 2
         for n, ch in enumerate(name):
-            img = font.render(ch, True, INK)
+            img = self.render(font, ch, INK)
             dy = 0
             if self.hit_big:
                 t = (time.perf_counter() - self.hit_t) - n * 0.03
@@ -1414,7 +1464,7 @@ class App:
 
     @staticmethod
     def mix(a, b, f):
-        f = 0.0 if f < 0 else (1.0 if f > 1 else f)
+        f = 0.0 if f < 0 else (1.0 if f > 1 else round(f * 16) / 16.0)   # 16 steps keeps text caches small
         return (int(a[0] + (b[0] - a[0]) * f), int(a[1] + (b[1] - a[1]) * f), int(a[2] + (b[2] - a[2]) * f))
 
     def draw_mini_mark(self, c, x, y, step):
@@ -1522,10 +1572,12 @@ class App:
             else:                              # closing: just fade
                 y = 58 + r * 30
             sel = i == sel_i
-            self.text(c, label, self.f_med, self.mix(BG, ACCENT if sel else col, a), (xin, y))
+            if not opening and a < 0.6:
+                continue                       # closing: rows vanish, the panel fades
+            self.text(c, label, self.f_med, ACCENT if sel else col, (xin, y))
             if val:
                 s = ("< %s >" % val) if sel else val
-                self.text(c, s, self.f_med, self.mix(BG, INK if sel else DIM, a),
+                self.text(c, s, self.f_med, INK if sel else DIM,
                           (BASE_W - xin + (kick if sel else 0), y), right=True)
 
     def draw_editor(self, c, a=1.0):
@@ -1550,6 +1602,19 @@ class App:
             self.eng.underruns, self.eng.load, len(e.voices) if e else -1, getattr(self.eng, "misses", 0),
             len(getattr(self.eng, "cache", ())), (e.t / e.sr) if e else -1, synth.PATCHES[self.patch]["name"],
             self.mode()), flush=True)
+
+    def frame_interval(self, now):
+        """30 fps while something is moving, 15 fps at rest, and back off
+        further if the audio engine is getting busy."""
+        load = self.eng.load
+        if load > 0.55:
+            return 1 / 12.0
+        busy = (self.parts or now - self.hit_t < 0.6 or self.menu or self.editor
+                or self.anim.get("menu", 0) > 0.01 or self.anim.get("editor", 0) > 0.01
+                or (self.msg and now - self.msg_t < 1.5))
+        if load > 0.4:
+            return 1 / 20.0
+        return 1 / 30.0 if busy else 1 / 15.0
 
     def run(self):
         clock = pygame.time.Clock()
@@ -1577,7 +1642,7 @@ class App:
             if now - last_hb > 20:
                 last_hb = now
                 self.heartbeat()
-            if now - last_draw > 1 / 30.0:      # UI at 30 fps; audio never waits on it
+            if now - last_draw > self.frame_interval(now):   # audio always comes first
                 self.draw()
                 last_draw = now
             clock.tick(120)
@@ -1600,6 +1665,8 @@ def load_cfg():
 
 
 def main():
+    # let the audio thread grab the interpreter quickly even while the UI draws
+    sys.setswitchinterval(0.001)
     cfg = load_cfg()
     s = cfg["settings"]
     block = s.get("latency", 1024) if s.get("latency") in (512, 1024, 2048) else 1024
