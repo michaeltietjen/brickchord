@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta property="og:title" content="Brickchord">
+<meta property="og:description" content="A pocket chord machine with an analog-style synth for the TrimUI Brick Pro running KNULLI.">
+<meta property="og:image" content="https://michaeltietjen.github.io/brickchord/brickchord-lockup.png">
+<link rel="icon" href="brickchord-icon.svg" type="image/svg+xml">
+<title>Brickchord</title>
+<meta name="description" content="Brickchord: a pocket chord machine with an analog-style synth for the TrimUI Brick Pro running KNULLI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a hardware front panel. Light grey chassis, ink labels, one orange key.
+   Sections are "modules" separated by panel seams; the playable keypad is the hero. */
+:root {
+  --chassis: #e4e2dc;     /* panel grey, the logo's key colour pushed warm */
+  --plate: #efede8;       /* raised plates and keys */
+  --ink: #18161c;         /* labels, wordmark */
+  --dim: #6d6874;         /* secondary labels */
+  --seam: #cfccc4;        /* panel seams */
+  --orange: #ff5a1f;      /* the one lit key */
+  --teal: #3f9e95;        /* secondary accent from the app screen */
+  --screen: #121016;      /* the device screen */
+  --screen-ink: #ece4d6;
+  --key-shadow: #bdb9b0;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --chassis: #1b1a1f; --plate: #26242b; --ink: #ece9e2; --dim: #9a94a2; --seam: #322f37;
+    --orange: #ff6a33; --teal: #5cc0b5; --screen: #0c0b0f; --screen-ink: #ece4d6; --key-shadow: #0d0c10;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --chassis: #1b1a1f; --plate: #26242b; --ink: #ece9e2; --dim: #9a94a2; --seam: #322f37;
+  --orange: #ff6a33; --teal: #5cc0b5; --screen: #0c0b0f; --screen-ink: #ece4d6; --key-shadow: #0d0c10;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--chassis); color: var(--ink);
+  font-family: var(--body); font-size: 16px; line-height: 1.55;
+  font-variation-settings: "wdth" 100;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+
+.wrap {
+  max-width: 1120px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.label {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--dim);
+}
+
+/* ---------- top strip */
+.strip { border-bottom: 1px solid var(--seam); }
+.strip .wrap { display: flex; align-items: center; gap: 24px; padding-block: 14px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand b {
+  font-family: var(--display); font-weight: 800; font-size: 21px; letter-spacing: -.01em;
+  font-variation-settings: "wdth" 112;
+}
+.mark { display: grid; grid-template-columns: repeat(4, 9px); gap: 2px; }
+.mark i { width: 9px; height: 9px; border-radius: 2px; background: var(--ink); }
+.mark i:nth-child(7) { background: var(--orange); }
+.strip nav { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; }
+.strip nav a { text-decoration: none; }
+.strip nav a:hover { color: var(--ink); }
+.tag {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  border: 1px solid var(--ink); border-radius: 3px; padding: 1px 6px; text-transform: uppercase;
+}
+
+/* ---------- hero */
+.hero .wrap {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 470px);
+  gap: 56px; padding-block: 64px 72px; align-items: center;
+}
+.hero h1 {
+  font-family: var(--display); font-weight: 850; line-height: .92; margin: 14px 0 22px;
+  font-size: clamp(44px, 7.2vw, 88px); letter-spacing: -.025em;
+  font-variation-settings: "wdth" 118; text-wrap: balance;
+}
+.hero h1 em { font-style: normal; color: var(--orange); }
+.hero p.lede { font-size: 19px; max-width: 34em; margin: 0 0 30px; color: var(--ink); }
+.ctas { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
+  font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 13px 18px; border-radius: 6px; border: 1.5px solid var(--ink);
+  transition: transform .08s ease, box-shadow .08s ease;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+.btn.primary { background: var(--orange); color: #fff; border-color: var(--orange); box-shadow: 0 3px 0 #b8380b; }
+.btn.primary:active { box-shadow: 0 0 0 #b8380b; }
+.fine { margin-top: 18px; font-size: 13.5px; color: var(--dim); }
+
+/* ---------- playable unit */
+.unit {
+  background: var(--plate); border-radius: 22px; padding: 22px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 0 var(--seam), 0 18px 40px -24px rgba(0,0,0,.35);
+  border: 1px solid var(--seam);
+}
+.screen {
+  background: var(--screen); color: var(--screen-ink); border-radius: 12px;
+  height: 168px; position: relative; overflow: hidden; padding: 14px 16px;
+  display: grid; grid-template-rows: auto 1fr auto;
+}
+.screen .top { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: #8a8392; letter-spacing: .06em; }
+.screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.chordname {
+  position: relative; align-self: center; text-align: center;
+  font-family: var(--display); font-weight: 800; font-size: 60px; line-height: 1;
+  font-variation-settings: "wdth" 105; letter-spacing: -.01em;
+}
+.chordname span { display: inline-block; }
+.chordname.drop span { animation: drop .32s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes drop { from { transform: translateY(-46px); opacity: 0; } to { transform: none; opacity: 1; } }
+.roman { position: relative; text-align: center; font-family: var(--display); font-weight: 700; font-size: 20px; color: var(--orange); min-height: 26px; }
+
+.keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.key {
+  aspect-ratio: 1; max-width: 100%; border: 0; border-radius: 12px; cursor: pointer;
+  background: var(--chassis); color: var(--ink);
+  box-shadow: 0 5px 0 var(--key-shadow);
+  display: grid; place-items: center; align-content: center; gap: 2px;
+  font-family: var(--display); transition: transform .06s ease, box-shadow .06s ease, background .15s ease;
+  touch-action: manipulation; -webkit-user-select: none; user-select: none;
+}
+.key .r { font-weight: 800; font-size: 22px; line-height: 1; font-variation-settings: "wdth" 110; }
+.key .n { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.key.on { transform: translateY(5px); box-shadow: 0 0 0 var(--key-shadow); background: var(--orange); color: #fff; }
+.key.on .n { color: rgba(255,255,255,.85); }
+.key.mod { background: var(--orange); color: #fff; box-shadow: 0 5px 0 #b8380b; }
+.key.mod .n { color: rgba(255,255,255,.85); }
+.key.mod.on { background: var(--ink); color: var(--plate); box-shadow: 0 0 0 #b8380b; }
+.mods { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.mods button, .mods select {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  background: transparent; color: var(--ink); border: 1.5px solid var(--seam); border-radius: 999px;
+  padding: 7px 12px; cursor: pointer;
+}
+.mods button[aria-pressed="true"] { border-color: var(--orange); color: var(--orange); }
+.mods select { appearance: none; padding-right: 12px; }
+.hint { margin-top: 12px; font-size: 12.5px; color: var(--dim); font-family: var(--mono); }
+
+/* ---------- modules */
+.module { border-top: 1px solid var(--seam); }
+.module .wrap { padding-block: 72px; }
+.module h2 {
+  font-family: var(--display); font-weight: 800; font-size: clamp(30px, 4vw, 46px); line-height: 1.02;
+  letter-spacing: -.02em; margin: 10px 0 18px; font-variation-settings: "wdth" 115; text-wrap: balance;
+}
+.module p.intro { max-width: 38em; font-size: 17.5px; margin: 0 0 36px; }
+
+.see { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.bezel {
+  background: #2a282e; border-radius: 18px; padding: 16px; max-width: 100%;
+  box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 22px 40px -26px rgba(0,0,0,.5);
+}
+.bezel img { display: block; width: 100%; height: auto; border-radius: 6px; image-rendering: auto; }
+.bezel figcaption { font-family: var(--mono); font-size: 11px; color: #8f8996; margin-top: 10px; letter-spacing: .05em; }
+.anim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.anim-list li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; }
+.anim-list li::before { content: ""; width: 12px; height: 12px; margin-top: 6px; border-radius: 3px; background: var(--ink); }
+.anim-list li:nth-child(2)::before { background: var(--orange); }
+.anim-list b { font-weight: 700; }
+
+/* control map */
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--seam); border-radius: 14px; overflow: hidden; background: var(--plate); }
+.controls > div { padding: 22px 24px; border-bottom: 1px solid var(--seam); }
+.controls > div:nth-child(odd) { border-right: 1px solid var(--seam); }
+.controls > div:nth-last-child(-n+2) { border-bottom: 0; }
+.controls .k { font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .04em; }
+.controls .v { margin-top: 4px; }
+.controls .v small { display: block; color: var(--dim); font-size: 14px; margin-top: 4px; }
+
+/* inventory */
+.inv { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.bank { background: var(--plate); border: 1px solid var(--seam); border-radius: 14px; padding: 22px; }
+.bank header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.bank h3 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 20px; font-variation-settings: "wdth" 112; }
+.bank .count { font-family: var(--mono); font-weight: 600; font-size: 28px; color: var(--orange); font-variant-numeric: tabular-nums; line-height: 1; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips span { font-family: var(--mono); font-size: 12px; padding: 4px 9px; border-radius: 4px; background: var(--chassis); border: 1px solid var(--seam); }
+.bank p { margin: 12px 0 0; font-size: 14.5px; color: var(--dim); }
+
+/* install */
+.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 0; max-width: 760px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; padding: 20px 0; border-top: 1px solid var(--seam); }
+.steps li:last-child { border-bottom: 1px solid var(--seam); }
+.steps li::before { content: counter(s, decimal-leading-zero); font-family: var(--mono); font-weight: 600; color: var(--orange); font-size: 15px; padding-top: 2px; }
+code { font-family: var(--mono); font-size: .88em; background: var(--plate); border: 1px solid var(--seam); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.note { margin-top: 26px; max-width: 760px; font-size: 15px; color: var(--dim); }
+
+footer { border-top: 1px solid var(--seam); }
+footer .wrap { padding-block: 36px 48px; display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; color: var(--dim); font-size: 13.5px; }
+footer p { margin: 0; max-width: 56em; }
+
+@media (max-width: 860px) {
+  .hero .wrap, .see { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .hero .wrap { padding-block: 40px 56px; }
+  .controls { grid-template-columns: minmax(0, 1fr); }
+  .controls > div:nth-child(odd) { border-right: 0; }
+  .controls > div:nth-last-child(2) { border-bottom: 1px solid var(--seam); }
+}
+@media (max-width: 480px) {
+  .strip nav { margin-left: 0; width: 100%; }
+  .unit { padding: 14px; border-radius: 18px; }
+  .chordname { font-size: 48px; }
+  .key .r { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chordname.drop span { animation: none; }
+  .key, .btn { transition: none; }
+}
+</style>
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+
+
+<header class="strip">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Brickchord home">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <b>brickchord</b>
+    </a>
+    <span class="tag">alpha</span>
+    <nav class="label" aria-label="Sections">
+      <a href="#play">Play</a>
+      <a href="#screen">Screen</a>
+      <a href="#sounds">Sounds</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/michaeltietjen/brickchord">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero" id="play">
+    <div class="wrap">
+      <div>
+        <div class="label">Chord machine for TrimUI Brick Pro · KNULLI</div>
+        <h1>Seven keys. Every chord in your <em>key.</em></h1>
+        <p class="lede">Brickchord turns a handheld into a pocket chord instrument. Each button plays one chord that fits your song, the sticks bend and color it, and a drum machine and synth bass keep everything on the beat.</p>
+        <div class="ctas">
+          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.2.0-alpha">Download v0.2.0</a>
+          <a class="btn" href="https://github.com/michaeltietjen/brickchord">Source on GitHub</a>
+        </div>
+        <p class="fine">Free and open source (MIT). Runs as a Port on KNULLI. Alpha: expect rough edges. <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.2.0-alpha">What's new in 0.2.0</a></p>
+      </div>
+
+      <div class="unit" aria-label="Playable Brickchord keypad">
+        <div class="screen">
+          <canvas id="scope" aria-hidden="true"></canvas>
+          <div class="top"><span id="keyinfo">C MAJOR</span><span id="soundinfo">JUNO-STYLE PAD</span></div>
+          <div class="chordname" id="chordname" aria-live="polite"><span>-</span></div>
+          <div class="roman" id="roman">press a key</div>
+        </div>
+        <div class="keys" id="keys"></div>
+        <div class="mods">
+          <button type="button" id="m-sus" aria-pressed="false">Sus4</button>
+          <button type="button" id="m-ninth" aria-pressed="false">9th</button>
+          <button type="button" id="m-flip" aria-pressed="false">Flip</button>
+          <label class="label" for="keysel" hidden>Key</label>
+          <select id="keysel" aria-label="Key"></select>
+          <select id="scalesel" aria-label="Scale">
+            <option>Major</option><option>Minor</option><option>Dorian</option><option>Mixolydian</option>
+          </select>
+        </div>
+        <p class="hint">Hold a key to sustain. Keyboard: 1 to 7 play, Q holds 7th.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="screen">
+    <div class="wrap">
+      <div class="label">On the device</div>
+      <h2>A screen that plays along</h2>
+      <p class="intro">Everything on Brickchord's screen moves with the music. This capture is the real app drawing itself.</p>
+      <div class="see">
+        <figure class="bezel" style="margin:0">
+          <video src="ui.mp4" width="400" height="300" autoplay muted loop playsinline style="display:block;width:100%;height:auto;border-radius:6px" aria-label="Brickchord running: chords being played, letters dropping in, a Tetris well filling behind the chord name, the beat turning on and the settings menu opening"></video>
+          <figcaption>Capture of Brickchord 640 × 480, chords then beat then menu</figcaption>
+        </figure>
+        <ul class="anim-list">
+          <li><span><b>A Tetris well behind every chord.</b> Each chord slams a piece down, its shape set by the chord you played. Full lines burst into bricks, and pieces fall one row per beat.</span></li>
+          <li><span><b>Keys that shatter.</b> The chord tile you hit sinks, flashes and throws bricks, then fades back slowly instead of snapping off.</span></li>
+          <li><span><b>Letters that drop in.</b> The chord name falls in one letter at a time and lands with a bounce.</span></li>
+          <li><span><b>A live oscilloscope.</b> The output waveform runs faintly behind the chord name, and the effect bars glide as you move the stick.</span></li>
+          <li><span><b>A launch chord.</b> The logo animates on start and plays the home chord of your key as its keys are struck.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="controls">
+    <div class="wrap">
+      <div class="label">Control map</div>
+      <h2>Your hands already know it</h2>
+      <p class="intro">The chords sit under your right thumb in order, the shoulders change their color, and both sticks do something musical.</p>
+      <div class="controls">
+        <div><div class="k">D-pad ← ↑ → ↓</div><div class="v">Chords I, ii, iii, IV</div></div>
+        <div><div class="k">X · A · B</div><div class="v">Chords V, vi, vii°</div></div>
+        <div><div class="k">Hold Y · L1 · R1</div><div class="v">Flip major/minor · 7th · sus4<small>L1 and R1 together make a 9th</small></div></div>
+        <div><div class="k">Left stick</div><div class="v">Bend the chord eight ways<small>7, maj7, 9, aug, flip, dim, sus4, sus2</small></div></div>
+        <div><div class="k">Right stick ↑ ↓</div><div class="v">Wet and dry<small>Up adds reverb and delay together, down dries the synth out</small></div></div>
+        <div><div class="k">Right stick ← →</div><div class="v">Filter and resonance<small>Click the stick to hold the effect where it is</small></div></div>
+        <div><div class="k">Start</div><div class="v">Beat on and off</div></div>
+        <div><div class="k">Select</div><div class="v">Settings<small>Select + Start quits</small></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="sounds">
+    <div class="wrap">
+      <div class="label">What's inside</div>
+      <h2>An analog-style synth, a bass and a drum machine</h2>
+      <p class="intro">Every note is rendered from detuned saws, pulse waves and a sub oscillator through a resonant filter. Effects touch only the synth, so the drums and bass stay punchy and dry.</p>
+      <div class="inv">
+        <div class="bank">
+          <header><h3>Sounds</h3><span class="count">15</span></header>
+          <div class="chips"><span>Juno Pad</span><span>Poly Brass</span><span>PWM Strings</span><span>Square Keys</span><span>Saw Pluck</span><span>Dark Sync-ish</span><span>Wide Supersaw</span><span>Prophet Poly</span><span>Electric Piano</span><span>Glass Bells</span><span>Choir Pad</span><span>Acid Chord</span><span>Lofi Strings</span><span>Sub Pad</span><span>Soft Tri Organ</span></div>
+          <p>Each one is editable: oscillator, detune, sub, filter and amp envelopes, PWM. Edits are remembered per sound.</p>
+        </div>
+        <div class="bank">
+          <header><h3>Beats</h3><span class="count">27</span></header>
+          <div class="chips"><span>Four Floor</span><span>Boom Bap</span><span>Synthpop</span><span>Half Time</span><span>House</span><span>Disco</span><span>Lo-fi</span><span>Trap</span><span>Funk</span><span>Breakbeat</span><span>Rock</span><span>Drum &amp; Bass</span><span>Dembow</span><span>Bossa</span><span>Afrobeat</span><span>Shuffle</span><span>Electro</span><span>Tribal</span><span>Jungle</span><span>Techno</span><span>Minimal Techno</span><span>2-Step Garage</span><span>UK Funky</span><span>Neo-Soul</span><span>Nu-Disco</span><span>Afro House</span><span>Footwork</span></div>
+          <p>Ghost notes and swing included. Strums and arps lock to the same clock, with optional quantize.</p>
+        </div>
+        <div class="bank">
+          <header><h3>Play modes</h3><span class="count">12</span></header>
+          <div class="chips"><span>Chord</span><span>Strum Folk</span><span>Strum Pop</span><span>Strum Skank</span><span>Slop</span><span>Harp Up</span><span>Harp Down</span><span>Arp 1/8 Up</span><span>Arp 1/16 Up</span><span>Arp 1/16 Up-Down</span><span>Arp 1/8 Down</span><span>Arp 1/16 Random</span></div>
+          <p>Arpeggios run over 1 to 4 octaves. Slop plays with loose, human timing. Harp sweeps a glissando through the chord.</p>
+        </div>
+        <div class="bank">
+          <header><h3>Bass</h3><span class="count">7</span></header>
+          <div class="chips"><span>Synth</span><span>Pulse</span><span>Octaves</span><span>Walk</span><span>Sub + Patch</span><span>Patch</span><span>Off</span></div>
+          <p>A dedicated synth bass an octave under your chords: a plucky saw over a solid sine low end. Pulse, Octaves and Walk play 8th-note lines locked to the beat.</p>
+        </div>
+        <div class="bank">
+          <header><h3>Reverbs</h3><span class="count">8</span></header>
+          <div class="chips"><span>Hall</span><span>Room</span><span>Plate</span><span>Big Hall</span><span>Spring</span><span>Reverse</span><span>Gated</span><span>Lo-fi Dark</span></div>
+        </div>
+        <div class="bank">
+          <header><h3>Delays</h3><span class="count">6</span></header>
+          <div class="chips"><span>Ping-Pong</span><span>Straight</span><span>Tape</span><span>Dub</span><span>Slapback</span><span>Multi-Tap</span></div>
+          <p>Synced to tempo, including dotted and triplet times. Tape and Dub repeats darken as they fade.</p>
+        </div>
+        <div class="bank">
+          <header><h3>Keys and scales</h3><span class="count">48</span></header>
+          <div class="chips"><span>12 keys</span><span>Major</span><span>Minor</span><span>Dorian</span><span>Mixolydian</span></div>
+          <p>Every chord button follows the key you pick, so you can't play a wrong chord.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="install">
+    <div class="wrap">
+      <div class="label">Install on KNULLI</div>
+      <h2>Four steps to your first chord</h2>
+      <ol class="steps">
+        <li><span>Download <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.2.0-alpha">brickchord-v0.2.0-alpha.zip</a> from GitHub Releases. It bundles the ARM64 NumPy Brickchord needs.</span></li>
+        <li><span>Copy <code>brickchord/</code> and <code>Brickchord.sh</code> into <code>roms/ports/</code> on the SD card (<code>/userdata/roms/ports/</code> on the device).</span></li>
+        <li><span>On the device, open Start → Game Settings → Update Gamelists, then launch <b>Ports → Brickchord</b>.</span></li>
+        <li><span>On first launch, press each button once and push each stick once so Brickchord learns your controls.</span></li>
+      </ol>
+      <p class="note">Want every stock sound to open instantly? On a computer with Python 3 and NumPy, run <code>python3 brickchord/factory_render.py</code> in the release folder before copying it over. It pre-renders all 15 sounds (about 355 MB). Otherwise the Brick renders each sound in quiet moments the first time you use it and keeps it for next time. The pack matches sounds with Filter and Resonance at 0 in Settings; use the right stick for live filter moves.</p>
+      <p class="note">Updating from 0.1? Copy the new files over the old ones. Your settings and sound edits are kept.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Brickchord is an original, independent project by Michael Tietjen. It is not affiliated with or endorsed by TrimUI, the KNULLI project, Pocket Audio (HiChord) or Telepathic Instruments (Orchid); its workflow was inspired by chord instruments like those.</p>
+    <p>MIT licensed · bundles NumPy (BSD-3-Clause)</p>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const NOTE = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+  const SCALES = { Major:[0,2,4,5,7,9,11], Minor:[0,2,3,5,7,8,10], Dorian:[0,2,3,5,7,9,10], Mixolydian:[0,2,4,5,7,9,10] };
+  const ROMAN = ["I","II","III","IV","V","VI","VII"];
+  const state = { key: 0, scale: "Major", seventh: false, sus: false, ninth: false, flip: false, held: null };
+
+  const keysel = document.getElementById("keysel");
+  NOTE.forEach((n, i) => { const o = document.createElement("option"); o.value = i; o.textContent = n; keysel.appendChild(o); });
+
+  function chord(deg) {
+    const sc = SCALES[state.scale];
+    const tone = i => sc[(deg + i) % 7] + 12 * Math.floor((deg + i) / 7);
+    const root = sc[deg];
+    let third = tone(2) - root, fifth = tone(4) - root, sev = tone(6) - root;
+    if (state.flip && fifth === 7) third = third === 4 ? 3 : 4;
+    let iv = [0, third, fifth];
+    if (state.sus) iv[1] = 5;
+    if (state.seventh || state.ninth) iv.push(sev);
+    if (state.ninth) iv.push(14);
+    const pc = (state.key + root) % 12;
+    let name = NOTE[pc];
+    const dim = third === 3 && fifth === 6;
+    if (state.sus) name += (state.seventh || state.ninth) ? (sev === 11 ? "maj7sus4" : "7sus4") : "sus4";
+    else if (dim) name += (state.seventh || state.ninth) ? (sev === 9 ? "dim7" : "m7b5") : "dim";
+    else if (third === 3) name += state.ninth ? "m9" : state.seventh ? "m7" : "m";
+    else name += state.ninth ? (sev === 11 ? "maj9" : "9") : state.seventh ? (sev === 11 ? "maj7" : "7") : "";
+    let rn = ROMAN[deg];
+    if (third === 3 || dim) rn = rn.toLowerCase();
+    if (dim && !state.sus) rn += "°";
+    return { pc, iv, name, rn };
+  }
+
+  // --- keypad: 4 x 2 like the logo; slot 6 is the orange 7th key
+  const keysEl = document.getElementById("keys");
+  const slots = [0, 1, 2, 3, 4, 5, "mod", 6];
+  const buttons = [];
+  slots.forEach(s => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "key" + (s === "mod" ? " mod" : "");
+    if (s === "mod") { b.innerHTML = '<span class="r">7TH</span><span class="n">hold</span>'; b.dataset.mod = "1"; b.setAttribute("aria-label", "Hold for 7th chords"); }
+    else { b.dataset.deg = s; }
+    keysEl.appendChild(b);
+    buttons.push(b);
+  });
+  function labelKeys() {
+    buttons.forEach(b => {
+      if (b.dataset.mod) return;
+      const c = chord(+b.dataset.deg);
+      b.innerHTML = '<span class="r">' + c.rn + '</span><span class="n">' + c.name + '</span>';
+      b.setAttribute("aria-label", "Play " + c.name);
+    });
+    document.getElementById("keyinfo").textContent = (NOTE[state.key] + " " + state.scale).toUpperCase();
+  }
+
+  // --- audio: detuned saws through a swept low-pass, into a soft room
+  let ctx, master, wet, analyser, voices = [];
+  function audio() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0.32;
+    const comp = ctx.createDynamicsCompressor();
+    analyser = ctx.createAnalyser(); analyser.fftSize = 1024;
+    const conv = ctx.createConvolver();
+    const len = ctx.sampleRate * 2.2, ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+    conv.buffer = ir;
+    wet = ctx.createGain(); wet.gain.value = 0.32;
+    master.connect(comp); master.connect(wet); wet.connect(conv); conv.connect(comp);
+    comp.connect(analyser); analyser.connect(ctx.destination);
+    drawScope();
+  }
+  function play(c) {
+    audio();
+    if (ctx.state === "suspended") ctx.resume();
+    stop(0.08);
+    const now = ctx.currentTime;
+    const base = 48 + c.pc; // root in octave 3
+    const notes = [base - 12, ...c.iv.map(i => base + 12 + i)];
+    notes.forEach((m, k) => {
+      const f = 440 * Math.pow(2, (m - 69) / 12);
+      const g = ctx.createGain();
+      const flt = ctx.createBiquadFilter(); flt.type = "lowpass"; flt.Q.value = 3;
+      flt.frequency.setValueAtTime(400, now); flt.frequency.exponentialRampToValueAtTime(3200, now + 0.06); flt.frequency.exponentialRampToValueAtTime(1300, now + 0.9);
+      const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      const start = now + k * 0.012;
+      g.gain.setValueAtTime(0, start); g.gain.linearRampToValueAtTime(k === 0 ? 0.16 : 0.1, start + 0.03); g.gain.setTargetAtTime(k === 0 ? 0.11 : 0.07, start + 0.1, 0.4);
+      const oscs = [-8, 7].map(det => { const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = f; o.detune.value = det; o.connect(flt); o.start(start); return o; });
+      flt.connect(g);
+      if (pan) { pan.pan.value = notes.length > 1 ? -0.5 + k / (notes.length - 1) : 0; g.connect(pan); pan.connect(master); } else g.connect(master);
+      voices.push({ g, oscs });
+    });
+  }
+  function stop(rel = 0.5) {
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    voices.forEach(v => { v.g.gain.cancelScheduledValues(now); v.g.gain.setValueAtTime(v.g.gain.value, now); v.g.gain.setTargetAtTime(0, now, rel / 4); v.oscs.forEach(o => o.stop(now + rel + 0.2)); });
+    voices = [];
+  }
+
+  // --- screen
+  const nameEl = document.getElementById("chordname"), romanEl = document.getElementById("roman");
+  function show(c) {
+    nameEl.classList.remove("drop"); void nameEl.offsetWidth;
+    nameEl.innerHTML = [...c.name].map((ch, i) => '<span style="animation-delay:' + (i * 30) + 'ms">' + ch + '</span>').join("");
+    nameEl.classList.add("drop");
+    romanEl.textContent = c.rn;
+  }
+  const cv = document.getElementById("scope"), g2 = cv.getContext("2d");
+  function drawScope() {
+    const data = new Uint8Array(analyser.fftSize);
+    const tick = () => {
+      const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+      if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+      g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g2.clearRect(0, 0, w, h);
+      analyser.getByteTimeDomainData(data);
+      g2.strokeStyle = "rgba(92,192,181,.55)"; g2.lineWidth = 1.5; g2.beginPath();
+      for (let i = 0; i < data.length; i += 4) { const x = i / data.length * w, y = h / 2 + (data[i] - 128) / 128 * h * 0.9; i ? g2.lineTo(x, y) : g2.moveTo(x, y); }
+      g2.stroke();
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  // --- input
+  function press(btn) {
+    if (btn.dataset.mod) { state.seventh = true; btn.classList.add("on"); labelKeys(); if (state.held != null) trigger(state.held); return; }
+    trigger(+btn.dataset.deg);
+  }
+  function trigger(deg) {
+    state.held = deg;
+    buttons.forEach(b => b.classList.toggle("on", b.dataset.mod ? !!state.seventh : +b.dataset.deg === deg));
+    const c = chord(deg); show(c); play(c);
+  }
+  function release(btn) {
+    if (btn.dataset.mod) { state.seventh = false; btn.classList.remove("on"); labelKeys(); if (state.held != null) trigger(state.held); return; }
+    if (+btn.dataset.deg === state.held) { state.held = null; btn.classList.remove("on"); stop(); }
+  }
+  buttons.forEach(b => {
+    b.addEventListener("pointerdown", e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); press(b); });
+    b.addEventListener("pointerup", () => release(b));
+    b.addEventListener("pointercancel", () => release(b));
+    b.addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && !e.repeat) { e.preventDefault(); press(b); } });
+    b.addEventListener("keyup", e => { if (e.key === "Enter" || e.key === " ") release(b); });
+  });
+  const degBtn = d => buttons.find(b => +b.dataset.deg === d && !b.dataset.mod);
+  const modBtn = buttons.find(b => b.dataset.mod);
+  document.addEventListener("keydown", e => {
+    if (e.repeat || e.target.tagName === "SELECT") return;
+    if (e.key >= "1" && e.key <= "7") press(degBtn(+e.key - 1));
+    if (e.key === "q" || e.key === "Q") press(modBtn);
+  });
+  document.addEventListener("keyup", e => {
+    if (e.key >= "1" && e.key <= "7") release(degBtn(+e.key - 1));
+    if (e.key === "q" || e.key === "Q") release(modBtn);
+  });
+  [["m-sus","sus"],["m-ninth","ninth"],["m-flip","flip"]].forEach(([id, k]) => {
+    const el = document.getElementById(id);
+    el.addEventListener("click", () => { state[k] = !state[k]; el.setAttribute("aria-pressed", state[k]); labelKeys(); });
+  });
+  keysel.addEventListener("change", () => { state.key = +keysel.value; labelKeys(); });
+  document.getElementById("scalesel").addEventListener("change", e => { state.scale = e.target.value; labelKeys(); });
+  labelKeys();
+})();
+</script>
+
+</body>
+</html>

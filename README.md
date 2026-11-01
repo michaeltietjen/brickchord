@@ -6,6 +6,8 @@ A pocket chord machine with an analog-style synth voice, built for the **TrimUI 
 One button plays one chord in your key, the left stick bends it, the right stick adds reverb, delay and filter,
 and everything plays on a single sample-accurate clock with a built-in drum machine and synth bass.
 
+**Website:** https://michaeltietjen.github.io/brickchord/
+
 > Alpha software. Tested on a TrimUI Brick Pro with a KNULLI beta build. Expect rough edges.
 
 
