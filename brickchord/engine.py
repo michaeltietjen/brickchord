@@ -65,9 +65,13 @@ class Engine:
         self.dly_beats = 0.75
         self.master = 0.8
         self.master_t = 0.8
-        self.dbuf_len = int(sr * 2.6)
+        self.dbuf_len = int(sr * 4.0)
         self.dbuf = np.zeros((self.dbuf_len, 2), np.float32)
         self.dw = 0
+        self.dly_type = "Ping-Pong"
+        L = 63
+        self.tape_hist = np.zeros((L - 1, 2), np.float32)
+        self.tape_S = {}
         self._setup_reverb(ir)
         self._setup_filter()
         # monitoring
@@ -147,6 +151,10 @@ class Engine:
                 ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
                 y = y * (1 - ramp) + y_new * ramp
         return y.astype(np.float32)
+
+    def c_reverb(self, ir):
+        """Switch reverb type. The old tail is dropped (a short fade avoids a click)."""
+        self._setup_reverb(ir)
 
     def _reverb(self, x):
         N = self.N
@@ -232,6 +240,68 @@ class Engine:
             if mode != self.mode:
                 self.c_clear()
             self.mode = mode
+
+    def c_delay_type(self, name):
+        self.dly_type = name
+
+    def _lp_fir(self, key, lo, hi):
+        """Short band-limiting FIR used on delay repeats (Tape / Dub)."""
+        S = self.tape_S.get(key)
+        if S is None:
+            L, M = 63, 1024
+            fr = np.fft.rfftfreq(M, 1.0 / self.sr)
+            H = 1.0 / np.sqrt(1 + (fr / hi) ** 4)
+            if lo:
+                H *= 1.0 / np.sqrt(1 + (lo / np.maximum(fr, 1.0)) ** 4)
+            h = np.roll(np.fft.irfft(H, M), (L - 1) // 2)[:L] * np.hanning(L)
+            S = np.fft.rfft(h, 2048).astype(np.complex64)
+            self.tape_S[key] = S
+        return S
+
+    def _darken(self, y, key, lo, hi):
+        L = 63
+        frame = np.concatenate([self.tape_hist, y])
+        self.tape_hist = frame[-(L - 1):]
+        Y = np.fft.rfft(frame, 2048, axis=0)
+        return np.fft.irfft(Y * self._lp_fir(key, lo, hi)[:, None], 2048, axis=0)[L - 1:L - 1 + len(y)].astype(np.float32)
+
+    def _delay(self, x, N, sr):
+        """Read the delay line, write input + feedback. Returns the wet signal."""
+        typ = self.dly_type
+        size = self.dbuf_len
+        idx = np.arange(N)
+        widx = (self.dw + idx) % size
+        beat = 60.0 / self.bpm * sr
+
+        def tap(samples):
+            dd = int(max(N, min(samples, size - N)))
+            return self.dbuf[(self.dw - dd + idx) % size]
+
+        amt = float(self.dly_t)
+        if typ == "Slapback":
+            y = tap(0.105 * sr)
+            fb_sig = y * 0.12
+            wet = y * 1.1
+        elif typ == "Multi-Tap":
+            d = beat * self.dly_beats
+            a, b, c = tap(d), tap(d * 1.5), tap(d * 2)
+            wet = a * np.array([0.9, 0.35], np.float32) + b * np.array([0.35, 0.9], np.float32) + c * 0.55
+            fb_sig = c * (0.15 + 0.35 * amt)
+            y = wet
+        else:
+            y = tap(beat * self.dly_beats)
+            if typ == "Straight":
+                fb_sig = y * (0.3 + 0.45 * amt)
+            elif typ == "Tape":
+                fb_sig = np.tanh(self._darken(y, "tape", 90.0, 2600.0) * 1.6) / 1.6 * (0.35 + 0.47 * amt)
+            elif typ == "Dub":
+                fb_sig = np.tanh(self._darken(y, "dub", 220.0, 1500.0) * 2.0) / 2.0 * (0.55 + 0.33 * amt)
+            else:                                   # Ping-Pong
+                fb_sig = y[:, ::-1] * (0.3 + 0.45 * amt)
+            wet = y
+        self.dbuf[widx] = x + fb_sig
+        self.dw = (self.dw + N) % size
+        return wet
 
     def c_fx(self, rev, dly, beats, master):
         self.rev_t, self.dly_t, self.dly_beats, self.master_t = rev, dly, beats, master
@@ -444,16 +514,8 @@ class Engine:
         mv = self.master + (self.master_t - self.master) * ramp
         self.rev, self.dly, self.master = self.rev_t, self.dly_t, self.master_t
 
-        # ping-pong delay, tempo synced
-        d = int(60.0 / self.bpm * self.dly_beats * sr)
-        d = max(N, min(d, self.dbuf_len - N))
-        idx = np.arange(N)
-        ridx = (self.dw - d + idx) % self.dbuf_len
-        widx = (self.dw + idx) % self.dbuf_len
-        y = self.dbuf[ridx]
-        fb = 0.3 + 0.45 * float(self.dly_t)
-        self.dbuf[widx] = dbus * dv + fb * y[:, ::-1]
-        self.dw = (self.dw + N) % self.dbuf_len
+        # delay (type chosen in Settings), tempo synced except Slapback
+        y = self._delay(dbus * dv, N, sr)
         mix += y
         rbus = rbus * rv + y * 0.35
         mix += self._reverb(rbus) * 1.1

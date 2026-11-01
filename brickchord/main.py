@@ -38,7 +38,9 @@ PLAY_MODES = ["Chord", "Strum Folk", "Strum Pop", "Strum Skank", "Slop", "Harp U
               "Arp 1/8 Up", "Arp 1/16 Up", "Arp 1/16 Up-Down", "Arp 1/8 Down", "Arp 1/16 Random"]
 # strum patterns on an 8th-note grid: D down, U up, d soft down, . rest
 STRUM_PATTERNS = {"Strum Folk": "D.DU.UDU", "Strum Pop": "D.D.UDUd", "Strum Skank": ".D.D.D.D"}
-DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0), ("1/4 dotted", 1.5)]
+DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0), ("1/4 dotted", 1.5),
+               ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
+DELAY_TYPES = ["Ping-Pong", "Straight", "Tape", "Dub", "Slapback", "Multi-Tap"]
 
 # colours
 BG = (18, 16, 22)
@@ -250,6 +252,8 @@ class App:
         self.base_rev = s.get("reverb", 0.25)
         self.base_dly = s.get("delay", 0.0)
         self.dly_time = clamp(s.get("delay_time", 2), 0, len(DELAY_TIMES) - 1)
+        self.rev_type = s.get("reverb_type", "Hall") if s.get("reverb_type") in synth.REVERBS else "Hall"
+        self.dly_type = s.get("delay_type", "Ping-Pong") if s.get("delay_type") in DELAY_TYPES else "Ping-Pong"
         self.quantize = s.get("quantize", True)
         self.block = s.get("latency", 1024) if s.get("latency") in (512, 1024, 2048) else 1024
 
@@ -299,6 +303,7 @@ class App:
         self.eng.post("drums", False, synth.BEATS[self.beat][1])
         self.push_params()
         self.push_fx()
+        self.push_types()
         self.queue_precache()
 
         if self.inp.joys and not self.cfg.get("buttons"):
@@ -313,6 +318,11 @@ class App:
     def push_params(self):
         p = self.cur_patch()
         self.eng.post("params", self.bpm, p["r"], p["s"] > 0.001, self.spread, self.mode(), self.quantize)
+
+    def push_types(self):
+        if self.rev_type != "Hall":
+            self.eng.post("reverb", synth.make_reverb(self.rev_type))
+        self.eng.post("delay_type", self.dly_type)
 
     def push_fx(self):
         self.eng.post("fx", self.rev, self.dly, DELAY_TIMES[self.dly_time][1], self.volume)
@@ -421,6 +431,7 @@ class App:
                                     octave=self.octave, bpm=self.bpm, beat=self.beat, play=self.play,
                                     latch=self.latch, spread=self.spread, volume=self.volume,
                                     reverb=self.base_rev, delay=self.base_dly, delay_time=self.dly_time,
+                                    reverb_type=self.rev_type, delay_type=self.dly_type,
                                     latency=self.block, quantize=self.quantize)
         self.cfg["patch_edits"] = self.edits
         try:
@@ -598,8 +609,10 @@ class App:
             ("Octave", "%+d" % self.octave),
             ("Play", self.mode()),
             ("Reverb", "%d%%" % round(self.base_rev * 100)),
+            ("Reverb Type", self.rev_type),
             ("Delay", "%d%%" % round(self.base_dly * 100)),
-            ("Delay Time", DELAY_TIMES[self.dly_time][0]),
+            ("Delay Type", self.dly_type),
+            ("Delay Time", DELAY_TIMES[self.dly_time][0] if self.dly_type != "Slapback" else "fixed"),
             ("Beat", synth.BEATS[self.beat][0]),
             ("Tempo", "%d BPM" % self.bpm),
             ("Spread", "%d ms" % self.spread),
@@ -644,6 +657,12 @@ class App:
             self.base_dly = clamp(round(self.base_dly + 0.05 * d, 2), 0, 1)
         elif name == "Delay Time":
             self.dly_time = (self.dly_time + d) % len(DELAY_TIMES)
+        elif name == "Reverb Type":
+            self.rev_type = synth.REVERBS[(synth.REVERBS.index(self.rev_type) + d) % len(synth.REVERBS)]
+            self.eng.post("reverb", synth.make_reverb(self.rev_type))
+        elif name == "Delay Type":
+            self.dly_type = DELAY_TYPES[(DELAY_TYPES.index(self.dly_type) + d) % len(DELAY_TYPES)]
+            self.eng.post("delay_type", self.dly_type)
         elif name == "Beat":
             self.beat = (self.beat + d) % len(synth.BEATS)
         elif name == "Tempo":

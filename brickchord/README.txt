@@ -38,4 +38,9 @@ volume, latency.
 The CPU % at the bottom shows how hard the audio engine is working.
 Log: brickchord.log in this folder.
 Reverb/Delay in Settings set the resting amount; the right stick adds more.
+Effects (reverb, delay, filter) only touch the synth; drums stay dry.
+Reverb Type: Hall, Room, Plate, Big Hall, Spring, Reverse, Gated, Lo-fi Dark.
+Delay Type: Ping-Pong, Straight, Tape (repeats get darker), Dub (long dark trails),
+  Slapback (one quick echo), Multi-Tap (rhythmic repeats).
+Delay Time adds 1/8 and 1/4 triplets.
 Bundled NumPy is BSD-licensed (see _vendor/numpy-*.dist-info).

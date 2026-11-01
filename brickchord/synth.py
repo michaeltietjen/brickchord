@@ -167,6 +167,90 @@ def reverb_ir(sec=1.7, predelay=0.018):
     return _IR
 
 
+# ---------------------------------------------------------------- reverb types
+REVERBS = ["Hall", "Room", "Plate", "Big Hall", "Spring", "Reverse", "Gated", "Lo-fi Dark"]
+_REV_CACHE = {}
+
+
+def _smooth(x, passes):
+    for _ in range(passes):
+        x = (x + np.roll(x, 1, 0) + np.roll(x, 2, 0)) / 3
+    return x
+
+
+def _norm(ir, level=1.15):
+    return (ir / (np.sqrt((ir ** 2).sum(0, keepdims=True)) * level)).astype(np.float32)
+
+
+def make_reverb(name):
+    """Impulse response for each reverb type (stereo float32). The engine
+    convolves the synth with it, so any shape costs the same per second of tail."""
+    if name in _REV_CACHE:
+        return _REV_CACHE[name]
+    rng = np.random.default_rng(11)
+
+    def noise(sec):
+        n = int(sec * SR)
+        return np.arange(n) / SR, rng.standard_normal((n, 2)).astype(np.float32)
+
+    def pre(ir, sec):
+        return np.concatenate([np.zeros((int(sec * SR), 2), np.float32), ir])
+
+    if name == "Hall":
+        ir = reverb_ir(1.2)
+    elif name == "Room":
+        t, x = noise(0.5)
+        ir = (x * 0.7 + _smooth(x, 2) * 0.6) * np.exp(-t * 6.9 / 0.5)[:, None]
+        # a few strong early reflections
+        for d, g in ((0.007, 0.9), (0.013, 0.7), (0.021, 0.55), (0.029, 0.4)):
+            i = int(d * SR)
+            ir[i] += g * np.array([1.0, 0.8] if i % 2 else [0.8, 1.0], np.float32) * 6
+        ir = _norm(pre(ir, 0.004))
+    elif name == "Plate":
+        t, x = noise(1.9)
+        ir = x * np.exp(-t * 6.9 / 1.9)[:, None]           # bright and dense, no darkening
+        ir = _norm(pre(ir, 0.002), 1.25)
+    elif name == "Big Hall":
+        t, x = noise(2.7)
+        sm = _smooth(x, 4)
+        mix = np.clip(t / 2.7 * 1.8, 0, 1)[:, None]
+        ir = (x * (1 - mix) + sm * mix * 1.9) * np.exp(-t * 6.9 / 2.7)[:, None]
+        ir = _norm(pre(ir, 0.035), 1.05)
+    elif name == "Spring":
+        t, x = noise(1.6)
+        ir = _smooth(x, 1) * np.exp(-t * 6.9 / 1.6)[:, None] * 0.5
+        # the "boing": a falling chirp repeating every ~38 ms, decaying
+        tc = np.arange(int(0.03 * SR)) / SR
+        chirp = np.sin(2 * np.pi * (3200 * tc - 40000 * tc * tc)) * np.exp(-tc * 90)
+        for k in range(40):
+            i = int((0.012 + k * 0.038) * SR)
+            if i + len(chirp) >= len(ir):
+                break
+            g = 0.9 * np.exp(-k * 0.11)
+            ir[i:i + len(chirp), k % 2] += chirp * g * 3
+            ir[i:i + len(chirp), 1 - k % 2] += chirp * g * 2
+        ir = _norm(ir, 1.1)
+    elif name == "Reverse":
+        t, x = noise(1.0)
+        env = (t / 1.0) ** 2.2                             # swells up, then stops dead
+        ir = _smooth(x, 1) * env[:, None]
+        ir = _norm(pre(ir, 0.01), 1.3)
+    elif name == "Gated":
+        t, x = noise(0.38)
+        env = np.where(t < 0.3, 1.0 - t * 0.5, np.clip(1 - (t - 0.3) / 0.08, 0, 1))
+        ir = (x * 0.8 + _smooth(x, 1) * 0.5) * env[:, None]
+        ir = _norm(pre(ir, 0.006), 1.2)
+    elif name == "Lo-fi Dark":
+        t, x = noise(1.7)
+        ir = _smooth(x, 14) * np.exp(-t * 6.9 / 1.7)[:, None]       # very dark
+        ir = np.round(ir * 40) / 40                                   # a little crunch
+        ir = _norm(pre(ir, 0.045), 1.0)
+    else:
+        ir = reverb_ir(1.2)
+    _REV_CACHE[name] = ir.astype(np.float32)
+    return _REV_CACHE[name]
+
+
 def _convolve(x, ir, out_len):
     nfft = 1 << int(math.ceil(math.log2(len(x) + len(ir))))
     y = np.empty((out_len, 2), np.float32)
