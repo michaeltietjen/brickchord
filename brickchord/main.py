@@ -435,8 +435,6 @@ class App(modes.ModesMixin):
         self.eng.request("lo", [self.ckey(m) for m in order])
         if hasattr(self.eng, "preload") and hasattr(self, "canvas"):
             self.eng.preload(self.loading)
-        if hasattr(self, "seq") and any(v is not None for row in self.seq["tracks"].values() for v in row):
-            self.seq_push()
 
     # ---------------- logo
     ORANGE = (255, 90, 31)
@@ -616,8 +614,6 @@ class App(modes.ModesMixin):
         self.sounding = notes
         self.hit_t, self.hit_big = time.perf_counter(), not revoice
         self.new_hit = True
-        if not revoice:
-            self.record_chord(deg, self.mods())
         self.eng.chord(notes, {m: self.ckey(m) for m in need}, revoice)
 
     def stop_chord(self):
@@ -651,7 +647,9 @@ class App(modes.ModesMixin):
                                     imode=getattr(self, "imode", "Play"))
         if hasattr(self, "rack"):
             self.cfg["rack"] = self.rack
-            self.cfg["seq"] = self.seq
+            self.cfg.pop("seq", None)
+            if getattr(self, "lp_loaded", False) and self.lp_e() is not None:
+                self.cfg["loop"] = self.lp_snapshot()
         self.cfg["patch_edits"] = self.edits
         try:
             with open(CFG_PATH, "w") as f:
@@ -1090,6 +1088,7 @@ class App(modes.ModesMixin):
                 self.menu_activate()
             elif name in ("B", "SELECT"):
                 self.menu = False
+                self.sel_combo = True          # this press closed the menu; don't reopen on release
                 self.save_cfg()
             elif name == "START":
                 self.toggle_drums()
@@ -1101,6 +1100,16 @@ class App(modes.ModesMixin):
         if self.wheel_open:
             if down and name == "B":
                 self.wheel_open = False
+            return
+        # SELECT: tap = settings, hold = looper controls from any mode
+        if name == "SELECT":
+            if down:
+                self.sel_combo = False
+            elif not getattr(self, "sel_combo", True):
+                self.menu = True
+            return
+        if "SELECT" in held and self.looper_combo(name, down):
+            self.sel_combo = True
             return
         if self.imode != "Play" and self.mode_input(name, down):
             return
@@ -1122,8 +1131,6 @@ class App(modes.ModesMixin):
                 self.cur_btn = None
         elif name in ("Y", "L1", "R1") and self.cur_btn and (self.cur_btn in held or self.latch):
             self.play_chord(self.cur_btn, revoice=True)
-        elif name == "SELECT" and down:
-            self.menu = True
         elif name == "START" and down:
             self.toggle_drums()
 
@@ -1210,7 +1217,7 @@ class App(modes.ModesMixin):
         if beat_pop:
             pygame.draw.rect(c, self.mix(PANEL, ACCENT, beat_pop), (0, 36, BASE_W, 2))
 
-        if self.imode in ("Sequencer", "Effects"):
+        if self.imode in ("Looper", "Effects"):
             self.draw_page(c)
         else:
             # ---- brick well + scope behind the chord name
@@ -1359,7 +1366,7 @@ class App(modes.ModesMixin):
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
-        hint = self.mode_hint() or "SELECT menu   START beat   L3 modes"
+        hint = self.mode_hint() or "SELECT menu (hold: looper)   START beat   L3 modes"
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
         on = self.sm("beatrow", 1.0 if self.drums_on else 0.0, 10)

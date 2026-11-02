@@ -185,6 +185,27 @@ class ProcHost:
                 p.terminate()
 
 
+def _resample(e, r):
+    """Pitch a rendered note by ratio r (attack plays once, loop wraps)."""
+    a, l = e
+
+    def rs(x, wrap):
+        n = max(2, int(len(x) / r))
+        pos = np.arange(n, dtype=np.float64) * r
+        i0 = pos.astype(np.int64)
+        fr = (pos - i0).astype(np.float32)[:, None]
+        i1 = i0 + 1
+        if wrap:
+            i0 %= len(x)
+            i1 %= len(x)
+        else:
+            i0 = np.minimum(i0, len(x) - 1)
+            i1 = np.minimum(i1, len(x) - 1)
+        return (x[i0] * (1 - fr) + x[i1] * fr).astype(np.float32)
+
+    return (rs(a, False), None if l is None else rs(l, True))
+
+
 # ---------------------------------------------------------------- fallback: threads
 class LocalHost:
     """Audio streams from a dedicated thread in this process. Notes come from a
@@ -269,25 +290,8 @@ class LocalHost:
                 best = c
         if best is None:
             return None
-        a, l = self.cache[best]
-        r = 2.0 ** ((k[0] - best[0]) / 12.0)
-
-        def rs(x, wrap):
-            n = max(2, int(len(x) / r))
-            pos = np.arange(n, dtype=np.float64) * r
-            i0 = pos.astype(np.int64)
-            fr = (pos - i0).astype(np.float32)[:, None]
-            i1 = i0 + 1
-            if wrap:
-                i0 %= len(x)
-                i1 %= len(x)
-            else:
-                i0 = np.minimum(i0, len(x) - 1)
-                i1 = np.minimum(i1, len(x) - 1)
-            return (x[i0] * (1 - fr) + x[i1] * fr).astype(np.float32)
-
         self.misses += 1
-        return (rs(a, False), None if l is None else rs(l, True))
+        return _resample(self.cache[best], 2.0 ** ((k[0] - best[0]) / 12.0))
 
     def _stop_workers(self):
         for w in self.workers:
@@ -391,6 +395,40 @@ class LocalHost:
         if missing and not busy and self.job_patch != missing[0][1]:
             self._start_workers([k for k in missing if k not in self.cache])
         return snd
+
+    def track_sounds(self, keys, standins=True):
+        """Notes for a looper track in any sound, {midi: key} -> ({midi: snd}, keys
+        still missing). Comes from memory, then the disk cache; anything else gets
+        a pitch-shifted stand-in now (if standins) and goes to the background
+        renderer when it is free. Ask again later for the real notes."""
+        snd, have, missing = {}, {}, []
+        for m, k in keys.items():
+            e = self.cache.get(k)
+            if e is None and os.path.exists(self._path(k)):
+                e = self._load(k)
+            if e is None:
+                missing.append(k)
+                continue
+            snd[m] = e
+            have[k[0]] = e
+        if missing and standins:
+            if not have:
+                k0 = sorted(missing)[len(missing) // 2]
+                e = self.synth.render_note(k0[0], json.loads(k0[1]), arrays=True)
+                try:
+                    import render_worker
+                    render_worker.save_note(np, self._path(k0), e[0], e[1])
+                except Exception as ex:
+                    _log("cache write:", ex)
+                snd[k0[0]] = have[k0[0]] = e
+                missing.remove(k0)
+            for k in missing:
+                near = min(have, key=lambda m: abs(m - k[0]))
+                snd[k[0]] = _resample(have[near], 2.0 ** ((k[0] - near) / 12.0))
+        todo = [k for k in missing if k not in self.pending]
+        if todo and not any(w.poll() is None for w in self.workers):
+            self._start_workers(todo)
+        return snd, missing
 
     def request(self, pri, keys):
         if pri == "reset":

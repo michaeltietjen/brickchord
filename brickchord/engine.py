@@ -24,14 +24,41 @@ import numpy as np
 DRUM_GAIN = {"kick": 0.9, "snare": 0.75, "hat": 0.7, "ohat": 0.7, "clap": 0.8, "rim": 0.6, "tom": 0.8, "shk": 0.7}
 REPEAT_STEPS = {"Repeat 1/4": 4, "Repeat 1/8": 2, "Repeat 1/16": 1}
 DRUM_PAN = {"hat": 0.15, "ohat": 0.15, "shk": -0.25, "rim": -0.15, "tom": 0.2}
-MAX_VOICES = 40      # hard cap on sounding voices (keeps the mixer inside its time budget)
+LOOP_TRACKS = 6
+CAP_TAGS = ("held", "strum", "arp", "harp", "drone", "bass")    # live notes the looper records
+MAX_VOICES = 56      # hard cap on sounding voices (keeps the mixer inside its time budget)
 
 STRUM_PATTERNS = {"Strum Folk": "D.DU.UDU", "Strum Pop": "D.D.UDUd", "Strum Skank": ".D.D.D.D"}
 
 
 class _V:
     __slots__ = ("a", "l", "pos", "start", "gain", "lg", "rg", "rel_at", "rel_len", "tag", "midi",
-                 "srev", "sdly", "done")
+                 "srev", "sdly", "done", "trk", "rec")
+
+
+class _Chain:
+    """One effects chain: the rack (drive, chorus, ...) and the sweepable filter.
+    The live synth has one and every looper track has its own."""
+    def __init__(self, L, nfft, flat):
+        self.rack = {}
+        self.was = set()
+        self.mod_hist = np.zeros((1200, 2), np.float32)
+        self.flt_hist = np.zeros((L - 1, 2), np.float32)
+        self.flt_user = (0.0, 0.0)
+        self.flt_t = (0.0, 0.0)
+        self.flt_cur = (0.0, 0.0)
+        self.flt_S = flat
+
+
+class _Track:
+    def __init__(self, chain):
+        self.ev = []             # [pos16, kind, ident, gain, pan, dur16, rel_s, skip]
+        self.by = {}             # step -> events starting in it
+        self.snd = {}            # midi -> (attack, loop) for kind "n"
+        self.mute = False
+        self.vol, self.pan, self.rs, self.ds = 0.85, 0.0, 0.25, 0.0
+        self.ch = chain
+        self.idle = 99
 
 
 class Engine:
@@ -67,9 +94,23 @@ class Engine:
         self.lead_vib = 0.0
         self.vib_ph = 0.0
         self.drone = None          # {"notes": [...], "snd": {...}, "restrike": bool}
-        self.seq = None            # compiled pattern from the UI
-        self.seq_on = False
-        self.seq_i = 0
+        # looper: tracks of recorded playing, each through its own effects
+        self.lp_len = 32
+        self.lp_tracks = []
+        self.lp_on = False
+        self.lp_i = 0              # absolute index of the next loop step
+        self.lp_cur = -1           # absolute index of the last processed loop step
+        self.lp_step_at = 0        # sample time of that step
+        self.lp_rec = None         # armed / recording track
+        self.lp_state = None       # None | "armed" | "rec"
+        self.lp_rec_start = 0.0
+        self.lp_rec_end = 0.0
+        self.lp_open = []          # recorded voices whose length isn't known yet
+        self.lp_lead = None        # open lead note event while recording
+        self.lp_ver = 0            # bumps on every change (UI redraw / save)
+        self.lp_undo = None        # [track, events, sounds] from before the last pass / clear
+        self._nocap = False
+        self.rack_beat = 0.0
         self.rel_len = int(0.4 * sr)
         self.sustains = True
         self.spread = 0
@@ -91,6 +132,7 @@ class Engine:
         self.tape_S = {}
         self._setup_reverb(ir)
         self._setup_filter()
+        self.lp_tracks = [_Track(self._chain()) for _ in range(LOOP_TRACKS)]
         # monitoring
         self.active = frozenset()
         self.load = 0.0
@@ -120,12 +162,12 @@ class Engine:
     def _setup_filter(self):
         L, N = self.FLT_L, self.N
         self.flt_nfft = 1 << int(math.ceil(math.log2(N + L - 1)))
-        self.flt_hist = np.zeros((L - 1, 2), np.float32)
         self.drum_hist = np.zeros(((L - 1) // 2, 2), np.float32)   # keeps dry drums in time with the filtered synth
-        self.flt_t = (0.0, 0.0)          # target (filter, resonance), each 0..1
-        self.flt_cur = None
-        self.flt_S = self._flt_design(0.0, 0.0)
-        self.flt_win = np.hanning(L).astype(np.float32)
+        self.flt_flat = self._flt_design(0.0, 0.0)
+        self.live = self._chain()
+
+    def _chain(self):
+        return _Chain(self.FLT_L, self.flt_nfft, self.flt_flat)
 
     def _flt_design(self, f, r):
         L, sr = self.FLT_L, self.sr
@@ -148,8 +190,9 @@ class Engine:
         return np.fft.rfft(h, self.flt_nfft).astype(np.complex64)
 
     def c_filter(self, f, r):
-        self.flt_user = (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)))
-        self.flt_t = (round(self.flt_user[0], 2), round(self.flt_user[1], 2))
+        ch = self.live
+        ch.flt_user = (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)))
+        ch.flt_t = (round(ch.flt_user[0], 2), round(ch.flt_user[1], 2))
 
     # ------------------------------------------------------------ effects rack
     # Stackable effects on the synth bus (drums and bass stay dry). Each is
@@ -160,18 +203,18 @@ class Engine:
                 "Auto-Pan", "Wide", "Filter LFO"]
 
     def c_rack(self, rack):
-        self.rack = {k: tuple(v) for k, v in rack.items()}
+        self.live.rack = {k: tuple(v) for k, v in rack.items()}
 
     def _lfo_phase(self, N, sr, beats):
         bps = self.bpm / 60.0 / sr
         return ((self.rack_beat + np.arange(N, dtype=np.float64) * bps) / beats) % 1.0
 
-    def _mod_delay(self, x, N, dl_l, dl_r):
-        """Read the synth bus through a delay that moves per sample (chorus,
+    def _mod_delay(self, ch, x, N, dl_l, dl_r):
+        """Read the bus through a delay that moves per sample (chorus,
         flanger, vibrato). dl_*: delay in samples per output sample."""
-        H = self.mod_hist.shape[0]
-        frame = np.concatenate([self.mod_hist, x])
-        self.mod_hist = frame[-H:]
+        H = ch.mod_hist.shape[0]
+        frame = np.concatenate([ch.mod_hist, x])
+        ch.mod_hist = frame[-H:]
         idx = np.arange(len(frame), dtype=np.float64)
         base = H + np.arange(N, dtype=np.float64)
         y = np.empty_like(x)
@@ -179,11 +222,8 @@ class Engine:
         y[:, 1] = np.interp(base - dl_r, idx, frame[:, 1])
         return y
 
-    def _rack(self, x, N, sr):
-        rack = getattr(self, "rack", None)
-        if not hasattr(self, "rack_beat"):
-            self.rack_beat = 0.0
-            self.mod_hist = np.zeros((1200, 2), np.float32)
+    def _rack(self, ch, x, N, sr):
+        rack = ch.rack
         beats_now = self.rack_beat
         if rack:
             R = self.RATES
@@ -210,17 +250,17 @@ class Engine:
                     if k == "Chorus":
                         dl = (12 + 4 * a * np.sin(2 * np.pi * ph)) * ms
                         dr = (12 + 4 * a * np.sin(2 * np.pi * (ph + 0.25))) * ms
-                        acc += self._mod_delay(x, N, dl, dr) * (0.45 + 0.25 * a)
+                        acc += self._mod_delay(ch, x, N, dl, dr) * (0.45 + 0.25 * a)
                     elif k == "Flanger":
                         dl = (0.6 + (2.4 + 3 * a) * (0.5 + 0.5 * np.sin(2 * np.pi * ph))) * ms
-                        acc += self._mod_delay(x, N, dl, dl) * (0.5 + 0.4 * a)
+                        acc += self._mod_delay(ch, x, N, dl, dl) * (0.5 + 0.4 * a)
                     else:                              # Vibrato: pitch wobble, fully wet
                         dl = (5 + 3 * a * np.sin(2 * np.pi * ph)) * ms
-                        acc += self._mod_delay(x, N, dl, dl) - x
+                        acc += self._mod_delay(ch, x, N, dl, dl) - x
                     wet_total += 1
                 x = x + acc / max(1.0, wet_total * 0.8)
             else:
-                self.mod_hist = np.concatenate([self.mod_hist, x])[-self.mod_hist.shape[0]:]
+                ch.mod_hist = np.concatenate([ch.mod_hist, x])[-ch.mod_hist.shape[0]:]
             if "Tremolo" in on:
                 a, ri = on["Tremolo"][1], on["Tremolo"][2]
                 ph = self._lfo_phase(N, sr, R[ri][1])
@@ -243,33 +283,37 @@ class Engine:
             if "Filter LFO" in on:
                 a, ri = on["Filter LFO"][1], on["Filter LFO"][2]
                 ph = (beats_now / R[ri][1]) % 1.0
-                f_user, r_user = getattr(self, "flt_user", (0.0, 0.0))
+                f_user, r_user = ch.flt_user
                 sweep = a * 0.85 * (0.5 - 0.5 * math.cos(2 * np.pi * ph))
-                self.flt_t = (round(max(f_user, sweep), 2), round(max(r_user, 0.35 * a), 2))
-            elif "Filter LFO" in getattr(self, "_rack_was", ()):
-                fu = getattr(self, "flt_user", (0.0, 0.0))
-                self.flt_t = (round(fu[0], 2), round(fu[1], 2))
-            self._rack_was = set(on)
-        self.rack_beat = beats_now + N * self.bpm / 60.0 / sr
+                ch.flt_t = (round(max(f_user, sweep), 2), round(max(r_user, 0.35 * a), 2))
+            elif "Filter LFO" in ch.was:
+                fu = ch.flt_user
+                ch.flt_t = (round(fu[0], 2), round(fu[1], 2))
+            ch.was = set(on)
+        elif ch.was:
+            if "Filter LFO" in ch.was:
+                ch.flt_t = (round(ch.flt_user[0], 2), round(ch.flt_user[1], 2))
+            ch.was = set()
         return x.astype(np.float32)
 
-    def _filter(self, x):
+    def _filter(self, ch, x):
         L, N, nf = self.FLT_L, self.N, self.flt_nfft
-        frame = np.concatenate([self.flt_hist, x])
-        self.flt_hist = frame[-(L - 1):]
+        frame = np.concatenate([ch.flt_hist, x])
+        ch.flt_hist = frame[-(L - 1):]
+        flat = (0.0, 0.0)
+        if ch.flt_t == flat and ch.flt_cur == flat:
+            # open filter = a plain 255-sample delay (keeps every bus in time), no FFT
+            h = (L - 1) // 2
+            return frame[h:h + N].astype(np.float32)
         X = np.fft.rfft(frame, nf, axis=0)
-        y = np.fft.irfft(X * self.flt_S[:, None], nf, axis=0)[L - 1:L - 1 + N]
-        if self.flt_t != self.flt_cur:
-            first = self.flt_cur is None
-            self.flt_cur = self.flt_t
-            S_new = self._flt_design(*self.flt_t)
+        y = np.fft.irfft(X * ch.flt_S[:, None], nf, axis=0)[L - 1:L - 1 + N]
+        if ch.flt_t != ch.flt_cur:
+            ch.flt_cur = ch.flt_t
+            S_new = self.flt_flat if ch.flt_t == flat else self._flt_design(*ch.flt_t)
             y_new = np.fft.irfft(X * S_new[:, None], nf, axis=0)[L - 1:L - 1 + N]
-            self.flt_S = S_new
-            if first:
-                y = y_new
-            else:
-                ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
-                y = y * (1 - ramp) + y_new * ramp
+            ch.flt_S = S_new
+            ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
+            y = y * (1 - ramp) + y_new * ramp
         return y.astype(np.float32)
 
     def c_reverb(self, ir):
@@ -302,7 +346,10 @@ class Engine:
         v.rel_len = int(rel if rel is not None else self.rel_len)
         v.rel_at = int(start + gate) if gate else None
         v.tag, v.midi, v.srev, v.sdly, v.done = tag, midi, srev, sdly, False
+        v.trk = v.rec = None
         self.voices.append(v)
+        if self.lp_state and not self._nocap and tag in CAP_TAGS and midi is not None:
+            self._cap_voice(v, "b" if tag == "bass" else "n", midi)
         if len(self.voices) > MAX_VOICES:
             self._steal(start)
         return v
@@ -321,6 +368,8 @@ class Engine:
         cands.sort(key=lambda v: (v.rel_at is None or v.rel_at > at, v.tag == "held", v.start))
         for v in cands[:excess]:
             v.rel_at, v.rel_len = int(at), fast
+            if v.rec is not None:
+                self._rec_close(v, at)
 
     def _release(self, tags, at, length=None):
         for v in self.voices:
@@ -328,6 +377,8 @@ class Engine:
                 v.rel_at = int(at)
                 if length is not None:
                     v.rel_len = int(length)
+                if v.rec is not None:
+                    self._rec_close(v, at)
         # cancel not-yet-started events for those tags
         self.events = [e for e in self.events if not (e[2] == self._ev_note and e[3][2] in tags)]
         heapq.heapify(self.events)
@@ -431,8 +482,10 @@ class Engine:
     # ------------------------------------------------------------ drum pads
     def c_hit(self, part, gain=1.0):
         if part in self.kit:
-            self._voice(self.kit[part], DRUM_GAIN.get(part, 0.75) * gain, DRUM_PAN.get(part, 0.0), self.t, "drum",
-                        srev=0, sdly=0, rel=int(0.02 * self.sr))
+            g, pan = DRUM_GAIN.get(part, 0.75) * gain, DRUM_PAN.get(part, 0.0)
+            self._voice(self.kit[part], g, pan, self.t, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
+            if self.lp_state:
+                self._cap(self.t, "d", part, g, pan, None, 0.02)
 
     # ------------------------------------------------------------ drone layer
     def c_drone(self, notes, snd):
@@ -462,6 +515,9 @@ class Engine:
         pass
 
     def c_lead_on(self, midi, snd, glide=0.0):
+        if self.lp_state and not self._nocap:
+            self._lead_cap_end(self.t)
+            self.lp_lead = self._cap(self.t, "n", midi, 0.95, 0.0, None, 0.3, snd)
         cur = self.leads[-1] if self.leads and not self.leads[-1].rel else None
         if cur is not None and glide > 0.005:
             cur.target, cur.glide = midi, glide        # legato slide to the new note
@@ -483,6 +539,7 @@ class Engine:
         self.leads = self.leads[-3:]
 
     def c_lead_off(self):
+        self._lead_cap_end(self.t)
         for v in self.leads:
             if not v.rel:
                 v.rel, v.rel_n = True, max(64, int(min(self.rel_len, 0.6 * self.sr)))
@@ -501,7 +558,7 @@ class Engine:
             out[mm] = l[(idx[mm] - na) % len(l)]
         return out
 
-    def _lead_render(self, mix, rbus, dbus, N, sr):
+    def _lead_render(self, mix, N, sr):
         i = np.arange(N, dtype=np.float64)
         vib = 1.0
         if self.lead_vib > 0.01:
@@ -531,8 +588,6 @@ class Engine:
                 seg *= (env * env)[:, None]
             seg *= 0.95
             mix += seg
-            rbus += seg
-            dbus += seg
             if v.l is None and v.pos >= len(v.a):
                 continue
             if v.rel and v.env <= 0.0:
@@ -540,60 +595,244 @@ class Engine:
             keep.append(v)
         self.leads = keep
 
-    # ------------------------------------------------------------ sequencer
-    def c_seq(self, compiled=None, running=None, restart=False):
-        if compiled is not None:
-            self.seq = compiled or None
-        if running is not None:
-            if running and not self.seq_on:
-                restart = True
-            self.seq_on = bool(running)
-            if not running:
-                self._release(("seqc", "seql", "seqb"), self.t, int(0.08 * self.sr))
-        if restart:
-            self.seq_i = 0
+    # ------------------------------------------------------------ looper
+    # Tracks record what you play (the notes the engine actually sounds, so
+    # strums, arps and repeats come back exactly), not audio. Playback goes
+    # through each track's own effects chain, so you can change a track's
+    # effects, level, pan and sound after recording.
+    def _step_len(self):
+        return 60.0 / self.bpm / 4 * self.sr
 
-    def _seq_step(self, at):
-        sq = self.seq
-        if not (sq and self.seq_on):
+    def _lp_abspos(self, T):
+        return self.lp_cur + (T - self.lp_step_at) / self._step_len()
+
+    def _lp_has(self):
+        return any(tr.ev for tr in self.lp_tracks)
+
+    def _lp_begin(self, T):
+        """First note after arming: start the loop if it isn't running (on the
+        bar line when the beat is on), then record exactly one loop's length."""
+        step = self._step_len()
+        if not self.lp_on:
+            self.lp_step_at = int(self.next16 - step)
+            last = self.step16 - 1                 # the clock step that just went by
+            if self.drums_on:
+                self.lp_cur = last % 16
+            else:
+                self.lp_cur = -1 if T >= self.next16 - 0.5 else 0
+            self.lp_i = self.lp_cur + 1
+            self.lp_on = True
+        tr = self.lp_tracks[self.lp_rec]
+        self.lp_undo = [self.lp_rec, list(tr.ev), dict(tr.snd)]
+        self.lp_rec_start = self._lp_abspos(T)
+        self.lp_rec_end = self.lp_rec_start + self.lp_len
+        self.lp_state = "rec"
+        self.lp_ver += 1
+
+    def _cap(self, T, kind, ident, gain, pan, dur, rel, snd=None):
+        k = self.lp_rec
+        if k is None or not self.lp_state:
+            return None
+        if self.lp_state == "armed":
+            self._lp_begin(T)
+        ap = self._lp_abspos(T)
+        if ap >= self.lp_rec_end or ap < self.lp_rec_start - 0.5:
+            return None
+        L = self.lp_len
+        pos = ap % L
+        tr = self.lp_tracks[k]
+        skip = int(math.floor(ap)) > self.lp_cur     # its step hasn't played yet this pass
+        ev = [round(pos, 4), kind, ident, round(float(gain), 3), round(float(pan), 3),
+              None if dur is None else min(float(L), dur), round(float(rel), 3), skip]
+        tr.ev.append(ev)
+        tr.by.setdefault(int(pos) % L, []).append(ev)
+        if kind == "n" and snd is not None and ident not in tr.snd:
+            tr.snd[ident] = snd
+        self.lp_ver += 1
+        return ev
+
+    def _cap_voice(self, v, kind, midi):
+        step = self._step_len()
+        dur = (v.rel_at - v.start) / step if v.rel_at is not None else None
+        ev = self._cap(v.start, kind, midi, v.gain, v.rg - v.lg, dur, v.rel_len / self.sr,
+                       (v.a, v.l) if kind == "n" else None)
+        if ev is not None:
+            v.rec = ev
+            if dur is None:
+                self.lp_open.append(v)
+
+    def _rec_close(self, v, at):
+        ev, v.rec = v.rec, None
+        d = max(0.05, (at - v.start) / self._step_len())
+        if ev[5] is None or d < ev[5]:
+            ev[5] = round(min(float(self.lp_len), d), 3)
+
+    def _lead_cap_end(self, at):
+        ev, self.lp_lead = self.lp_lead, None
+        if ev is not None and ev[5] is None:
+            st = ev[0]
+            now = self._lp_abspos(at) % self.lp_len
+            ev[5] = round(max(0.1, (now - st) % self.lp_len), 3)
+
+    def _lp_rec_stop(self, at):
+        for v in self.lp_open:
+            if v.rec is not None and v.l is not None:
+                self._rec_close(v, at)
+            v.rec = None
+        self.lp_open = []
+        self._lead_cap_end(at)
+        self.lp_rec = None
+        self.lp_state = None
+        self.lp_ver += 1
+
+    def c_lp(self, op, *a):
+        if op == "len":
+            if not self._lp_has():
+                self.lp_len = int(a[0])
+        elif op == "arm":
+            k = a[0]
+            if self.lp_state:
+                self._lp_rec_stop(self.t)
+            if k is not None:
+                self.lp_rec, self.lp_state = int(k), "armed"
+                if self._lp_has() and not self.lp_on:
+                    self.c_lp("play", True)
+            self.lp_ver += 1
+        elif op == "clear":
+            k = a[0]
+            if self.lp_rec == k and self.lp_state:
+                self._lp_rec_stop(self.t)
+            tr = self.lp_tracks[k]
+            if tr.ev:
+                self.lp_undo = [k, list(tr.ev), dict(tr.snd)]
+            tr.ev, tr.by, tr.snd = [], {}, {}
+            self._release_track(k)
+            if not self._lp_has() and not self.lp_state:
+                self.lp_on = False
+            self.lp_ver += 1
+        elif op == "play":
+            on = bool(a[0])
+            if on and not self.lp_on and (self._lp_has() or self.lp_state):
+                step = self._step_len()
+                self.lp_step_at = int(self.next16 - step)
+                # start on the next bar line when the beat is on, else the next step
+                self.lp_cur = -((16 - self.step16 % 16) % 16) - 1 if self.drums_on else -1
+                self.lp_i = self.lp_cur + 1
+                self.lp_on = True
+            elif not on and self.lp_on:
+                if self.lp_state:
+                    self._lp_rec_stop(self.t)
+                self.lp_on = False
+                for k in range(len(self.lp_tracks)):
+                    self._release_track(k)
+            self.lp_ver += 1
+        elif op == "mix":
+            k, d = a[0], a[1]
+            tr = self.lp_tracks[k]
+            for name in ("vol", "pan", "rs", "ds", "mute"):
+                if name in d:
+                    setattr(tr, name, d[name])
+            if d.get("mute"):
+                self._release_track(k, 0.05)
+        elif op == "fx":
+            k, rack, flt = a[0], a[1], a[2]
+            ch = self.lp_tracks[k].ch
+            ch.rack = {n: tuple(v) for n, v in rack.items()}
+            ch.flt_user = (max(0.0, min(1.0, flt[0])), max(0.0, min(1.0, flt[1])))
+            if "Filter LFO" not in ch.was:
+                ch.flt_t = (round(ch.flt_user[0], 2), round(ch.flt_user[1], 2))
+        elif op == "snd":
+            k, snd, replace = a[0], a[1], (a[2] if len(a) > 2 else False)
+            tr = self.lp_tracks[k]
+            if replace:
+                tr.snd = dict(snd)
+                self._release_track(k, 0.08)
+            else:
+                tr.snd.update(snd)
+        elif op == "undo":
+            if self.lp_state:
+                self._lp_rec_stop(self.t)
+            if self.lp_undo:
+                k, ev, snd = self.lp_undo
+                tr = self.lp_tracks[k]
+                self.lp_undo = [k, list(tr.ev), dict(tr.snd)]      # undo again = redo
+                tr.ev, tr.snd = ev, snd
+                self._lp_index(tr)
+                self._release_track(k)
+                if self._lp_has() and not self.lp_on:
+                    self.c_lp("play", True)
+                self.lp_ver += 1
+        elif op == "load":
+            k, evs = a[0], a[1]
+            tr = self.lp_tracks[k]
+            tr.ev, tr.by = [], {}
+            L = self.lp_len
+            for e in evs:
+                ev = list(e[:7]) + [False]
+                ev[0] = float(ev[0]) % L
+                tr.ev.append(ev)
+                tr.by.setdefault(int(ev[0]) % L, []).append(ev)
+            self.lp_ver += 1
+
+    def _lp_index(self, tr):
+        L = self.lp_len
+        tr.by = {}
+        for ev in tr.ev:
+            ev[7] = False
+            tr.by.setdefault(int(ev[0]) % L, []).append(ev)
+
+    def _release_track(self, k, fade=0.03):
+        at = self.t
+        for v in self.voices:
+            if v.trk == k and (v.rel_at is None or v.rel_at > at):
+                v.rel_at, v.rel_len = at, int(fade * self.sr)
+
+    def _lp_step(self, at):
+        if not self.lp_on:
             return
-        n = sq["len"]
-        i = self.seq_i % n
-        self.seq_i += 1
-        ev = sq["steps"][i]
-        step = 60.0 / self.bpm / 4 * self.sr
-        snd = sq["snd"]
-        for part, g in ev.get("drums", ()):
-            if part in self.kit:
-                self._voice(self.kit[part], DRUM_GAIN.get(part, 0.75) * g, DRUM_PAN.get(part, 0.0), at, "drum",
-                            srev=0, sdly=0, rel=int(0.02 * self.sr))
-        c = ev.get("chord")
-        if c:
-            notes, dur = c
-            gate = int(step * dur * 0.95)
-            self._release(("seqc",), at, int(0.03 * self.sr))
-            first = 0 if self.bass_mode in ("Patch", "Sub + Patch") else 1
-            for k, m in enumerate(notes[first:]):
-                e = snd.get(m)
-                if e is not None:
-                    pan = (k / max(1, len(notes) - 1) - 0.5) * 0.6
-                    self._voice(e, 0.85, pan, at, "seqc", m, gate, int(min(self.rel_len, 0.5 * self.sr)))
-            if self.bass_mode not in ("Patch", "Off"):
-                root = notes[0] - 12
-                while root < 28:
-                    root += 12
-                b = self.bass_bank.get(root)
-                if b is not None:
-                    self._release(("seqb",), at, int(0.02 * self.sr))
-                    self._voice(b, 0.75 * self.bass_gain, 0.0, at, "seqb", root, gate, int(0.05 * self.sr),
-                                srev=0, sdly=0)
-        ld = ev.get("lead")
-        if ld:
-            m, dur = ld
-            e = snd.get(m)
-            if e is not None:
-                self._release(("seql",), at, int(0.02 * self.sr))
-                self._voice(e, 0.9, 0.0, at, "seql", m, int(step * dur * 0.9), int(min(self.rel_len, 0.3 * self.sr)))
+        a = self.lp_i
+        self.lp_i += 1
+        self.lp_cur = a
+        self.lp_step_at = at
+        step = self._step_len()
+        if self.lp_state == "rec" and a >= self.lp_rec_end:
+            self._lp_rec_stop(int(at - (a - self.lp_rec_end) * step))
+        if a < 0:
+            return
+        L = self.lp_len
+        li = a % L
+        self._nocap = True
+        try:
+            for k, tr in enumerate(self.lp_tracks):
+                evs = tr.by.get(li)
+                if not evs:
+                    continue
+                for ev in evs:
+                    if ev[7]:
+                        ev[7] = False          # recorded just now and still sounding live
+                        continue
+                    if not tr.mute:
+                        self._lp_play(k, tr, ev, at + (ev[0] - li) * step, step)
+        finally:
+            self._nocap = False
+
+    def _lp_play(self, k, tr, ev, start, step):
+        pos, kind, ident, gain, pan, dur, rel = ev[:7]
+        if kind == "n":
+            snd = tr.snd.get(ident)
+        elif kind == "b":
+            snd = self.bass_bank.get(ident)
+        else:
+            snd = self.kit.get(ident)
+        if snd is None:
+            return
+        if dur is None:
+            gate = int(self.lp_len * step) if snd[1] is not None else None
+        else:
+            gate = max(64, int(dur * step))
+        v = self._voice(snd, gain, max(-1.0, min(1.0, pan)), int(start), "loop", ident if kind != "d" else None,
+                        gate, int(rel * self.sr), srev=0, sdly=0)
+        v.trk = k
 
     def c_params(self, bpm=None, rel=None, sustains=None, spread=None, mode=None, quantize=None):
         if quantize is not None:
@@ -832,7 +1071,7 @@ class Engine:
                 gain = DRUM_GAIN.get(part, 0.75) * (0.4 if ch == "g" else 1.0)
                 pan = DRUM_PAN.get(part, 0.0)
                 self._voice(self.kit[part], gain, pan, when, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
-        self._seq_step(at)
+        self._lp_step(at)
         if self.drone and self.drone.get("restrike") and s % 8 == 0:
             self._drone_strike(at)
         if not self.chord:
@@ -877,8 +1116,7 @@ class Engine:
 
         mix = np.zeros((N, 2), np.float32)
         dmix = np.zeros((N, 2), np.float32)      # drums: dry, no effects
-        rbus = np.zeros((N, 2), np.float32)
-        dbus = np.zeros((N, 2), np.float32)
+        tb = {}                                  # looper track buses
         T = np.arange(t, t + N)
         live = []
         for v in self.voices:
@@ -901,21 +1139,22 @@ class Engine:
             seg *= g[:, None]
             seg[:, 0] *= v.lg
             seg[:, 1] *= v.rg
-            if v.tag in ("drum", "bass", "seqb"):
+            if v.done and v.rec is not None:
+                v.rec = None
+            if v.trk is not None:
+                b = tb.get(v.trk)
+                if b is None:
+                    b = tb[v.trk] = np.zeros((N, 2), np.float32)
+                b[o:] += seg
+            elif v.tag in ("drum", "bass"):
                 dmix[o:] += seg
-                if not v.done:
-                    live.append(v)
-                continue
-            mix[o:] += seg
-            if v.srev:
-                rbus[o:] += seg * v.srev
-            if v.sdly:
-                dbus[o:] += seg * v.sdly
+            else:
+                mix[o:] += seg
             if not v.done:
                 live.append(v)
         self.voices = live
         if self.leads:
-            self._lead_render(mix, rbus, dbus, N, sr)
+            self._lead_render(mix, N, sr)
 
         # smoothed fx amounts (linear ramp across the block = no zipper noise)
         ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
@@ -924,15 +1163,38 @@ class Engine:
         mv = self.master + (self.master_t - self.master) * ramp
         self.rev, self.dly, self.master = self.rev_t, self.dly_t, self.master_t
 
+        # live synth: its rack, then its filter, then sends to the shared delay/reverb
+        x = self._filter(self.live, self._rack(self.live, mix, N, sr))
+        out = x.copy()
+        rsend = x * rv
+        dsend = x * dv
+        # looper tracks: each through its own rack and filter, then level, pan, sends
+        for k, tr in enumerate(self.lp_tracks):
+            b = tb.get(k)
+            if b is None:
+                if tr.idle > 2:
+                    continue
+                tr.idle += 1
+                b = np.zeros((N, 2), np.float32)
+            else:
+                tr.idle = 0
+            y = self._filter(tr.ch, self._rack(tr.ch, b, N, sr))
+            p = tr.pan
+            y[:, 0] *= tr.vol * min(1.0, 1.0 - p)
+            y[:, 1] *= tr.vol * min(1.0, 1.0 + p)
+            out += y
+            if tr.rs:
+                rsend += y * tr.rs
+            if tr.ds:
+                dsend += y * tr.ds
+        self.rack_beat += N * self.bpm / 60.0 / sr
         # delay (type chosen in Settings), tempo synced except Slapback
-        y = self._delay(dbus * dv, N, sr)
-        mix += y
-        rbus = rbus * rv + y * 0.35
-        mix += self._reverb(rbus) * 1.1
+        y = self._delay(dsend, N, sr)
+        out += y
+        out += self._reverb(rsend + y * 0.35) * 1.1
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]
-        mix = self._rack(mix, N, sr)
-        out = np.tanh((self._filter(mix) + frame[:N]) * mv)
+        out = np.tanh((out + frame[:N]) * mv)
 
         self.t += N
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)

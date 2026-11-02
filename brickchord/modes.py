@@ -4,10 +4,11 @@
 #   Lead       single-note melodies: buttons = scale notes, glide, stick bend/vibrato
 #   Drone      sustained root/fifth/octave layer that keeps going under the others
 #   Drums      buttons are drum pads
-#   Sequencer  8 tracks x 16/32 steps, step edit or live record from the other modes
+#   Looper     6 tracks that record what you play, each with its own effects
 #   Effects    stackable effects rack with randomize
 #
 # Click the left stick (L3) for the mode wheel; tilt to pick, let go to choose.
+import json
 import math
 import random
 import sys
@@ -18,7 +19,7 @@ import pygame
 import engine
 import synth
 
-IMODES = ["Play", "Lead", "Drone", "Drums", "Sequencer", "Effects"]   # clockwise from the top
+IMODES = ["Play", "Lead", "Drone", "Drums", "Looper", "Effects"]   # clockwise from the top
 FX_ROWS = engine.Engine.FX_ORDER + ["Glide"]
 RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
@@ -28,17 +29,26 @@ DRUM_PADS = {"LEFT": "kick", "UP": "snare", "RIGHT": "hat", "DOWN": "ohat", "X":
              "B": "rim", "Y": "shk"}
 PAD_LABEL = {"kick": "KICK", "snare": "SNARE", "hat": "HAT", "ohat": "OPEN", "clap": "CLAP", "tom": "TOM",
              "rim": "RIM", "shk": "SHAKE"}
-SEQ_TRACKS = ["Chords", "Lead", "Kick", "Snare", "Hat", "Open Hat", "Clap", "Perc"]
-SEQ_DRUM = {"Kick": "kick", "Snare": "snare", "Hat": "hat", "Open Hat": "ohat", "Clap": "clap", "Perc": "rim"}
-SEQ_MAX = 32
+FX_ORDER = engine.Engine.FX_ORDER
+LOOP_N = engine.LOOP_TRACKS
+TFX_ROWS = ["Sound", "Level", "Pan", "Reverb", "Delay", "Filter", "Resonance"] + FX_ORDER
+TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), (120, 200, 110), (255, 120, 160)]
+DRUM_ROW = {"kick": 0.85, "snare": 0.6, "clap": 0.55, "tom": 0.7, "rim": 0.45, "hat": 0.25, "ohat": 0.2, "shk": 0.35}
 
 
 def M():
     return sys.modules["main"]
 
 
-def new_pattern():
-    return {"len": 16, "tracks": {t: [None] * SEQ_MAX for t in SEQ_TRACKS}}
+def e_len(app):
+    e = app.lp_e()
+    return e.lp_len if e else app.lp_bars * 16
+
+
+def new_track():
+    return {"name": None, "patch": None, "pj": None, "vol": 0.85, "pan": 0.0, "rs": 0.25, "ds": 0.0,
+            "mute": False, "rack": {k: [False, FX_DEFAULTS[k][0], FX_DEFAULTS[k][1]] for k in FX_ORDER},
+            "flt": [0.0, 0.0]}
 
 
 class ModesMixin:
@@ -46,7 +56,7 @@ class ModesMixin:
     def modes_init(self):
         s = self.cfg.get("settings", {})
         self.imode = s.get("imode", "Play") if s.get("imode") in IMODES else "Play"
-        if self.imode == "Effects":
+        if self.imode in ("Effects", "Looper"):
             self.imode = "Play"
         self.prev_imode = "Play"
         self.wheel_open = False
@@ -66,15 +76,37 @@ class ModesMixin:
             amt, rate = FX_DEFAULTS[k]
             v = rack.get(k)
             self.rack[k] = [bool(v[0]), float(v[1]), int(v[2])] if v and len(v) == 3 else [False, amt, rate]
-        sq = self.cfg.get("seq")
-        self.seq = sq if (isinstance(sq, dict) and "tracks" in sq) else new_pattern()
-        for t in SEQ_TRACKS:
-            row = self.seq["tracks"].setdefault(t, [None] * SEQ_MAX)
-            row.extend([None] * (SEQ_MAX - len(row)))
-        self.seq_on = False
-        self.seq_rec = False
-        self.seq_row = 0
-        self.seq_col = 0
+        lp = self.cfg.get("loop") or {}
+        self.lp_bars = lp.get("bars", 2) if lp.get("bars") in (1, 2, 4, 8) else 2
+        saved = lp.get("tracks") or []
+        self.lp_meta = []
+        for k in range(LOOP_N):
+            t = new_track()
+            if k < len(saved) and isinstance(saved[k], dict):
+                for f in t:
+                    if f in saved[k] and f != "rack":
+                        t[f] = saved[k][f]
+                for n, v in (saved[k].get("rack") or {}).items():
+                    if n in t["rack"] and len(v) == 3:
+                        t["rack"][n] = [bool(v[0]), float(v[1]), int(v[2])]
+            self.lp_meta.append(t)
+        self.lp_sel = 0
+        self.lp_page = "tracks"
+        self.tfx_i = 0
+        self.lp_loaded = False
+        self.lp_pending = {}
+        self.lp_retry_t = 0.0
+        self.lp_resolve_after = None
+        self.lp_last_state = None
+        self.lp_watch = None
+        self.lp_arm_pj = None
+        self.lp_was_empty = False
+        self.lp_return = "Play"
+        self.lp_clear_ask = None
+        self.lp_clear_t = 0.0
+        self.lp_dirty = False
+        self.lp_save_t = 0.0
+        self.lp_lane_cache = {}
 
     # ------------------------------------------------------------ mode wheel
     def wheel_toggle(self):
@@ -110,6 +142,9 @@ class ModesMixin:
             self.lead_all_off()
         if new == "Effects":
             self.prev_imode = self.imode
+        if new == "Looper" and self.imode != "Looper":
+            self.lp_return = self.imode
+            self.lp_page = "tracks"
         self.imode = new
         self.stick_mod = None
         self.flash(new.upper())
@@ -135,8 +170,8 @@ class ModesMixin:
                     self.pad(name)
                 return True
             return name in ("L1", "R1")
-        if im == "Sequencer":
-            return self.seq_input(name, down)
+        if im == "Looper":
+            return self.lp_input(name, down)
         if im == "Effects":
             return self.fx_input(name, down)
         return False
@@ -181,8 +216,6 @@ class ModesMixin:
         self.lead_note = m
         self.sounding = [m] + self.drone_notes
         self.hit_t, self.hit_big = time.perf_counter(), True
-        h = self.inp.held
-        self.seq_record("Lead", [deg, (1 if "Y" in h else 0) - (1 if "L1" in h else 0), 1 if "R1" in h else 0])
 
     def lead_release(self, btn):
         was_top = bool(self.lead_stack) and self.lead_stack[-1][0] == btn
@@ -238,161 +271,343 @@ class ModesMixin:
         self.pad_hit[btn] = time.perf_counter()
         self.last_pad = part
         self.hit_t, self.hit_big = time.perf_counter(), False
-        lane = next((t for t, p in SEQ_DRUM.items() if p == part), "Perc")
-        self.seq_record(lane, [part, min(1.0, gain)])
 
-    # ------------------------------------------------------------ sequencer
-    def seq_now_step(self):
-        e = getattr(self.eng, "eng", None)
-        n = self.seq["len"]
-        if not (e and self.seq_on):
-            return None
-        idx = (e.seq_i - 1) % n
-        step = 60.0 / e.bpm / 4 * e.sr
-        frac = (e.t - (e.next16 - step)) / step
-        if frac > 0.5:
-            idx = (idx + 1) % n
-        return idx
+    # ------------------------------------------------------------ looper
+    def lp_e(self):
+        return getattr(self.eng, "eng", None)
 
-    def seq_record(self, track, value):
-        if not (self.seq_rec and self.seq_on):
+    def patch_json(self, i):
+        p = synth.edited_patch(synth.PATCHES[i], self.edits.get(str(i)))
+        p["cutoff"] = p["cutoff"] * (2 ** self.tone)
+        p["res"] = max(0.5, p["res"] + self.res)
+        return json.dumps(p, sort_keys=True)
+
+    def lp_push_track(self, k):
+        m = self.lp_meta[k]
+        self.eng.post("lp", "mix", k, {"vol": m["vol"], "pan": m["pan"], "rs": m["rs"], "ds": m["ds"],
+                                       "mute": m["mute"]})
+        self.eng.post("lp", "fx", k, {n: tuple(v) for n, v in m["rack"].items()}, tuple(m["flt"]))
+
+    def lp_load(self):
+        """Hand the saved tracks to the engine once it is running."""
+        self.lp_loaded = True
+        e = self.lp_e()
+        if e is None:
             return
-        i = self.seq_now_step()
-        if i is None:
+        self.eng.post("lp", "len", self.lp_bars * 16)
+        saved = (self.cfg.get("loop") or {}).get("tracks") or []
+        bass = set()
+        for k in range(LOOP_N):
+            self.lp_push_track(k)
+            evs = saved[k].get("ev") if k < len(saved) else None
+            if evs:
+                self.eng.post("lp", "load", k, evs)
+                bass.update(ev[2] for ev in evs if ev[1] == "b")
+        if bass:
+            self.ensure_bass(sorted(bass))
+        self.lp_resolve_after = time.perf_counter() + 0.3     # once the engine has the events
+
+    def lp_resolve(self, k, replace=False):
+        e = self.lp_e()
+        pj = self.lp_meta[k]["pj"]
+        if e is None or not pj or not hasattr(self.eng, "track_sounds"):
             return
-        self.seq["tracks"][track][i] = value
-        self.seq_push()
-
-    def record_chord(self, deg, mods):
-        self.seq_record("Chords", [deg, sorted(k for k, v in mods.items() if v)])
-
-    def seq_push(self):
-        """Turn the pattern into timed notes with sounds and hand it to the engine."""
-        if not hasattr(self, "seq") or not hasattr(self.eng, "resolve"):
+        tr = e.lp_tracks[k]
+        midis = sorted({ev[2] for ev in list(tr.ev) if ev[1] == "n"})
+        if not replace:
+            midis = [m for m in midis if m not in tr.snd]
+        if not midis:
             return
-        mm = M()
-        n = self.seq["len"]
-        tr = self.seq["tracks"]
-        sc = mm.SCALES[self.scale]
-        steps = [{"drums": []} for _ in range(n)]
-        need = set()
-        roots = set()
-
-        def dur_until(row, i, cap):
-            for d in range(1, n + 1):
-                if row[(i + d) % n] is not None or d >= cap:
-                    return d
-            return n
-
-        prev = []
-        crow = tr["Chords"][:n]
-        for i, v in enumerate(crow):
-            if v is None:
-                continue
-            deg, ml = v
-            pc, iv, _ = mm.build_chord(self.key, self.scale, deg, {k: True for k in ml})
-            notes, prev = mm.voice(pc, iv, prev, self.octave)
-            steps[i]["chord"] = (notes, dur_until(crow, i, n))
-            need.update(notes)
-            r = notes[0] - 12
-            while r < 28:
-                r += 12
-            roots.add(r)
-        lrow = tr["Lead"][:n]
-        for i, v in enumerate(lrow):
-            if v is None:
-                continue
-            deg, oc, sh = v
-            m = 60 + self.key + sc[deg] + 12 * (self.octave + oc) + sh - (12 if self.key >= 7 else 0)
-            steps[i]["lead"] = (m, dur_until(lrow, i, 4))
-            need.add(m)
-        for t, part in SEQ_DRUM.items():
-            for i, v in enumerate(tr[t][:n]):
-                if v is not None:
-                    steps[i]["drums"].append((v[0], v[1]))
-        if roots and synth.BASS_MODES[self.bass] not in ("Patch", "Off"):
-            self.ensure_bass(sorted(roots))
-        self.eng.post("seq", {"len": n, "steps": steps, "snd": self._snd(sorted(need))}, None, False)
-
-    def seq_toggle(self):
-        self.seq_on = not self.seq_on
-        if self.seq_on:
-            self.seq_push()
-        self.eng.post("seq", None, self.seq_on, True)
-        self.flash("SEQUENCER " + ("PLAY" if self.seq_on else "STOP"))
-
-    def seq_input(self, name, down):
-        if not down:
-            return name not in ("SELECT", "R3")
-        n = self.seq["len"]
-        tname = SEQ_TRACKS[self.seq_row]
-        row = self.seq["tracks"][tname]
-        c = self.seq_col
-        changed = False
-        if name == "UP":
-            self.seq_row = (self.seq_row - 1) % len(SEQ_TRACKS)
-        elif name == "DOWN":
-            self.seq_row = (self.seq_row + 1) % len(SEQ_TRACKS)
-        elif name == "LEFT":
-            self.seq_col = (c - 1) % n
-        elif name == "RIGHT":
-            self.seq_col = (c + 1) % n
-        elif name == "A":
-            if tname in SEQ_DRUM:
-                row[c] = None if row[c] else [SEQ_DRUM[tname], 1.0]
-            elif row[c] is None:
-                last = self.anim.get("_seq_last_" + tname, 0)
-                row[c] = [last, []] if tname == "Chords" else [last, 0, 0]
-            else:
-                row[c][0] = (row[c][0] + 1) % 7
-            if row[c] and tname not in SEQ_DRUM:
-                self.anim["_seq_last_" + tname] = row[c][0]
-                self.seq_preview(tname, row[c])
-            changed = True
-            self.seq_col = (c + 1) % n if tname in SEQ_DRUM else c
-        elif name == "B":
-            row[c] = None
-            changed = True
-        elif name in ("L1", "R1") and row[c] is not None:
-            d = -1 if name == "L1" else 1
-            if tname in SEQ_DRUM:
-                levels = [0.45, 0.75, 1.0]
-                k = min(range(3), key=lambda j: abs(levels[j] - row[c][1]))
-                row[c][1] = levels[(k + d) % 3]
-            elif tname == "Lead" and "Y" in self.inp.held:
-                row[c][1] = max(-1, min(1, row[c][1] + d))          # Y + L1/R1 = octave
-            else:
-                row[c][0] = (row[c][0] + d) % 7
-                self.seq_preview(tname, row[c])
-            changed = True
-        elif name == "X":
-            self.seq_rec = not self.seq_rec
-            self.flash("RECORD " + ("ON: play in Play, Lead or Drums" if self.seq_rec else "OFF"))
-        elif name == "Y":
-            if not any(k in self.inp.held for k in ("L1", "R1")):
-                self.seq["len"] = {8: 16, 16: 32, 32: 8}[n]
-                self.seq_col %= self.seq["len"]
-                changed = True
-        elif name == "START":
-            self.seq_toggle()
+        snd, missing = self.eng.track_sounds({m: (m, pj) for m in midis})
+        self.eng.post("lp", "snd", k, snd, replace)
+        if missing:
+            self.lp_pending[k] = {kk[0]: kk for kk in missing}
         else:
+            self.lp_pending.pop(k, None)
+
+    def looper_combo(self, name, down):
+        """SELECT held + a button: run the looper without leaving your instrument."""
+        if name in ("START", "L3", "R3"):
             return False
-        if changed:
-            self.seq_push()
+        if not down or name not in ("A", "B", "X", "Y", "UP", "DOWN"):
+            return True                      # swallow the rest while SELECT is held
+        e = self.lp_e()
+        if e is None:
+            self.flash("LOOPER NEEDS THE LOCAL AUDIO ENGINE")
+            return True
+        k = self.lp_sel
+        if name == "A":
+            self.lp_arm(k, stay=True)
+        elif name == "B":
+            if e.lp_undo:
+                self.eng.post("lp", "undo")
+                self.lp_dirty = True
+                self.flash("UNDO / REDO TRACK %d" % (e.lp_undo[0] + 1))
+            else:
+                self.flash("NOTHING TO UNDO")
+        elif name == "X":
+            self.lp_toggle_play()
+        elif name == "Y":
+            m = self.lp_meta[k]
+            m["mute"] = not m["mute"]
+            self.lp_push_track(k)
+            self.lp_dirty = True
+            self.flash("TRACK %d %s" % (k + 1, "MUTED" if m["mute"] else "ON"))
+        else:
+            self.lp_sel = (k + (1 if name == "DOWN" else -1)) % LOOP_N
+            tr = e.lp_tracks[self.lp_sel]
+            nm = (self.lp_meta[self.lp_sel]["name"] or "") if tr.ev else "empty"
+            self.flash("TRACK %d  %s" % (self.lp_sel + 1, nm.upper()))
         return True
 
-    def seq_preview(self, track, v):
-        mm = M()
-        if track == "Chords":
-            pc, iv, _ = mm.build_chord(self.key, self.scale, v[0], {k: True for k in v[1]})
-            notes, _ = mm.voice(pc, iv, [], self.octave)
-            self.eng.chord(notes, {m: self.ckey(m) for m in notes}, False)
-            self.audition_until = time.perf_counter() + 0.5
-        elif track == "Lead":
-            sc = mm.SCALES[self.scale]
-            m = 60 + self.key + sc[v[0]] + 12 * (self.octave + v[1]) + v[2] - (12 if self.key >= 7 else 0)
-            self.eng.post("lead_on", m, self._snd([m]).get(m), 0.0)
-            self.anim["_lead_preview"] = time.perf_counter()
+    def lp_arm(self, k, stay=False):
+        e = self.lp_e()
+        if e is None:
+            self.flash("LOOPER NEEDS THE LOCAL AUDIO ENGINE")
+            return
+        if e.lp_rec == k and e.lp_state:
+            self.eng.post("lp", "arm", None)
+            self.flash("RECORDING STOPPED")
+            return
+        m = self.lp_meta[k]
+        live_pj = self.ckey(0)[1]
+        if not e.lp_tracks[k].ev:
+            # a new track starts with the sound and effects you hear right now
+            m.update(name=synth.PATCHES[self.patch]["name"], patch=self.patch, pj=live_pj,
+                     rack={n: list(self.rack[n]) for n in FX_ORDER}, flt=[round(x, 2) for x in e.live.flt_user],
+                     rs=round(min(1.0, e.rev_t), 2), ds=round(min(1.0, e.dly_t), 2), mute=False)
+            self.lp_push_track(k)
+        self.lp_arm_pj = live_pj
+        self.lp_watch = k
+        self.lp_was_empty = not e.lp_tracks[k].ev
+        self.eng.post("lp", "arm", k)
+        if not stay:
+            back = self.lp_return if self.lp_return in ("Play", "Lead", "Drone", "Drums") else "Play"
+            self.set_mode(back)
+        self.flash("TRACK %d %s: PLAY TO RECORD" % (k + 1, "ARMED" if self.lp_was_empty else "OVERDUB"))
+
+    def lp_set_sound(self, k, d):
+        m = self.lp_meta[k]
+        i = ((m["patch"] if m["patch"] is not None else self.patch) + d) % len(synth.PATCHES)
+        m.update(patch=i, name=synth.PATCHES[i]["name"], pj=self.patch_json(i))
+        self.lp_resolve(k, replace=True)
+        self.lp_dirty = True
+
+    def lp_randomize(self, k):
+        rack = self.lp_meta[k]["rack"]
+        names = list(FX_ORDER)
+        pick = random.sample(names, random.randint(1, 3))
+        for n in names:
+            rack[n][0] = n in pick
+            if n in pick:
+                rack[n][1] = round(random.uniform(0.25, 0.9), 2)
+                rack[n][2] = random.randrange(len(RATES))
+        self.lp_push_track(k)
+        self.flash("TRACK %d: %s" % (k + 1, " + ".join(pick)))
+
+    def lp_input(self, name, down):
+        if not down:
+            return name not in ("SELECT", "R3")
+        if self.lp_page == "fx":
+            return self.tfx_input(name)
+        e = self.lp_e()
+        k = self.lp_sel
+        m = self.lp_meta[k]
+        has = bool(e and e.lp_tracks[k].ev)
+        any_has = bool(e and any(t.ev for t in e.lp_tracks))
+        if name == "UP":
+            self.lp_sel = (k - 1) % LOOP_N
+        elif name == "DOWN":
+            self.lp_sel = (k + 1) % LOOP_N
+        elif name in ("LEFT", "RIGHT"):
+            m["vol"] = round(max(0.0, min(1.0, m["vol"] + (0.05 if name == "RIGHT" else -0.05))), 2)
+            self.lp_push_track(k)
+            self.nudge = (time.perf_counter(), 1 if name == "RIGHT" else -1)
+        elif name == "A":
+            self.lp_arm(k)
+            return True
+        elif name == "B":
+            now = time.perf_counter()
+            if not has:
+                return True
+            self.eng.post("lp", "clear", k)
+            self.lp_pending.pop(k, None)
+            self.lp_dirty = True
+            self.flash("TRACK %d CLEARED   SELECT+B UNDOES" % (k + 1))
+        elif name == "Y":
+            m["mute"] = not m["mute"]
+            self.lp_push_track(k)
+        elif name == "X":
+            self.lp_page = "fx"
+            self.tfx_i = 0
+        elif name in ("L1", "R1"):
+            d = 1 if name == "R1" else -1
+            if not any_has and not (e and e.lp_state):
+                opts = [1, 2, 4, 8]
+                self.lp_bars = opts[(opts.index(self.lp_bars) + d) % len(opts)] if self.lp_bars in opts else 2
+                self.eng.post("lp", "len", self.lp_bars * 16)
+                self.flash("LOOP %d BAR%s" % (self.lp_bars, "" if self.lp_bars == 1 else "S"))
+            elif has:
+                self.lp_set_sound(k, d)
+                self.flash("TRACK %d: %s" % (k + 1, m["name"].upper()))
+        elif name == "START":
+            self.lp_toggle_play()
+        else:
+            return False
+        self.lp_dirty = True
+        return True
+
+    def lp_toggle_play(self):
+        e = self.lp_e()
+        if e is not None:
+            on = not e.lp_on
+            self.eng.post("lp", "play", on)
+            self.flash("LOOP " + ("PLAY" if on else "STOP"))
+
+    def tfx_value(self, k, row):
+        m = self.lp_meta[k]
+        if row == "Sound":
+            return m["name"] or synth.PATCHES[self.patch]["name"]
+        if row == "Level":
+            return m["vol"]
+        if row == "Pan":
+            return m["pan"]
+        if row == "Reverb":
+            return m["rs"]
+        if row == "Delay":
+            return m["ds"]
+        if row == "Filter":
+            return m["flt"][0]
+        if row == "Resonance":
+            return m["flt"][1]
+        return m["rack"][row]
+
+    def tfx_input(self, name):
+        k = self.lp_sel
+        m = self.lp_meta[k]
+        row = TFX_ROWS[self.tfx_i]
+        fx = row in FX_ORDER
+        if name == "UP":
+            self.tfx_i = (self.tfx_i - 1) % len(TFX_ROWS)
+            return True
+        if name == "DOWN":
+            self.tfx_i = (self.tfx_i + 1) % len(TFX_ROWS)
+            return True
+        if name == "B":
+            self.lp_page = "tracks"
+            return True
+        if name == "START":
+            self.lp_toggle_play()
+            return True
+        if name in ("L1", "R1"):
+            d = 1 if name == "R1" else -1
+            if fx:
+                v = m["rack"][row]
+                v[2] = (v[2] + d) % len(RATES)
+            else:
+                self.lp_sel = (k + d) % LOOP_N        # next / previous track
+                return True
+        elif name in ("LEFT", "RIGHT"):
+            d = 1 if name == "RIGHT" else -1
+            self.nudge = (time.perf_counter(), d)
+            if row == "Sound":
+                if self.lp_e() and self.lp_e().lp_tracks[k].ev:
+                    self.lp_set_sound(k, d)
+                return True
+            if fx:
+                v = m["rack"][row]
+                v[1] = round(max(0.0, min(1.0, v[1] + 0.1 * d)), 2)
+                v[0] = v[1] > 0.0
+            elif row == "Level":
+                m["vol"] = round(max(0.0, min(1.0, m["vol"] + 0.05 * d)), 2)
+            elif row == "Pan":
+                m["pan"] = round(max(-1.0, min(1.0, m["pan"] + 0.1 * d)), 2)
+            elif row == "Reverb":
+                m["rs"] = round(max(0.0, min(1.0, m["rs"] + 0.05 * d)), 2)
+            elif row == "Delay":
+                m["ds"] = round(max(0.0, min(1.0, m["ds"] + 0.05 * d)), 2)
+            elif row == "Filter":
+                m["flt"][0] = round(max(0.0, min(1.0, m["flt"][0] + 0.05 * d)), 2)
+            elif row == "Resonance":
+                m["flt"][1] = round(max(0.0, min(1.0, m["flt"][1] + 0.05 * d)), 2)
+        elif name == "A":
+            if fx:
+                m["rack"][row][0] = not m["rack"][row][0]
+            elif row == "Pan":
+                m["pan"] = 0.0
+            else:
+                m["mute"] = not m["mute"]
+        elif name == "X":
+            self.lp_randomize(k)
+            self.lp_dirty = True
+            return True
+        elif name == "Y":
+            for n in FX_ORDER:
+                m["rack"][n][0] = False
+            self.flash("TRACK %d: EFFECTS OFF" % (k + 1))
+        else:
+            return False
+        self.lp_push_track(k)
+        self.lp_dirty = True
+        return True
+
+    def lp_tick(self, now):
+        if not self.lp_loaded:
+            self.lp_load()
+        e = self.lp_e()
+        if e is None:
+            return
+        if self.lp_resolve_after and now > self.lp_resolve_after:
+            self.lp_resolve_after = None
+            for k in range(LOOP_N):
+                self.lp_resolve(k, replace=True)
+        st = e.lp_state
+        if st != self.lp_last_state:
+            if st == "rec":
+                self.flash("RECORDING TRACK %d" % ((e.lp_rec or 0) + 1))
+            elif st is None and self.lp_last_state == "rec":
+                k = self.lp_watch
+                if k is not None and e.lp_tracks[k].ev:
+                    self.lp_resolve(k, replace=self.lp_meta[k]["pj"] != self.lp_arm_pj)
+                    nxt = None
+                    if self.lp_was_empty and self.lp_sel == k:
+                        # next layer: move to the next empty track so SELECT+A records it
+                        for d in range(1, LOOP_N):
+                            j = (k + d) % LOOP_N
+                            if not e.lp_tracks[j].ev:
+                                nxt = j
+                                break
+                    if nxt is not None:
+                        self.lp_sel = nxt
+                        self.flash("TRACK %d RECORDED   NEXT: TRACK %d" % (k + 1, nxt + 1))
+                    else:
+                        self.flash("TRACK %d RECORDED" % (k + 1))
+                self.lp_dirty = True
+            self.lp_last_state = st
+        if self.lp_pending and now - self.lp_retry_t > 1.5 and hasattr(self.eng, "track_sounds"):
+            self.lp_retry_t = now
+            for k, keys in list(self.lp_pending.items()):
+                snd, missing = self.eng.track_sounds(keys, standins=False)
+                if snd:
+                    self.eng.post("lp", "snd", k, snd, False)
+                left = {kk[0]: kk for kk in missing}
+                if left:
+                    self.lp_pending[k] = left
+                else:
+                    del self.lp_pending[k]
+        if self.lp_dirty and not st and now - self.lp_save_t > 3.0:
+            self.lp_save_t = now
+            self.lp_dirty = False
+            self.save_cfg()
+
+    def lp_snapshot(self):
+        e = self.lp_e()
+        tracks = []
+        for k in range(LOOP_N):
+            t = dict(self.lp_meta[k])
+            t["ev"] = [ev[:7] for ev in list(e.lp_tracks[k].ev)] if e else []
+            tracks.append(t)
+        return {"bars": self.lp_bars, "tracks": tracks}
 
     # ------------------------------------------------------------ effects
     def push_rack(self):
@@ -442,6 +657,7 @@ class ModesMixin:
         return True
 
     def modes_tick(self, now):
+        self.lp_tick(now)
         t = self.anim.get("_lead_preview")
         if t and now - t > 0.45:
             self.anim["_lead_preview"] = None
@@ -463,12 +679,17 @@ class ModesMixin:
             pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT2, 0.4 + 0.4 * b), (x, y, w, 20), border_radius=10)
             self.text(c, t, self.f_small, mm.BG, (x + w // 2, y + 10), center=True)
             x += w + 6
-        if self.seq_on or self.seq_rec:
-            t = ("REC " if self.seq_rec else "") + ("SEQ" if self.seq_on else "")
+        e = self.lp_e()
+        if e is not None and (e.lp_on or e.lp_state):
+            if e.lp_state:
+                t = "REC %d" % ((e.lp_rec or 0) + 1)
+                blink = e.lp_state == "rec" or int(time.perf_counter() * 3) % 2 == 0
+                col = (230, 70, 70) if blink else mm.PANEL
+            else:
+                t, col = "LOOP T%d" % (self.lp_sel + 1), mm.ACCENT2
             w = self.f_small.size(t)[0] + 14
-            col = (230, 70, 70) if self.seq_rec else mm.ACCENT2
             pygame.draw.rect(c, col, (x, y, w, 20), border_radius=10)
-            self.text(c, t.strip(), self.f_small, mm.BG, (x + w // 2, y + 10), center=True)
+            self.text(c, t, self.f_small, mm.BG, (x + w // 2, y + 10), center=True)
             x += w + 6
         return x
 
@@ -476,7 +697,7 @@ class ModesMixin:
         return {"Lead": "Y oct+  L1 oct-  R1 sharp  L-stick bend/vibrato  L3 modes",
                 "Drone": "tap a degree to drone, again to stop  Y adds 3rd  L3 modes",
                 "Drums": "8 pads  L1 soft  R1 accent  L3 modes",
-                "Sequencer": "A set  B clear  L1/R1 value  X rec  Y length  START play",
+                "Looper": self.lp_hint(),
                 "Effects": "A on/off  LEFT/RIGHT amount  L1/R1 rate  X random  Y all off  B back"}.get(self.imode)
 
     def mode_pills(self, h):
@@ -487,8 +708,9 @@ class ModesMixin:
             return [("Y  ADD 3RD", "Y" in h), ("TAP = ON/OFF", False), ("PLAY ON TOP", False),
                     ("L3  LEAD/PLAY", False)]
         if self.imode == "Drums":
+            e = self.lp_e()
             return [("Y  SHAKER", "Y" in h), ("L1  SOFT", "L1" in h), ("R1  ACCENT", "R1" in h),
-                    ("X REC IN SEQ", self.seq_rec)]
+                    ("LOOP REC", bool(e and e.lp_state))]
         return None
 
     def mode_tile(self, i, btn):
@@ -540,61 +762,193 @@ class ModesMixin:
             return True
         return False
 
+    def lp_hint(self):
+        if self.lp_page == "fx":
+            return "LEFT/RIGHT value  A on/off  L1/R1 rate  X random  Y fx off  B back"
+        e = self.lp_e()
+        if e is not None and not any(t.ev for t in e.lp_tracks):
+            return "A record  L1/R1 loop length  hold SELECT: +A rec  +X play  anywhere"
+        return "A rec  B clear  Y mute  X fx  <> level  L1/R1 sound  SEL+B undo"
+
     def draw_page(self, c):
-        if self.imode == "Sequencer":
-            self.draw_seq(c)
+        if self.imode == "Looper":
+            self.draw_looper(c)
         else:
             self.draw_fx_page(c)
 
-    def draw_seq(self, c):
+    def lp_playpos(self, e):
+        if not e.lp_on or e.lp_cur < 0:
+            return None
+        step = 60.0 / e.bpm / 4 * e.sr
+        return (e.lp_cur + max(0.0, min(1.0, (e.t - e.lp_step_at) / step))) % e.lp_len
+
+    def lp_lane(self, k, tr, w, h):
+        """Cached picture of a track's notes (rebuilt only when it changes)."""
         mm = M()
-        e = getattr(self.eng, "eng", None)
-        n = self.seq["len"]
-        top = 48
+        n = len(tr.ev)
+        key = (n, w, h, e_len(self), self.lp_meta[k]["mute"])
+        hit = self.lp_lane_cache.get(k)
+        if hit and hit[0] == key:
+            return hit[1]
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        L = float(e_len(self))
+        col = TRACK_COLS[k % len(TRACK_COLS)]
+        if self.lp_meta[k]["mute"]:
+            col = mm.DIM
+        evs = list(tr.ev)
+        notes = [ev for ev in evs if ev[1] in ("n", "b")]
+        if notes:
+            lo = min(ev[2] for ev in notes)
+            hi = max(ev[2] for ev in notes)
+            span = max(12, hi - lo)
+        for ev in evs[-400:]:
+            x = int(ev[0] / L * w)
+            if ev[1] == "d":
+                yy = int(h * DRUM_ROW.get(ev[2], 0.5))
+                pygame.draw.rect(surf, col, (x, yy - 2, 3, 4))
+            else:
+                yy = int(h - 3 - (ev[2] - lo) / span * (h - 6))
+                ln = max(2, int((ev[5] or 0.5) / L * w))
+                c2 = self.mix(col, mm.INK, 0.25) if ev[1] == "b" else col
+                if x + ln > w:                                   # wraps around the loop
+                    pygame.draw.rect(surf, c2, (x, yy - 1, w - x, 3))
+                    pygame.draw.rect(surf, c2, (0, yy - 1, min(x, x + ln - w), 3))
+                else:
+                    pygame.draw.rect(surf, c2, (x, yy - 1, ln, 3))
+        self.lp_lane_cache[k] = (key, surf)
+        return surf
+
+    def draw_looper(self, c):
+        mm = M()
+        e = self.lp_e()
+        top = 46
         bottom = mm.L["tiles_y"] + mm.L["tile_h"]
-        title = "SEQUENCER   %d steps   %s%s" % (n, "PLAYING" if self.seq_on else "stopped",
-                                                 "   REC" if self.seq_rec else "")
-        self.text(c, title, self.f_small, mm.ACCENT if self.seq_on else mm.DIM, (20, top))
-        top += 20
-        rh = (bottom - top) // len(SEQ_TRACKS)
-        lw = 92
-        page = self.seq_col // 16
-        vis = min(16, n)
-        cw = (mm.BASE_W - 20 - lw - 10) / vis
-        play = ((e.seq_i - 1) % n) if (e and self.seq_on) else -1
-        sc = mm.SCALES[self.scale]
-        for r, t in enumerate(SEQ_TRACKS):
-            y = top + r * rh
-            sel_row = r == self.seq_row
-            self.text(c, t.upper(), self.f_small, mm.ACCENT if sel_row else mm.DIM, (20, y + rh // 2 - 7))
-            row = self.seq["tracks"][t]
-            for k in range(vis):
-                i = page * 16 + k
-                if i >= n:
-                    break
-                x = int(20 + lw + k * cw)
-                rect = pygame.Rect(x, y + 2, int(cw) - 3, rh - 4)
-                base = mm.PANEL if (i // 4) % 2 == 0 else self.mix(mm.PANEL, mm.BG, 0.45)
-                v = row[i]
-                col = base
-                if v is not None:
-                    col = mm.ACCENT if t in SEQ_DRUM else (mm.ACCENT2 if t == "Lead" else mm.MOD_ON)
-                    if t in SEQ_DRUM:
-                        col = self.mix(base, col, 0.35 + 0.65 * v[1])
-                if i == play:
-                    col = self.mix(col, (255, 255, 255), 0.35)
-                pygame.draw.rect(c, col, rect, border_radius=4)
-                if v is not None and t not in SEQ_DRUM and rh > 22:
-                    if t == "Chords":
-                        pc, iv, _ = mm.build_chord(self.key, self.scale, v[0], {kk: True for kk in v[1]})
-                        lab = mm.roman_for(v[0], iv)
-                    else:
-                        lab = mm.NOTE_NAMES[(self.key + sc[v[0]] + v[2]) % 12]
-                    self.text(c, lab, self.f_small, mm.BG, rect.center, center=True)
-                if sel_row and i == self.seq_col:
-                    pygame.draw.rect(c, mm.INK, rect.inflate(4, 4), 2, border_radius=5)
-        if n > 16:
-            self.text(c, "page %d/%d" % (page + 1, n // 16), self.f_small, mm.DIM, (mm.BASE_W - 20, 48), right=True)
+        if e is None:
+            self.text(c, "Looper needs the local audio engine", self.f_med, mm.DIM, (mm.BASE_W // 2, 200), center=True)
+            return
+        if self.lp_page == "fx":
+            self.draw_track_fx(c, e)
+            return
+        playing = e.lp_on
+        st = "PLAYING" if playing else "stopped"
+        self.text(c, "LOOPER", self.f_med, mm.ACCENT, (20, top))
+        self.text(c, "%d bar%s   %s" % (self.lp_bars, "" if self.lp_bars == 1 else "s", st), self.f_small,
+                  mm.INK if playing else mm.DIM, (122, top + 6))
+        top += 28
+        rh = (bottom - top) // LOOP_N
+        x0, x1 = 176, mm.BASE_W - 92
+        lw = x1 - x0
+        pp = self.lp_playpos(e)
+        now = time.perf_counter()
+        ty = self.sm("lp_sel", top + self.lp_sel * rh, 24)
+        pygame.draw.rect(c, mm.PANEL, (10, int(ty) + 1, mm.BASE_W - 20, rh - 2), border_radius=8)
+        nt, nd = self.nudge
+        for k in range(LOOP_N):
+            y = top + k * rh
+            tr = e.lp_tracks[k]
+            m = self.lp_meta[k]
+            sel = k == self.lp_sel
+            col = TRACK_COLS[k % len(TRACK_COLS)]
+            rec = e.lp_rec == k and e.lp_state
+            badge = pygame.Rect(18, y + rh // 2 - 13, 26, 26)
+            if rec:
+                blink = e.lp_state == "rec" or int(now * 3) % 2 == 0
+                pygame.draw.rect(c, (230, 70, 70) if blink else mm.PANEL, badge, border_radius=13)
+            else:
+                pygame.draw.rect(c, col if tr.ev and not m["mute"] else mm.BG, badge, border_radius=13)
+            self.text(c, str(k + 1), self.f_small, mm.BG if (rec or (tr.ev and not m["mute"])) else mm.DIM,
+                      badge.center, center=True)
+            nm = (m["name"] or "empty") if tr.ev else ("armed" if rec else "empty")
+            self.text(c, nm[:14], self.f_small, mm.INK if (sel or tr.ev) else mm.DIM, (54, y + rh // 2 - 16))
+            if rec:
+                sub = "REC" if e.lp_state == "rec" else "play to start"
+            elif tr.ev:
+                kinds = set(ev[1] for ev in list(tr.ev))
+                sub = " + ".join(x for x, f in (("notes", "n" in kinds), ("bass", "b" in kinds),
+                                                ("drums", "d" in kinds)) if f)
+                nfx = sum(1 for v in m["rack"].values() if v[0])
+                sub += ("   fx %d" % nfx) if nfx else ""
+            else:
+                sub = "A to record" if sel else ""
+            self.text(c, sub, self.f_small, (230, 90, 90) if rec else mm.DIM, (54, y + rh // 2 + 2))
+            lane = pygame.Rect(x0, y + 5, lw, rh - 10)
+            pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.5), lane, border_radius=4)
+            for b in range(1, self.lp_bars):
+                bx = x0 + int(lw * b / self.lp_bars)
+                pygame.draw.line(c, mm.PANEL, (bx, lane.top + 2), (bx, lane.bottom - 2))
+            if tr.ev:
+                c.blit(self.lp_lane(k, tr, lw, rh - 10), lane.topleft)
+            if rec and e.lp_state == "rec" and pp is not None:
+                a0 = e.lp_rec_start % e.lp_len
+                done = min(1.0, max(0.0, (e.lp_cur - e.lp_rec_start) / e.lp_len))
+                pygame.draw.rect(c, (230, 70, 70), (x0 + int(lw * a0 / e.lp_len), lane.bottom - 3,
+                                                    max(2, int(lw * done)), 3))
+            # level + mute
+            vx = mm.BASE_W - 84
+            pygame.draw.rect(c, mm.BG, (vx, y + rh // 2 - 4, 46, 8), border_radius=4)
+            kick = int(4 * nd * (1 - self.since(nt, 0.18)) ** 2) if sel else 0
+            fill = int(46 * self.sm("lpvol%d" % k, m["vol"], 18))
+            if fill:
+                pygame.draw.rect(c, mm.DIM if m["mute"] else col, (vx + kick, y + rh // 2 - 4, fill, 8),
+                                 border_radius=4)
+            if m["mute"]:
+                self.text(c, "M", self.f_small, (230, 90, 90), (mm.BASE_W - 26, y + rh // 2 - 7))
+        if pp is not None:
+            px = x0 + int(lw * pp / e.lp_len)
+            pygame.draw.line(c, mm.INK, (px, top + 2), (px, top + rh * LOOP_N - 2), 2)
+
+    def draw_track_fx(self, c, e):
+        mm = M()
+        k = self.lp_sel
+        m = self.lp_meta[k]
+        top = 46
+        bottom = mm.L["tiles_y"] + mm.L["tile_h"]
+        col = TRACK_COLS[k % len(TRACK_COLS)]
+        self.text(c, "TRACK %d" % (k + 1), self.f_med, col, (20, top))
+        self.text(c, "effects, level and sends, after recording   L1/R1 track", self.f_small, mm.DIM,
+                  (136, top + 6))
+        y0 = top + 32
+        rh = 24
+        vis = max(6, (bottom - y0) // rh)
+        first = max(0, min(self.tfx_i - vis // 2, len(TFX_ROWS) - vis))
+        nt, nd = self.nudge
+        ty = self.sm("tfx_sel", y0 + (self.tfx_i - first) * rh, 24)
+        pygame.draw.rect(c, mm.PANEL, (14, int(ty) - 2, mm.BASE_W - 28, rh), border_radius=6)
+        for r in range(first, min(len(TFX_ROWS), first + vis)):
+            row = TFX_ROWS[r]
+            y = y0 + (r - first) * rh
+            sel = r == self.tfx_i
+            fx = row in FX_ORDER
+            v = self.tfx_value(k, row)
+            on = v[0] if fx else True
+            self.text(c, row, self.f_small if len(row) > 9 else self.f_med, mm.ACCENT if sel else (mm.INK if on else mm.DIM),
+                      (28, y + 1))
+            kick = int(6 * nd * (1 - self.since(nt, 0.18)) ** 2) if sel else 0
+            if row == "Sound":
+                self.text(c, "< %s >" % v, self.f_med, mm.INK, (300 + kick, y + 1))
+                continue
+            if fx:
+                pill = pygame.Rect(170, y + 3, 42, rh - 8)
+                pygame.draw.rect(c, mm.MOD_ON if on else mm.BG, pill, border_radius=8)
+                self.text(c, "ON" if on else "off", self.f_small, mm.BG if on else mm.DIM, pill.center, center=True)
+                amt = v[1]
+            else:
+                amt = v
+            bx, bw = 230, 230
+            pygame.draw.rect(c, mm.BG, (bx, y + rh // 2 - 4, bw, 8), border_radius=4)
+            if row == "Pan":
+                cx = bx + bw // 2
+                px = int(cx + amt * bw / 2)
+                pygame.draw.rect(c, mm.ACCENT, (min(cx, px), y + rh // 2 - 4, max(3, abs(px - cx)), 8), border_radius=4)
+                val = "C" if abs(amt) < 0.05 else ("L%d" % round(-amt * 100) if amt < 0 else "R%d" % round(amt * 100))
+            else:
+                fill = int(bw * self.sm("tfx_%d_%s" % (k, row), amt, 18))
+                if fill:
+                    pygame.draw.rect(c, mm.ACCENT if on else mm.DIM, (bx, y + rh // 2 - 4, fill, 8), border_radius=4)
+                val = RATES[v[2]][0] if fx and row not in ("Drive", "Lo-fi", "Wide") else "%d%%" % round(amt * 100)
+            self.text(c, val, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28 + kick, y + 5), right=True)
+        if first + vis < len(TFX_ROWS):
+            self.text(c, "more", self.f_small, mm.DIM, (mm.BASE_W // 2, bottom - 4), center=True)
 
     def draw_fx_page(self, c):
         mm = M()
