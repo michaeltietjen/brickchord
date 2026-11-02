@@ -649,7 +649,8 @@ class App(modes.ModesMixin):
             self.cfg["rack"] = self.rack
             self.cfg.pop("seq", None)
             if getattr(self, "lp_loaded", False) and self.lp_e() is not None:
-                self.cfg["loop"] = self.lp_snapshot()
+                self.cfg.pop("loop", None)
+                self.song_save()
         self.cfg["patch_edits"] = self.edits
         try:
             with open(CFG_PATH, "w") as f:
@@ -1217,7 +1218,7 @@ class App(modes.ModesMixin):
         if beat_pop:
             pygame.draw.rect(c, self.mix(PANEL, ACCENT, beat_pop), (0, 36, BASE_W, 2))
 
-        if self.imode in ("Looper", "Effects"):
+        if self.imode in ("Song", "Effects"):
             self.draw_page(c)
         else:
             # ---- brick well + scope behind the chord name

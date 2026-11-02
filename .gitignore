@@ -6,3 +6,4 @@ brickchord/*.log
 *.zip
 brickchord/cache/
 dist/
+brickchord/brickchord_song.json

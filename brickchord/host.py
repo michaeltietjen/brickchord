@@ -373,32 +373,32 @@ class LocalHost:
             self.pending = {}
         if self.lp_pending and time.time() - self.lp_retry > 1.5:
             self.lp_retry = time.time()
-            for k, keys in list(self.lp_pending.items()):
+            for (p, k), keys in list(self.lp_pending.items()):
                 snd, missing = self.track_sounds(keys, standins=False)
                 if snd:
-                    self.eng.post("lp", "snd", k, snd, False)
+                    self.eng.post("lp", "snd", p, k, snd, False)
                 left = {kk[0]: kk for kk in missing}
                 if left:
-                    self.lp_pending[k] = left
+                    self.lp_pending[(p, k)] = left
                 else:
-                    del self.lp_pending[k]
+                    del self.lp_pending[(p, k)]
         return got
 
-    def lp_sound(self, k, pj, replace=False):
-        """Give looper track k its notes in sound pj (stand-ins first if needed;
-        the real notes are swapped in by poll() as they arrive)."""
-        tr = self.eng.lp_tracks[k]
+    def lp_sound(self, p, k, pj, replace=False):
+        """Give track k of pattern p its notes in sound pj (stand-ins first if
+        needed; the real notes are swapped in by poll() as they arrive)."""
+        tr = self.eng.pats[p].tracks[k]
         midis = sorted({ev[2] for ev in list(tr.ev) if ev[1] == "n"})
         if not replace:
             midis = [m for m in midis if m not in tr.snd]
         if not midis or not pj:
             return
         snd, missing = self.track_sounds({m: (m, pj) for m in midis})
-        self.eng.post("lp", "snd", k, snd, replace)
+        self.eng.post("lp", "snd", p, k, snd, replace)
         if missing:
-            self.lp_pending[k] = {kk[0]: kk for kk in missing}
+            self.lp_pending[(p, k)] = {kk[0]: kk for kk in missing}
         else:
-            self.lp_pending.pop(k, None)
+            self.lp_pending.pop((p, k), None)
 
     # ---------------- host interface
     def post(self, name, *args):
@@ -524,8 +524,10 @@ class _MTrack:
         self.snd = set()
 
 
-class _MChain:
-    flt_user = (0.0, 0.0)
+class _MPat:
+    def __init__(self, n):
+        self.len = 32
+        self.tracks = [_MTrack() for _ in range(n)]
 
 
 class Mirror:
@@ -535,11 +537,11 @@ class Mirror:
         import engine
         self.sr, self.t, self.bpm, self.load, self.underruns, self.step16 = sr, 0, 96.0, 0.0, 0, 0
         self.sink, self.voices, self.active, self.scope = "starting", [], frozenset(), None
-        self.live = _MChain()
         self.rev_t = self.dly_t = 0.0
-        self.lp_tracks = [_MTrack() for _ in range(engine.LOOP_TRACKS)]
-        self.lp_on, self.lp_state, self.lp_rec, self.lp_cur, self.lp_step_at = False, None, None, -1, 0
-        self.lp_len, self.lp_rec_start, self.lp_rec_end, self.lp_undo, self.lp_ver = 32, 0.0, 0.0, None, 0
+        self.pats = [_MPat(engine.LOOP_TRACKS) for _ in range(engine.NPATS)]
+        self.lp_on, self.lp_state, self.lp_rec, self.lp_rec_p, self.lp_pos, self.lp_abs = False, None, None, 0, -1, -1
+        self.lp_step_at, self.lp_rec_start, self.lp_rec_end, self.lp_undo, self.lp_ver = 0, 0.0, 0.0, None, 0
+        self.cur, self.cue, self.sel, self.song_on, self.song_row, self.song_rep = 0, None, 0, False, 0, 0
         self.left = self.misses = self.ncache = 0
         self.prof = None
 
@@ -549,13 +551,16 @@ class Mirror:
         self.left, self.misses, self.ncache = s["left"], s["misses"], s["cache"]
         self.voices = [None] * s["nvoices"]
         self.active, self.scope = s["active"], s["scope"]
-        self.live.flt_user, self.rev_t, self.dly_t = s["flt"], s["rev_t"], s["dly_t"]
-        (self.lp_on, self.lp_state, self.lp_rec, self.lp_cur, self.lp_step_at, self.lp_len,
-         self.lp_rec_start, self.lp_rec_end, u, self.lp_ver) = s["lp"]
+        self.rev_t, self.dly_t = s["rev_t"], s["dly_t"]
+        (self.lp_on, self.lp_state, self.lp_rec, self.lp_rec_p, self.lp_pos, self.lp_abs, self.lp_step_at,
+         self.lp_rec_start, self.lp_rec_end, u, self.lp_ver, self.cur, self.cue, self.sel,
+         self.song_on, self.song_row, self.song_rep) = s["lp"]
         self.lp_undo = None if u is None else [u]
         self.prof = s.get("prof")
-        if s.get("tracks") is not None:
-            for tr, (ev, snd) in zip(self.lp_tracks, s["tracks"]):
+        for p, (n, tracks) in (s.get("pats") or {}).items():
+            pat = self.pats[p]
+            pat.len = n
+            for tr, (ev, snd) in zip(pat.tracks, tracks):
                 tr.ev, tr.snd = ev, set(snd)
 
 
@@ -625,8 +630,8 @@ class SplitHost:
             elif msg[0] == "preloaded":
                 return
 
-    def lp_sound(self, k, pj, replace=False):
-        self._send("lp_sound", k, pj, replace)
+    def lp_sound(self, p, k, pj, replace=False):
+        self._send("lp_sound", p, k, pj, replace)
 
     def poll(self):
         self.pump()

@@ -27,18 +27,24 @@ def resolve_refs(h, args):
     return out
 
 
-def snapshot(h, ver):
+def snapshot(h, sent):
     e = h.eng
     sc = getattr(e, "scope", None)
     snap = {"t": e.t, "sr": e.sr, "bpm": e.bpm, "load": e.load, "under": e.underruns, "step16": e.step16,
             "sink": e.sink, "left": len(h.pending), "misses": h.misses, "cache": len(h.cache),
             "nvoices": len(e.voices), "active": e.active, "scope": None if sc is None else sc.copy(),
-            "flt": e.live.flt_user, "rev_t": e.rev_t, "dly_t": e.dly_t,
-            "lp": (e.lp_on, e.lp_state, e.lp_rec, e.lp_cur, e.lp_step_at, e.lp_len, e.lp_rec_start,
-                   e.lp_rec_end, e.lp_undo[0] if e.lp_undo else None, e.lp_ver),
+            "rev_t": e.rev_t, "dly_t": e.dly_t,
+            "lp": (e.lp_on, e.lp_state, e.lp_rec, e.lp_rec_p, e.lp_pos, e.lp_abs, e.lp_step_at, e.lp_rec_start,
+                   e.lp_rec_end, e.lp_undo[0] if e.lp_undo else None, e.lp_ver, e.cur, e.cue, e.sel,
+                   e.song_on, e.song_row, e.song_rep),
             "prof": getattr(e, "prof", None)}
-    if e.lp_ver != ver:
-        snap["tracks"] = [([ev[:7] for ev in list(tr.ev)], sorted(tr.snd)) for tr in e.lp_tracks]
+    pats = {}
+    for p, pat in enumerate(e.pats):
+        if sent.get(p) != pat.ver:
+            sent[p] = pat.ver
+            pats[p] = (pat.len, [([ev[:7] for ev in list(tr.ev)], sorted(tr.snd)) for tr in pat.tracks])
+    if pats:
+        snap["pats"] = pats
     return snap
 
 
@@ -56,7 +62,7 @@ def main():
     print("audio process: pid %d sink %s block %d" % (os.getpid(), h.eng.sink, block), flush=True)
     parent = os.getppid()
     last_snap = last_poll = 0.0
-    ver = -1
+    sent = {}
     try:
         while True:
             if conn.poll(0.015):
@@ -78,7 +84,7 @@ def main():
                         h.preload(lambda i, n: conn.send(("progress", i, n)))
                         conn.send(("preloaded",))
                     elif op == "lp_sound":
-                        h.lp_sound(msg[1], msg[2], msg[3])
+                        h.lp_sound(msg[1], msg[2], msg[3], msg[4])
                 except Exception:
                     traceback.print_exc()
                     sys.stdout.flush()
@@ -91,9 +97,7 @@ def main():
                     break
             if now - last_snap > 0.033:
                 last_snap = now
-                snap = snapshot(h, ver)
-                ver = snap["lp"][-1]
-                conn.send(("state", snap))
+                conn.send(("state", snapshot(h, sent)))
     except (BrokenPipeError, ConnectionResetError, EOFError):
         pass
     except Exception:
