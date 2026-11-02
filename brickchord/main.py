@@ -14,6 +14,7 @@ import time
 import pygame
 
 import host
+import modes
 import synth
 from synth import SR
 
@@ -54,7 +55,8 @@ KEYMAP = {pygame.K_LEFT: "LEFT", pygame.K_RIGHT: "RIGHT", pygame.K_UP: "UP", pyg
           pygame.K_e: "R1", pygame.K_TAB: "SELECT", pygame.K_RETURN: "START"}
 
 PLAY_MODES = ["Chord", "Strum Folk", "Strum Pop", "Strum Skank", "Slop", "Harp Up", "Harp Down",
-              "Arp 1/8 Up", "Arp 1/16 Up", "Arp 1/16 Up-Down", "Arp 1/8 Down", "Arp 1/16 Random"]
+              "Arp 1/8 Up", "Arp 1/16 Up", "Arp 1/16 Up-Down", "Arp 1/8 Down", "Arp 1/16 Random",
+              "Repeat 1/4", "Repeat 1/8", "Repeat 1/16"]
 # strum patterns on an 8th-note grid: D down, U up, d soft down, . rest
 STRUM_PATTERNS = {"Strum Folk": "D.DU.UDU", "Strum Pop": "D.D.UDUd", "Strum Skank": ".D.D.D.D"}
 DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0), ("1/4 dotted", 1.5),
@@ -252,7 +254,7 @@ KEYMAP_SIG = {"k:" + v: v for v in KEYMAP.values()}
 
 
 # ------------------------------------------------------------------ app
-class App:
+class App(modes.ModesMixin):
     def __init__(self, eng, cfg):
         self.cfg = cfg
         s = self.cfg["settings"]
@@ -334,6 +336,7 @@ class App:
         self.well_reset()
         self.grav_t = 0.0
         self.new_hit = False
+        self.modes_init()
         self.flt = (0.0, 0.0)
         self.rev = self.base_rev
         self.dly = self.base_dly
@@ -344,6 +347,7 @@ class App:
         self.push_fx()
         self.push_types()
         self.push_bass()
+        self.push_rack()
         self.intro()
         self.queue_precache()
 
@@ -353,7 +357,9 @@ class App:
             if "sticks" not in self.cfg:
                 self.learn_sticks()
             elif not self.cfg.get("fx2_learned"):
-                self.learn_sticks(only=("rx", "R3"))       # new in this version
+                self.learn_sticks(only=("rx", "R3", "L3"))
+            elif not self.cfg.get("l3_learned"):
+                self.learn_sticks(only=("L3",))            # new: mode wheel
 
     # ---------------- engine glue
     def push_params(self):
@@ -429,6 +435,8 @@ class App:
         self.eng.request("lo", [self.ckey(m) for m in order])
         if hasattr(self.eng, "preload") and hasattr(self, "canvas"):
             self.eng.preload(self.loading)
+        if hasattr(self, "seq") and any(v is not None for row in self.seq["tracks"].values() for v in row):
+            self.seq_push()
 
     # ---------------- logo
     ORANGE = (255, 90, 31)
@@ -608,6 +616,8 @@ class App:
         self.sounding = notes
         self.hit_t, self.hit_big = time.perf_counter(), not revoice
         self.new_hit = True
+        if not revoice:
+            self.record_chord(deg, self.mods())
         self.eng.chord(notes, {m: self.ckey(m) for m in need}, revoice)
 
     def stop_chord(self):
@@ -637,7 +647,11 @@ class App:
                                     reverb=self.base_rev, delay=self.base_dly, delay_time=self.dly_time,
                                     reverb_type=self.rev_type, delay_type=self.dly_type,
                                     latency=self.block, quantize=self.quantize,
-                                    bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct)
+                                    bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
+                                    imode=getattr(self, "imode", "Play"))
+        if hasattr(self, "rack"):
+            self.cfg["rack"] = self.rack
+            self.cfg["seq"] = self.seq
         self.cfg["patch_edits"] = self.edits
         try:
             with open(CFG_PATH, "w") as f:
@@ -691,7 +705,7 @@ class App:
         j = self.inp.joys[0]
         steps = [("lx", "Push the LEFT stick", "RIGHT"), ("ly", "Push the LEFT stick", "UP"),
                  ("ry", "Push the RIGHT stick", "UP"), ("rx", "Push the RIGHT stick", "RIGHT"),
-                 ("R3", "Click the RIGHT stick", "DOWN")]
+                 ("R3", "Click the RIGHT stick", "DOWN"), ("L3", "Click the LEFT stick", "DOWN")]
         if only:
             steps = [st for st in steps if st[0] in only]
         result = dict(self.cfg.get("sticks") or {}) if only else {}
@@ -710,9 +724,9 @@ class App:
                 for sig, down in self.inp.raw(ev):
                     if down and (sig in start_btn or sig == "k:START"):
                         skip = True
-                    elif down and key == "R3" and sig.startswith("b") and sig not in self.inp.map:
-                        mapping = {k: v for k, v in self.inp.map.items() if v != "R3"}
-                        mapping[sig] = "R3"
+                    elif down and key in ("R3", "L3") and sig.startswith("b") and sig not in self.inp.map:
+                        mapping = {k: v for k, v in self.inp.map.items() if v != key}
+                        mapping[sig] = key
                         self.inp.map = mapping
                         self.cfg["buttons"] = mapping
                         self.eng.post("click")
@@ -721,7 +735,7 @@ class App:
                 i += 1
                 armed = True
                 continue
-            if key != "R3":
+            if key not in ("R3", "L3"):
                 best, bv = None, 0.0
                 for a in range(j.get_numaxes()):
                     if a in used:
@@ -743,9 +757,12 @@ class App:
             if i < len(steps):
                 self.text(c, steps[i][1], self.f_med, DIM, (BASE_W // 2, 170 + L["dy"]), center=True)
                 self.text(c, steps[i][2], self.f_huge, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
-                if steps[i][0] != "R3":
+                if steps[i][0] not in ("R3", "L3"):
                     self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320 + L["dy"]), center=True)
-            if only:
+            if only == ("L3",):
+                self.text(c, "New: click the left stick for the mode wheel (Play, Lead, Drone, Drums...)",
+                          self.f_small, ACCENT2, (BASE_W // 2, 385 + L["dy"]), center=True)
+            elif only:
                 self.text(c, "New: right stick LEFT/RIGHT = filter / resonance, click = hold effects",
                           self.f_small, ACCENT2, (BASE_W // 2, 385 + L["dy"]), center=True)
             self.text(c, "Press START to skip a step (or if you have no sticks)", self.f_small, DIM,
@@ -754,6 +771,8 @@ class App:
             clock.tick(60)
         self.cfg["sticks"] = result
         self.cfg["fx2_learned"] = True
+        if not only or "L3" in only:
+            self.cfg["l3_learned"] = True
         self.save_cfg()
 
     # ---------------- sound cache (dry first, reverb layer in the background)
@@ -770,7 +789,14 @@ class App:
 
     def update_sticks(self):
         st = self.cfg.get("sticks") or {}
-        if st.get("lx") or st.get("ly"):
+        if (st.get("lx") or st.get("ly")) and (self.wheel_open or self.imode != "Play"):
+            x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
+            self.stick_xy = (x, y)
+            if self.wheel_open:
+                self.wheel_stick(x, y)
+            else:
+                self.mode_stick(x, y)
+        elif st.get("lx") or st.get("ly"):
             x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
             mag = math.hypot(x, y)
             new = self.stick_mod
@@ -1068,6 +1094,16 @@ class App:
             elif name == "START":
                 self.toggle_drums()
             return
+        if name == "L3":
+            if down:
+                self.wheel_toggle()
+            return
+        if self.wheel_open:
+            if down and name == "B":
+                self.wheel_open = False
+            return
+        if self.imode != "Play" and self.mode_input(name, down):
+            return
         if name == "R3":
             if down:
                 if self.fx_hold:
@@ -1157,8 +1193,14 @@ class App:
         pygame.draw.rect(c, PANEL, (0, 0, BASE_W, 38))
         self.draw_mini_mark(c, 14, 12, st)
         self.text(c, "BRICKCHORD", self.f_small, ACCENT, (62, 12))
+        chips_end = self.draw_mode_chip(c, 172, 9)
         info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
                                                    synth.PATCHES[self.patch]["name"], self.mode(), self.bpm)
+        for alt in ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, synth.PATCHES[self.patch]["name"], self.bpm),
+                    "%s %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bpm)):
+            if BASE_W - 12 - self.f_small.size(info)[0] > chips_end + 10:
+                break
+            info = alt
         if info != self.anim.get("_info"):
             self.anim["_info"] = info
             self.anim["_info_t"] = now
@@ -1168,82 +1210,91 @@ class App:
         if beat_pop:
             pygame.draw.rect(c, self.mix(PANEL, ACCENT, beat_pop), (0, 36, BASE_W, 2))
 
-        # ---- brick well + scope behind the chord name
-        if self.new_hit:
-            self.new_hit = False
-            if self.hit_big and self.cur:
-                self.hard_drop(self.cur[0] % 7)
-        self.draw_well(c, quarter and beat_pop > 0.9)
-        self.draw_scope(c)
-
-        # ---- chord name + numeral (pop on strike), or the idle logo
-        x = self.since(self.hit_t, 0.32)
-        if self.cur:
-            deg, pc, iv, name = self.cur
-            font = self.f_huge if self.f_huge.size(name)[0] < 330 else self.f_big
-            self.draw_name(c, name, font, BASE_W // 2 - 10, L["name_y"], x)
-            ry = int(14 * (1 - min(1, x * 1.6)) ** 3)
-            self.text(c, roman_for(deg, iv), self.f_big, ACCENT, (BASE_W // 2, L["roman_y"] + ry), center=True)
+        if self.imode in ("Sequencer", "Effects"):
+            self.draw_page(c)
         else:
-            self.draw_mark(c, BASE_W // 2, L["mark_y"], 22, 1.5 + now - getattr(self, "t0", now))
-            b = 0.5 + 0.5 * math.sin(now * 2.2)
-            self.text(c, "press a chord", self.f_med, self.mix(DIM, INK, b * 0.5), (BASE_W // 2, L["roman_y"]), center=True)
+            # ---- brick well + scope behind the chord name
+            if self.new_hit:
+                self.new_hit = False
+                if self.hit_big and self.cur:
+                    self.hard_drop(self.cur[0] % 7)
+            self.draw_well(c, quarter and beat_pop > 0.9)
+            self.draw_scope(c)
 
-        # ---- modifier pills fill from the middle when held
-        m = self.mods()
-        h = self.inp.held
-        labels = [("Y  FLIP", "Y" in h), ("L1  7th", "L1" in h and "R1" not in h),
-                  ("R1  SUS4", "R1" in h and "L1" not in h), ("L1+R1  9th", "L1" in h and "R1" in h)]
-        x = 40
-        for n, (lab, on) in enumerate(labels):
-            lv = self.sm("pill%d" % n, 1.0 if on else 0.0, 22 if on else 9)
-            r = pygame.Rect(x, L["pills_y"], 128, 26)
-            pygame.draw.rect(c, PANEL, r, border_radius=6)
-            if lv > 0.02:
-                fw = max(6, int(r.w * lv))
-                fr = pygame.Rect(0, 0, fw, r.h)
-                fr.center = r.center
-                pygame.draw.rect(c, self.mix(PANEL, (92, 70, 34), lv), fr, border_radius=6)
-                pygame.draw.rect(c, self.mix(PANEL, MOD_ON, lv), fr, 2, border_radius=6)
-            self.text(c, lab, self.f_small, self.mix(DIM, MOD_ON, lv), r.center, center=True)
-            x += 142
+            # ---- chord name + numeral (pop on strike), or the idle logo
+            x = self.since(self.hit_t, 0.32)
+            if self.mode_hero(c, now):
+                pass
+            elif self.cur:
+                deg, pc, iv, name = self.cur
+                font = self.f_huge if self.f_huge.size(name)[0] < 330 else self.f_big
+                self.draw_name(c, name, font, BASE_W // 2 - 10, L["name_y"], x)
+                ry = int(14 * (1 - min(1, x * 1.6)) ** 3)
+                self.text(c, roman_for(deg, iv), self.f_big, ACCENT, (BASE_W // 2, L["roman_y"] + ry), center=True)
+            else:
+                self.draw_mark(c, BASE_W // 2, L["mark_y"], 22, 1.5 + now - getattr(self, "t0", now))
+                b = 0.5 + 0.5 * math.sin(now * 2.2)
+                self.text(c, "press a chord", self.f_med, self.mix(DIM, INK, b * 0.5), (BASE_W // 2, L["roman_y"]), center=True)
 
-        if (self.cfg.get("sticks") or {}).get("lx"):
-            self.draw_stick(c)
-        self.draw_fx(c)
+            # ---- modifier pills fill from the middle when held
+            m = self.mods()
+            h = self.inp.held
+            labels = self.mode_pills(h) or [("Y  FLIP", "Y" in h), ("L1  7th", "L1" in h and "R1" not in h),
+                                            ("R1  SUS4", "R1" in h and "L1" not in h), ("L1+R1  9th", "L1" in h and "R1" in h)]
+            x = 40
+            for n, (lab, on) in enumerate(labels):
+                lv = self.sm("pill%d" % n, 1.0 if on else 0.0, 22 if on else 9)
+                r = pygame.Rect(x, L["pills_y"], 128, 26)
+                pygame.draw.rect(c, PANEL, r, border_radius=6)
+                if lv > 0.02:
+                    fw = max(6, int(r.w * lv))
+                    fr = pygame.Rect(0, 0, fw, r.h)
+                    fr.center = r.center
+                    pygame.draw.rect(c, self.mix(PANEL, (92, 70, 34), lv), fr, border_radius=6)
+                    pygame.draw.rect(c, self.mix(PANEL, MOD_ON, lv), fr, 2, border_radius=6)
+                self.text(c, lab, self.f_small, self.mix(DIM, MOD_ON, lv), r.center, center=True)
+                x += 142
 
-        # ---- chord buttons: press down, flash, glow off slowly
-        tw, gap = 82, 6
-        x0 = (BASE_W - (7 * tw + 6 * gap)) // 2
-        ck = (self.key, self.scale, tuple(sorted(k for k, v in m.items() if v)))
-        if self.anim.get("_ck") != ck:
-            self.anim["_ck"] = ck
-            self.anim["_chords"] = [build_chord(self.key, self.scale, i, m) for i in range(7)]
-        chords = self.anim["_chords"]
-        for i, btn in enumerate(CHORD_BUTTONS):
-            pc, iv, name = chords[i]
-            active = bool(self.cur and self.cur[0] == i)
-            lv = self.sm("tile%d" % i, 1.0 if active else 0.0, 30 if active else 6)
-            hit = active and self.since(self.hit_t, 0.16) < 1
-            dip = int(5 * (1 - self.since(self.hit_t, 0.16))) if hit else (2 if active else 0)
-            th = L["tile_h"]
-            r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"] + dip, tw, th)
-            if dip:
-                pygame.draw.rect(c, (8, 7, 10), (r.x, L["tiles_y"] + th - 4, tw, 4 + dip), border_radius=10)
-            col = self.mix(PANEL, ACCENT, lv)
-            if hit:
-                col = self.mix((255, 226, 200), ACCENT, self.since(self.hit_t, 0.16))
-                if self.anim.get("_shatter") != self.hit_t:        # strike: tile throws bricks
-                    self.anim["_shatter"] = self.hit_t
-                    for _ in range(10 if self.hit_big else 4):
-                        self.burst(r.x + random.randrange(tw), r.y + random.randrange(20),
-                                   random.choice((ACCENT, (255, 226, 200), self.PIECE_COL[i % 7])), 1, 220, up=260)
-            pygame.draw.rect(c, col, r, border_radius=10)
-            ink = self.mix(INK, BG, lv)
-            self.text(c, roman_for(i, iv), self.f_med, self.mix(ACCENT2, BG, lv), (r.centerx, r.y + th * 21 // 100), center=True)
-            nm_font = self.f_med if len(name) < 6 else self.f_small
-            self.text(c, name, nm_font, ink, (r.centerx, r.y + th * 54 // 100), center=True)
-            self.text(c, BUTTON_GLYPH[btn], self.f_small, self.mix(DIM, BG, lv), (r.centerx, r.y + th * 83 // 100), center=True)
+            if (self.cfg.get("sticks") or {}).get("lx"):
+                self.draw_stick(c)
+            self.draw_fx(c)
+
+            # ---- chord buttons: press down, flash, glow off slowly
+            tw, gap = 82, 6
+            x0 = (BASE_W - (7 * tw + 6 * gap)) // 2
+            ck = (self.key, self.scale, tuple(sorted(k for k, v in m.items() if v)))
+            if self.anim.get("_ck") != ck:
+                self.anim["_ck"] = ck
+                self.anim["_chords"] = [build_chord(self.key, self.scale, i, m) for i in range(7)]
+            chords = self.anim["_chords"]
+            for i, btn in enumerate(CHORD_BUTTONS):
+                pc, iv, name = chords[i]
+                active = bool(self.cur and self.cur[0] == i)
+                top = roman_for(i, iv)
+                ov = self.mode_tile(i, btn)
+                if ov:
+                    top, name, active = ov
+                lv = self.sm("tile%d" % i, 1.0 if active else 0.0, 30 if active else 6)
+                hit = active and self.since(self.hit_t, 0.16) < 1
+                dip = int(5 * (1 - self.since(self.hit_t, 0.16))) if hit else (2 if active else 0)
+                th = L["tile_h"]
+                r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"] + dip, tw, th)
+                if dip:
+                    pygame.draw.rect(c, (8, 7, 10), (r.x, L["tiles_y"] + th - 4, tw, 4 + dip), border_radius=10)
+                col = self.mix(PANEL, ACCENT, lv)
+                if hit:
+                    col = self.mix((255, 226, 200), ACCENT, self.since(self.hit_t, 0.16))
+                    if self.anim.get("_shatter") != self.hit_t:        # strike: tile throws bricks
+                        self.anim["_shatter"] = self.hit_t
+                        for _ in range(10 if self.hit_big else 4):
+                            self.burst(r.x + random.randrange(tw), r.y + random.randrange(20),
+                                       random.choice((ACCENT, (255, 226, 200), self.PIECE_COL[i % 7])), 1, 220, up=260)
+                pygame.draw.rect(c, col, r, border_radius=10)
+                ink = self.mix(INK, BG, lv)
+                self.text(c, top, self.f_med, self.mix(ACCENT2, BG, lv), (r.centerx, r.y + th * 21 // 100), center=True)
+                nm_font = self.f_med if len(name) < 6 else self.f_small
+                self.text(c, name, nm_font, ink, (r.centerx, r.y + th * 54 // 100), center=True)
+                self.text(c, BUTTON_GLYPH[btn], self.f_small, self.mix(DIM, BG, lv), (r.centerx, r.y + th * 83 // 100), center=True)
 
         # ---- keyboard: sounding keys light, then fade out
         kx, ky, kw, kh = 20, L["kb_y"], BASE_W - 40, L["kb_h"]
@@ -1308,7 +1359,7 @@ class App:
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
-        hint = "SELECT menu   START beat   SEL+START quit"
+        hint = self.mode_hint() or "SELECT menu   START beat   L3 modes"
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
         on = self.sm("beatrow", 1.0 if self.drums_on else 0.0, 10)
@@ -1328,6 +1379,8 @@ class App:
                 self.text(c, self.msg, self.f_small, self.mix(BG, MOD_ON, a), (BASE_W // 2, L["msg_y"] + rise), center=True)
 
         self.draw_parts(c)
+
+        self.draw_wheel(c)
 
         # ---- overlays slide up and fade in/out
         ma = self.sm("menu", 1.0 if (self.menu and not self.editor) else 0.0, 16)
@@ -1574,6 +1627,18 @@ class App:
     def draw_stick(self, c):
         cx, cy, rad = 556, L["stick_cy"], 62
         pygame.draw.circle(c, PANEL, (cx, cy), rad + 14)
+        if self.imode != "Play":                      # other modes: stick = bend/vibrato or nothing
+            sx, sy = self.stick_xy
+            ex, ey = self.sm("stx", sx, 25), self.sm("sty", sy, 25)
+            p = (int(cx + ex * 30), int(cy - ey * 30))
+            pygame.draw.circle(c, ACCENT if self.imode == "Lead" and (abs(sx) > 0.15 or sy > 0.2) else DIM, p, 8)
+            lab = {"Lead": "BEND / VIB"}.get(self.imode, "L3 = MODES")
+            self.text(c, lab, self.f_small, DIM, (cx, cy + rad + 26), center=True)
+            if self.imode == "Lead":
+                self.text(c, "vib", self.f_small, DIM, (cx, cy - rad + 4), center=True)
+                self.text(c, "-2", self.f_small, DIM, (cx - rad + 8, cy), center=True)
+                self.text(c, "+2", self.f_small, DIM, (cx + rad - 8, cy), center=True)
+            return
         for sector, mod in STICK_SECTORS.items():
             ang = math.radians(sector * 45)
             lv = self.sm("sec_" + mod, 1.0 if self.stick_mod == mod else 0.0, 20)
@@ -1713,6 +1778,7 @@ class App:
             if self.audition_until and time.perf_counter() > self.audition_until:
                 self.audition_until = 0
                 self.stop_chord()
+            self.modes_tick(time.perf_counter())
             now = time.perf_counter()
             if now - last_poll > 0.3 and hasattr(self.eng, "poll"):
                 last_poll = now

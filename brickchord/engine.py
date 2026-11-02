@@ -22,6 +22,7 @@ import traceback
 import numpy as np
 
 DRUM_GAIN = {"kick": 0.9, "snare": 0.75, "hat": 0.7, "ohat": 0.7, "clap": 0.8, "rim": 0.6, "tom": 0.8, "shk": 0.7}
+REPEAT_STEPS = {"Repeat 1/4": 4, "Repeat 1/8": 2, "Repeat 1/16": 1}
 DRUM_PAN = {"hat": 0.15, "ohat": 0.15, "shk": -0.25, "rim": -0.15, "tom": 0.2}
 MAX_VOICES = 40      # hard cap on sounding voices (keeps the mixer inside its time budget)
 
@@ -61,6 +62,14 @@ class Engine:
         self.bass_bank = {}       # midi -> (a, None), rendered by the UI side
         self.bass_root = None
         self.arp_oct = 1
+        self.leads = []            # mono lead voice(s): the playing one + any fading out
+        self.lead_bend = 0.0
+        self.lead_vib = 0.0
+        self.vib_ph = 0.0
+        self.drone = None          # {"notes": [...], "snd": {...}, "restrike": bool}
+        self.seq = None            # compiled pattern from the UI
+        self.seq_on = False
+        self.seq_i = 0
         self.rel_len = int(0.4 * sr)
         self.sustains = True
         self.spread = 0
@@ -139,7 +148,110 @@ class Engine:
         return np.fft.rfft(h, self.flt_nfft).astype(np.complex64)
 
     def c_filter(self, f, r):
-        self.flt_t = (round(max(0.0, min(1.0, f)), 2), round(max(0.0, min(1.0, r)), 2))
+        self.flt_user = (max(0.0, min(1.0, f)), max(0.0, min(1.0, r)))
+        self.flt_t = (round(self.flt_user[0], 2), round(self.flt_user[1], 2))
+
+    # ------------------------------------------------------------ effects rack
+    # Stackable effects on the synth bus (drums and bass stay dry). Each is
+    # (on, amount 0..1, rate index into RATES). Synced to the tempo.
+    RATES = [("1/16", 0.25), ("1/8", 0.5), ("1/8.", 0.75), ("1/4", 1.0), ("1/2", 2.0),
+             ("1 bar", 4.0), ("2 bars", 8.0), ("4 bars", 16.0)]
+    FX_ORDER = ["Drive", "Lo-fi", "Chorus", "Flanger", "Vibrato", "Tremolo", "Gate",
+                "Auto-Pan", "Wide", "Filter LFO"]
+
+    def c_rack(self, rack):
+        self.rack = {k: tuple(v) for k, v in rack.items()}
+
+    def _lfo_phase(self, N, sr, beats):
+        bps = self.bpm / 60.0 / sr
+        return ((self.rack_beat + np.arange(N, dtype=np.float64) * bps) / beats) % 1.0
+
+    def _mod_delay(self, x, N, dl_l, dl_r):
+        """Read the synth bus through a delay that moves per sample (chorus,
+        flanger, vibrato). dl_*: delay in samples per output sample."""
+        H = self.mod_hist.shape[0]
+        frame = np.concatenate([self.mod_hist, x])
+        self.mod_hist = frame[-H:]
+        idx = np.arange(len(frame), dtype=np.float64)
+        base = H + np.arange(N, dtype=np.float64)
+        y = np.empty_like(x)
+        y[:, 0] = np.interp(base - dl_l, idx, frame[:, 0])
+        y[:, 1] = np.interp(base - dl_r, idx, frame[:, 1])
+        return y
+
+    def _rack(self, x, N, sr):
+        rack = getattr(self, "rack", None)
+        if not hasattr(self, "rack_beat"):
+            self.rack_beat = 0.0
+            self.mod_hist = np.zeros((1200, 2), np.float32)
+        beats_now = self.rack_beat
+        if rack:
+            R = self.RATES
+            on = {k: v for k, v in rack.items() if v[0]}
+            if "Drive" in on:
+                a = on["Drive"][1]
+                k = 1.0 + a * 8.0
+                x = np.tanh(x * k) / k * (1 + a * 1.5)          # saturate, keep loudness close
+            if "Lo-fi" in on:
+                a = on["Lo-fi"][1]
+                hold = 1 + int(a * 6)
+                if hold > 1:
+                    x = np.repeat(x[::hold], hold, axis=0)[:N]
+                steps = 2.0 ** (12 - a * 8)
+                x = np.round(x * steps) / steps
+            mods = [k for k in ("Chorus", "Flanger", "Vibrato") if k in on]
+            if mods:
+                ms = sr / 1000.0
+                acc = np.zeros_like(x)
+                wet_total = 0.0
+                for k in mods:
+                    a, ri = on[k][1], on[k][2]
+                    ph = self._lfo_phase(N, sr, R[ri][1])
+                    if k == "Chorus":
+                        dl = (12 + 4 * a * np.sin(2 * np.pi * ph)) * ms
+                        dr = (12 + 4 * a * np.sin(2 * np.pi * (ph + 0.25))) * ms
+                        acc += self._mod_delay(x, N, dl, dr) * (0.45 + 0.25 * a)
+                    elif k == "Flanger":
+                        dl = (0.6 + (2.4 + 3 * a) * (0.5 + 0.5 * np.sin(2 * np.pi * ph))) * ms
+                        acc += self._mod_delay(x, N, dl, dl) * (0.5 + 0.4 * a)
+                    else:                              # Vibrato: pitch wobble, fully wet
+                        dl = (5 + 3 * a * np.sin(2 * np.pi * ph)) * ms
+                        acc += self._mod_delay(x, N, dl, dl) - x
+                    wet_total += 1
+                x = x + acc / max(1.0, wet_total * 0.8)
+            else:
+                self.mod_hist = np.concatenate([self.mod_hist, x])[-self.mod_hist.shape[0]:]
+            if "Tremolo" in on:
+                a, ri = on["Tremolo"][1], on["Tremolo"][2]
+                ph = self._lfo_phase(N, sr, R[ri][1])
+                x = x * (1 - a * 0.5 * (1 - np.cos(2 * np.pi * ph)))[:, None].astype(np.float32)
+            if "Gate" in on:
+                a, ri = on["Gate"][1], on["Gate"][2]
+                ph = self._lfo_phase(N, sr, R[ri][1])
+                edge = np.clip((0.55 - ph) * 30, 0, 1) * np.clip(ph * 60, 0, 1)
+                x = x * (1 - a + a * edge)[:, None].astype(np.float32)
+            if "Auto-Pan" in on:
+                a, ri = on["Auto-Pan"][1], on["Auto-Pan"][2]
+                ph = self._lfo_phase(N, sr, R[ri][1])
+                pan = a * np.sin(2 * np.pi * ph)
+                x = x * np.stack([np.sqrt(0.5 - 0.5 * pan), np.sqrt(0.5 + 0.5 * pan)], 1).astype(np.float32) * 1.414
+            if "Wide" in on:
+                a = on["Wide"][1]
+                m = (x[:, 0] + x[:, 1]) * 0.5
+                sd = (x[:, 0] - x[:, 1]) * 0.5 * (1 + a * 1.5)
+                x = np.stack([m + sd, m - sd], 1).astype(np.float32)
+            if "Filter LFO" in on:
+                a, ri = on["Filter LFO"][1], on["Filter LFO"][2]
+                ph = (beats_now / R[ri][1]) % 1.0
+                f_user, r_user = getattr(self, "flt_user", (0.0, 0.0))
+                sweep = a * 0.85 * (0.5 - 0.5 * math.cos(2 * np.pi * ph))
+                self.flt_t = (round(max(f_user, sweep), 2), round(max(r_user, 0.35 * a), 2))
+            elif "Filter LFO" in getattr(self, "_rack_was", ()):
+                fu = getattr(self, "flt_user", (0.0, 0.0))
+                self.flt_t = (round(fu[0], 2), round(fu[1], 2))
+            self._rack_was = set(on)
+        self.rack_beat = beats_now + N * self.bpm / 60.0 / sr
+        return x.astype(np.float32)
 
     def _filter(self, x):
         L, N, nf = self.FLT_L, self.N, self.flt_nfft
@@ -305,6 +417,184 @@ class Engine:
         self._release(("bass",), at, int(0.015 * self.sr))
         self._bass(at, m, 1.0 if i % 2 == 0 else 0.8, int(step * 0.8))
 
+    # ------------------------------------------------------------ repeat
+    def _repeat(self, at, k):
+        if not self.chord:
+            return
+        step = 60.0 / self.bpm / 4 * self.sr * k
+        self._release(("strum",), at, int(0.01 * self.sr))
+        notes = self.chord["notes"][1:]
+        for i, m in enumerate(notes):
+            pan = (i / max(1, len(notes) - 1) - 0.5) * 0.5
+            self._note(at, m, "strum", 0.85, pan, int(step * 0.55), int(0.04 * self.sr))
+
+    # ------------------------------------------------------------ drum pads
+    def c_hit(self, part, gain=1.0):
+        if part in self.kit:
+            self._voice(self.kit[part], DRUM_GAIN.get(part, 0.75) * gain, DRUM_PAN.get(part, 0.0), self.t, "drum",
+                        srev=0, sdly=0, rel=int(0.02 * self.sr))
+
+    # ------------------------------------------------------------ drone layer
+    def c_drone(self, notes, snd):
+        """Sustained notes on their own layer: they keep going while you play
+        chords or lead on top. Sounds that don't sustain are re-struck."""
+        self._release(("drone",), self.t, int(0.8 * self.sr))
+        if not notes:
+            self.drone = None
+            return
+        restrike = any(snd.get(m) is not None and snd[m][1] is None for m in notes)
+        self.drone = {"notes": list(notes), "snd": snd, "restrike": restrike}
+        self._drone_strike(self.t)
+
+    def _drone_strike(self, at):
+        d = self.drone
+        if d.get("restrike"):
+            self._release(("drone",), at, int(0.3 * self.sr))
+        for i, m in enumerate(d["notes"]):
+            e = d["snd"].get(m)
+            if e is None:
+                continue
+            pan = (i / max(1, len(d["notes"]) - 1) - 0.5) * 0.8
+            self._voice(e, 0.7, pan, at, "drone", m, None, int(1.2 * self.sr))
+
+    # ------------------------------------------------------------ lead voice
+    class _Lead:
+        pass
+
+    def c_lead_on(self, midi, snd, glide=0.0):
+        cur = self.leads[-1] if self.leads and not self.leads[-1].rel else None
+        if cur is not None and glide > 0.005:
+            cur.target, cur.glide = midi, glide        # legato slide to the new note
+            return
+        for v in self.leads:                           # quick fade of the old note
+            if not v.rel:
+                v.rel, v.rel_n = True, int(0.02 * self.sr)
+        if snd is None:
+            return
+        v = self._Lead()
+        v.a, v.l = snd
+        v.base = v.target = midi
+        v.ratio = 1.0
+        v.glide = glide
+        v.pos = 0.0
+        v.env = 1.0
+        v.rel, v.rel_n = False, 0
+        self.leads.append(v)
+        self.leads = self.leads[-3:]
+
+    def c_lead_off(self):
+        for v in self.leads:
+            if not v.rel:
+                v.rel, v.rel_n = True, max(64, int(min(self.rel_len, 0.6 * self.sr)))
+
+    def c_lead_mod(self, bend, vib):
+        self.lead_bend, self.lead_vib = float(bend), float(vib)
+
+    def _lead_fetch(self, v, idx):
+        a, l = v.a, v.l
+        na = len(a)
+        out = np.zeros((len(idx), 2), np.float32)
+        m = idx < na
+        out[m] = a[idx[m]]
+        if l is not None:
+            mm = ~m
+            out[mm] = l[(idx[mm] - na) % len(l)]
+        return out
+
+    def _lead_render(self, mix, rbus, dbus, N, sr):
+        i = np.arange(N, dtype=np.float64)
+        vib = 1.0
+        if self.lead_vib > 0.01:
+            ph = self.vib_ph + 2 * np.pi * 5.5 * i / sr
+            vib = 2.0 ** (self.lead_vib * 0.6 * np.sin(ph) / 12.0)
+        self.vib_ph = (self.vib_ph + 2 * np.pi * 5.5 * N / sr) % (2 * np.pi)
+        bend = 2.0 ** (self.lead_bend / 12.0)
+        keep = []
+        for v in self.leads:
+            rt = 2.0 ** ((v.target - v.base) / 12.0)
+            if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
+                c = math.exp(-1.0 / (v.glide * 0.35 * sr))
+                r = rt + (v.ratio - rt) * c ** (i + 1)
+            else:
+                r = np.full(N, rt)
+            v.ratio = float(r[-1])
+            r = r * vib * bend
+            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
+            v.pos = float(pos[-1] + r[-1])
+            i0 = pos.astype(np.int64)
+            fr = (pos - i0).astype(np.float32)[:, None]
+            seg = self._lead_fetch(v, i0) * (1 - fr) + self._lead_fetch(v, i0 + 1) * fr
+            if v.rel:
+                env = v.env - np.arange(1, N + 1, dtype=np.float32) / max(1, v.rel_n)
+                env = np.clip(env, 0, 1)
+                v.env = float(env[-1])
+                seg *= (env * env)[:, None]
+            seg *= 0.95
+            mix += seg
+            rbus += seg
+            dbus += seg
+            if v.l is None and v.pos >= len(v.a):
+                continue
+            if v.rel and v.env <= 0.0:
+                continue
+            keep.append(v)
+        self.leads = keep
+
+    # ------------------------------------------------------------ sequencer
+    def c_seq(self, compiled=None, running=None, restart=False):
+        if compiled is not None:
+            self.seq = compiled or None
+        if running is not None:
+            if running and not self.seq_on:
+                restart = True
+            self.seq_on = bool(running)
+            if not running:
+                self._release(("seqc", "seql", "seqb"), self.t, int(0.08 * self.sr))
+        if restart:
+            self.seq_i = 0
+
+    def _seq_step(self, at):
+        sq = self.seq
+        if not (sq and self.seq_on):
+            return
+        n = sq["len"]
+        i = self.seq_i % n
+        self.seq_i += 1
+        ev = sq["steps"][i]
+        step = 60.0 / self.bpm / 4 * self.sr
+        snd = sq["snd"]
+        for part, g in ev.get("drums", ()):
+            if part in self.kit:
+                self._voice(self.kit[part], DRUM_GAIN.get(part, 0.75) * g, DRUM_PAN.get(part, 0.0), at, "drum",
+                            srev=0, sdly=0, rel=int(0.02 * self.sr))
+        c = ev.get("chord")
+        if c:
+            notes, dur = c
+            gate = int(step * dur * 0.95)
+            self._release(("seqc",), at, int(0.03 * self.sr))
+            first = 0 if self.bass_mode in ("Patch", "Sub + Patch") else 1
+            for k, m in enumerate(notes[first:]):
+                e = snd.get(m)
+                if e is not None:
+                    pan = (k / max(1, len(notes) - 1) - 0.5) * 0.6
+                    self._voice(e, 0.85, pan, at, "seqc", m, gate, int(min(self.rel_len, 0.5 * self.sr)))
+            if self.bass_mode not in ("Patch", "Off"):
+                root = notes[0] - 12
+                while root < 28:
+                    root += 12
+                b = self.bass_bank.get(root)
+                if b is not None:
+                    self._release(("seqb",), at, int(0.02 * self.sr))
+                    self._voice(b, 0.75 * self.bass_gain, 0.0, at, "seqb", root, gate, int(0.05 * self.sr),
+                                srev=0, sdly=0)
+        ld = ev.get("lead")
+        if ld:
+            m, dur = ld
+            e = snd.get(m)
+            if e is not None:
+                self._release(("seql",), at, int(0.02 * self.sr))
+                self._voice(e, 0.9, 0.0, at, "seql", m, int(step * dur * 0.9), int(min(self.rel_len, 0.3 * self.sr)))
+
     def c_params(self, bpm=None, rel=None, sustains=None, spread=None, mode=None, quantize=None):
         if quantize is not None:
             self.quantize = quantize
@@ -464,6 +754,8 @@ class Engine:
             return
         if mode.startswith("Strum"):
             self._strum("d" if revoice else "D", t)
+        elif mode.startswith("Repeat"):
+            self._repeat(t, REPEAT_STEPS.get(mode, 2))
         else:
             if not revoice:
                 self.pat_i, self.pat_dir = 0, 1
@@ -540,6 +832,9 @@ class Engine:
                 gain = DRUM_GAIN.get(part, 0.75) * (0.4 if ch == "g" else 1.0)
                 pan = DRUM_PAN.get(part, 0.0)
                 self._voice(self.kit[part], gain, pan, when, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
+        self._seq_step(at)
+        if self.drone and self.drone.get("restrike") and s % 8 == 0:
+            self._drone_strike(at)
         if not self.chord:
             return
         mode = self.mode
@@ -553,6 +848,10 @@ class Engine:
         elif mode.startswith("Arp") and not fresh:
             if "1/16" in mode or s % 2 == 0:
                 self._arp_step(at)
+        elif mode.startswith("Repeat") and not fresh:
+            k = REPEAT_STEPS.get(mode, 2)
+            if s % k == 0:
+                self._repeat(at, k)
 
     # ------------------------------------------------------------ render one block
     def process(self):
@@ -602,7 +901,7 @@ class Engine:
             seg *= g[:, None]
             seg[:, 0] *= v.lg
             seg[:, 1] *= v.rg
-            if v.tag == "drum" or v.tag == "bass":
+            if v.tag in ("drum", "bass", "seqb"):
                 dmix[o:] += seg
                 if not v.done:
                     live.append(v)
@@ -615,6 +914,8 @@ class Engine:
             if not v.done:
                 live.append(v)
         self.voices = live
+        if self.leads:
+            self._lead_render(mix, rbus, dbus, N, sr)
 
         # smoothed fx amounts (linear ramp across the block = no zipper noise)
         ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
@@ -630,6 +931,7 @@ class Engine:
         mix += self._reverb(rbus) * 1.1
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]
+        mix = self._rack(mix, N, sr)
         out = np.tanh((self._filter(mix) + frame[:N]) * mv)
 
         self.t += N

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased: modes, engines, effects rack, sequencer
+- Mode wheel: click the left stick (L3) to open it, push the stick toward Play, Lead, Drone, Drums, Sequencer or Effects, let go to switch. L3 is learned once on first launch.
+- New synth engines: FM (FM Keys, FM Bell, FM Brass), Karplus-Strong plucked strings (Nylon Guitar, Steel Guitar), Drawbar Organ, Vox Pad (formant vowels that morph) and Air Pad (shaped noise). 23 sounds in total.
+- Effects rack with LFOs, stackable: Drive, Lo-fi, Chorus, Flanger, Vibrato, Tremolo, Gate, Auto-Pan, Wide (stereo) and Filter LFO, each with an amount and a tempo-synced rate (1/16 to 4 bars), plus Glide. Randomize with X. Runs alongside the existing reverbs and delays.
+- Lead mode: single-note melodies on the 7 chord buttons, Y/L1 octave up/down, R1 sharp, left stick bends and adds vibrato, legato glide.
+- Drone mode: tap a degree to sustain a drone of that chord root (Y adds the 3rd), play other modes on top.
+- Drums mode: 8 finger-drum pads (kick, snare, hats, clap, tom, rim, shaker), L1 soft, R1 accent.
+- Repeat play modes: Repeat 1/4, 1/8, 1/16 retrigger the held chord in time.
+- 8-track step sequencer (Chords, Lead, Kick, Snare, Hat, Open Hat, Clap, Perc), up to 32 steps, live record with X while playing in any mode, saved with your settings.
+- Not yet tested on hardware.
+
 ## v0.1.0-alpha (2026-10-31)
 First public alpha.
 - 15 sounds: adds Wide Supersaw, Prophet Poly, Electric Piano, Glass Bells, Choir Pad, Acid Chord, Lofi Strings, Sub Pad

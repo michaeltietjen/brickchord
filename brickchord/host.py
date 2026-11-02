@@ -367,6 +367,11 @@ class LocalHost:
         self.eng.post(name, *args)
 
     def chord(self, notes, keys, revoice):
+        self.eng.post("chord", notes, self.resolve(keys), revoice)
+
+    def resolve(self, keys):
+        """Sounds for {midi: key}: cached, a resampled stand-in, or rendered now
+        if the sound is brand new. Missing notes go to the background renderer."""
         self.last_play = time.time()
         self._pause_workers(True)
         snd = {}
@@ -382,10 +387,10 @@ class LocalHost:
                 if k not in self.pending:
                     missing.append(k)
             snd[m] = e
-        self.eng.post("chord", notes, snd, revoice)
         busy = any(w.poll() is None for w in self.workers)
         if missing and not busy and self.job_patch != missing[0][1]:
             self._start_workers([k for k in missing if k not in self.cache])
+        return snd
 
     def request(self, pri, keys):
         if pri == "reset":

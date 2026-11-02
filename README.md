@@ -16,9 +16,12 @@ and everything plays on a single sample-accurate clock with a built-in drum mach
 - **Chord modifiers**: hold Y (flip major/minor), L1 (7th), R1 (sus4), L1+R1 (9th)
 - **Left stick** bends the held chord 8 ways: 7, maj7, 9, aug, flip, dim, sus4, sus2
 - **Right stick** for effects: up = wetter (reverb and delay together), down = dry; left = filter, right = resonance; click to hold
-- **Analog-VA engine**: detuned saws, PWM, sub oscillator, resonant low-pass with its own envelope. 15 sounds, each editable in the Sound Editor
+- **Six modes** on a wheel (click the left stick): Play, Lead (melodies with bend, vibrato and glide), Drone, Drums (8 pads), Sequencer and Effects
+- **Synth engines**: analog-VA (detuned saws, PWM, sub, resonant filter), FM, plucked strings, drawbar organ, formant vox and noise pads. 23 sounds, editable in the Sound Editor
+- **Effects rack with LFOs**: Drive, Lo-fi, Chorus, Flanger, Vibrato, Tremolo, Gate, Auto-Pan, Wide, Filter LFO and Glide, stackable, tempo-synced, with randomize
+- **8-track step sequencer** (chords, lead and 6 drum tracks), up to 32 steps, with live recording
 - **Synth bass** on its own dry bus, with Synth, Pulse, Octaves, Walk, Sub + Patch, Patch and Off modes and a level control
-- **12 play modes**: Chord, Strum (Folk / Pop / Skank), Slop, Harp Up / Down, and 5 arpeggiators that span 1 to 4 octaves
+- **15 play styles**: Chord, Strum (Folk / Pop / Skank), Slop, Harp Up / Down, 5 arpeggiators that span 1 to 4 octaves, and Repeat 1/4, 1/8, 1/16
 - **Drum machine** with 27 beats (house, techno, jungle, drum & bass, 2-step, UK funky, footwork, neo-soul and more), ghost notes and swing; strums, arps and bass lock to its clock, with optional quantize
 - **8 reverbs** (Hall, Room, Plate, Big Hall, Spring, Reverse, Gated, Lo-fi Dark) and **6 delays** (Ping-Pong, Straight, Tape, Dub, Slapback, Multi-Tap), tempo-synced with dotted and triplet times. Effects touch only the synth, so drums and bass stay punchy
 - **An animated screen**: a self-playing Tetris well that drops a piece on every chord and clears lines in a burst of bricks, shattering chord tiles, falling chord names, a live oscilloscope, and a launch animation that plays the home chord of your key
@@ -50,13 +53,16 @@ NumPy in `brickchord/_vendor/` (or have NumPy available to the system Python).
 | D-pad ← ↑ → ↓ | Chords I, ii, iii, IV |
 | X, A, B | Chords V, vi, vii° |
 | Y / L1 / R1 (hold) | Flip / 7th / sus4 (L1+R1 = 9th) |
-| Left stick | Chord bends |
+| Left stick | Chord bends (Play), bend and vibrato (Lead) |
+| Click left stick | Mode wheel: push toward a mode, let go to switch |
 | Right stick ↑ ↓ | Wet (reverb + delay) / dry |
 | Right stick ← → | Filter / resonance |
 | Click right stick | Hold the current effect settings |
 | Start | Beat on/off |
 | Select | Settings |
 | Select + Start | Quit |
+
+In the other modes the screen shows its own controls. Sequencer: D-pad moves, A sets a step, B clears, L1/R1 change the value, X records live, Y sets the length, Start plays. Effects: D-pad up/down picks an effect, A toggles it, left/right sets the amount, L1/R1 the rate, X randomizes, Y turns all off.
 
 ## How it works
 - `engine.py` mixes one continuous stereo stream in NumPy and schedules every note, strum, arp, bass note and drum hit in

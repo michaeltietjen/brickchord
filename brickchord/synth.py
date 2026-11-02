@@ -48,6 +48,24 @@ PATCHES = [
          cutoff=1500, res=.7, fenv=.3, fa=.5, fd=1.0, fs=.8, a=.5, d=1.0, s=.9, r=1.5, pwm=0),
     dict(name="Soft Tri Organ", oscs=[("tri", 0, .6, -.3, 0), ("tri", 1200, .35, .3, 0), ("tri", 3, .3, 0, -1)],
          cutoff=4000, res=.8, fenv=0, fa=.01, fd=.1, fs=1, a=.02, d=.2, s=1, r=.2, pwm=0),
+    # ---- other synth engines (engine=...): FM, plucked string, air/noise; vox = formant wavetable
+    dict(name="FM Keys", engine="fm", oscs=[], fm=dict(ratio=1.0, idx=3.2, idx_s=0.6, idx_t=0.35, det=4),
+         cutoff=6000, res=.7, fenv=0, fa=.01, fd=.2, fs=1, a=.003, d=1.4, s=.35, r=.5, pwm=0),
+    dict(name="FM Bell", engine="fm", oscs=[], fm=dict(ratio=3.5, idx=5.0, idx_s=1.0, idx_t=0.6, det=3),
+         cutoff=8000, res=.7, fenv=0, fa=.01, fd=.2, fs=1, a=.002, d=2.6, s=.0, r=1.4, pwm=0),
+    dict(name="FM Brass", engine="fm", oscs=[], fm=dict(ratio=1.0, idx=1.0, idx_s=3.0, idx_t=0.25, det=6),
+         cutoff=6000, res=.7, fenv=0, fa=.01, fd=.2, fs=1, a=.06, d=.6, s=.8, r=.35, pwm=0),
+    dict(name="Nylon Guitar", engine="pluck", oscs=[], pluck=dict(bright=.35, t60=2.2, body=.25),
+         cutoff=6000, res=.7, fenv=0, fa=.01, fd=.2, fs=1, a=.002, d=2.2, s=.0, r=.25, pwm=0),
+    dict(name="Steel Guitar", engine="pluck", oscs=[], pluck=dict(bright=.75, t60=3.2, body=.15),
+         cutoff=6000, res=.7, fenv=0, fa=.01, fd=.2, fs=1, a=.002, d=2.8, s=.0, r=.3, pwm=0),
+    dict(name="Drawbar Organ", gain=1.3, oscs=[("sine", 0, .55, -.2, 0), ("sine", 1200, .4, .2, 0), ("sine", 1902, .3, 0, 0),
+                                               ("sine", 2400, .22, -.3, 0), ("sine", 0, .5, .3, -1)],
+         cutoff=8000, res=.7, fenv=0, fa=.01, fd=.1, fs=1, a=.008, d=.2, s=1, r=.12, pwm=0),
+    dict(name="Vox Pad", gain=1.6, oscs=[("vox", -7, .6, -.6, 0), ("vox", 7, .6, .6, 0), ("sine", 0, .25, 0, -1)],
+         cutoff=5000, res=.7, fenv=0, fa=.5, fd=1.0, fs=1, a=.6, d=1.0, s=.9, r=1.6, pwm=.9),
+    dict(name="Air Pad", engine="noise", oscs=[], noise=dict(width=.035, tilt=.9, floor=.04),
+         cutoff=3500, res=.7, fenv=0, fa=.5, fd=1.0, fs=1, a=.9, d=1.0, s=.9, r=2.0, pwm=0),
 ]
 
 
@@ -81,7 +99,19 @@ def _harm_amps(wave, k, duty):
     return (2.0 / (np.pi * k))[None, :] * np.sin(np.pi * k[None, :] * duty[:, None])
 
 
-WAVES = ["saw", "square", "pulse", "tri", "sine"]
+WAVES = ["saw", "square", "pulse", "tri", "sine", "vox"]
+
+
+def _vox_amps(k, f, duty):
+    """Formant wavetable: a saw shaped by vowel formants that morph from 'ah' to
+    'oh' as duty (the PWM LFO) moves. -> (B,H)"""
+    m = np.clip((duty - 0.1) / 0.8, 0, 1)[:, None]              # 0 = ah, 1 = oh
+    hz = (k * f)[None, :]
+    out = np.full((len(duty), len(k)), 0.04, np.float32)
+    for fa, fo, bw, g in ((800, 450, 110, 1.0), (1150, 800, 140, 0.6), (2900, 2830, 220, 0.3)):
+        F = fa + (fo - fa) * m
+        out = out + g * np.exp(-((hz - F) / bw) ** 2)
+    return (out / k[None, :] ** 0.3).astype(np.float32)
 
 # Sound Editor parameters: (key, label, min, max, step)
 EDIT_PARAMS = [
@@ -294,13 +324,16 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
     b = idx_n // BLOCK
     u = ((idx_n % BLOCK) / BLOCK).astype(np.float32)
 
-    for wave, cents, level, pan, octv in p["oscs"]:
+    eng = p.get("engine", "va")
+    if eng != "va":
+        out = _other_engine(eng, p, f0, n, attack_len)
+    for wave, cents, level, pan, octv in (p["oscs"] if eng == "va" else ()):
         f = f0 * (2 ** octv) * 2 ** (cents / 1200.0)
         hmax = int(min(NH - 1, (SR * 0.46) / f))
         if hmax < 1:
             continue
         k = np.arange(1, hmax + 1, dtype=np.float32)
-        base = _harm_amps(wave, k, duty)
+        base = _vox_amps(k, f, duty) if wave == "vox" else _harm_amps(wave, k, duty)
         w = (k[None, :] * f) / fc[:, None]
         filt = 1.0 / np.sqrt((1 - w * w) ** 2 + (w / q) ** 2)
         amps = base * filt                                   # (nb, H)
@@ -351,6 +384,65 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
 
 
 GAIN = 0.12
+
+
+def _other_engine(eng, p, f0, n, attack_len):
+    """Raw stereo signal for the non-VA engines (envelopes are applied after)."""
+    rng = np.random.RandomState(int(f0 * 10) % 100000)
+    t = np.arange(n, dtype=np.float32) / SR
+    out = np.zeros((n, 2), np.float32)
+    if eng == "fm":
+        q = p["fm"]
+        idx = q["idx_s"] + (q["idx"] - q["idx_s"]) * np.exp(-t / max(0.01, q["idx_t"]))
+        idx = np.where(t < attack_len, idx, idx[min(n - 1, int(attack_len * SR))])   # steady loop
+        for ch, c in ((0, -q["det"]), (1, q["det"])):
+            fc = f0 * 2 ** (c / 1200.0)
+            mod = np.sin(2 * np.pi * fc * q["ratio"] * t + rng.rand() * 6.28)
+            out[:, ch] = np.sin(2 * np.pi * fc * t + idx * mod)
+        return out * 1.5
+    if eng == "pluck":
+        q = p["pluck"]
+        b = q["bright"]
+        P = int(math.ceil(2 * SR / f0))                    # period in samples at ~2x rate
+        rate = (P + 0.5 - 0.5 * b) * f0                    # loss filter adds (0.5-0.5b) samples of delay
+        N = int(n * rate / SR) + P + 2
+        y = np.zeros(N, np.float32)
+        ex = rng.uniform(-1, 1, P).astype(np.float32)
+        for _ in range(int((1 - b) * 4) + 1):              # darker pick = smoother excitation
+            ex = 0.5 * (ex + np.roll(ex, 1))
+        y[1:P + 1] = ex - ex.mean()
+        t60 = q["t60"] * (261.6 / f0) ** 0.35              # higher strings ring shorter
+        g = 10 ** (-3.0 * (P / rate) / max(0.05, t60))     # loss per trip round the string
+        for s0 in range(P + 1, N - P, P):
+            seg = y[s0 - P:s0]
+            prev = y[s0 - P - 1:s0 - 1]
+            # Karplus-Strong: average with the previous sample (string loss);
+            # brighter strings average less
+            y[s0:s0 + P] = g * (seg * (0.5 + 0.5 * b) + prev * (0.5 - 0.5 * b))
+        sig = np.interp(np.arange(n) * (rate / SR), np.arange(N), y).astype(np.float32)
+        body = q.get("body", 0)
+        if body:                                           # a touch of a resonant body
+            d = int(SR * 0.0023)
+            sig[d:] += body * sig[:-d]
+        out[:, 0] = sig
+        out[1:, 1] = sig[:-1] * 0.97
+        pk = float(np.abs(out).max()) or 1.0
+        return out * (1.7 / pk)
+    if eng == "noise":
+        q = p["noise"]
+        for ch in (0, 1):
+            w = rng.standard_normal(n).astype(np.float32)
+            F = np.fft.rfft(w)
+            hz = np.fft.rfftfreq(n, 1.0 / SR)
+            G = np.full(len(hz), q["floor"], np.float32)
+            kmax = int(min(40, (SR * 0.45) // f0))
+            for k in range(1, kmax + 1):
+                G += (k ** -q["tilt"]) * np.exp(-((hz - k * f0) / (f0 * q["width"] * k ** 0.5)) ** 2)
+            G *= 1.0 / np.sqrt(1 + (hz / p["cutoff"]) ** 4)
+            out[:, ch] = np.fft.irfft(F * G, n)
+        pk = float(np.abs(out).max()) or 1.0
+        return out * (1.7 / pk)
+    return out
 
 
 def _to_bytes(x):
