@@ -102,6 +102,8 @@ class Engine:
         self.kit = {}
         self.kits = {}            # name -> kit (the Classic one is also self.kit)
         self.tuned = {}           # (kit, lane, semitones) -> pitched drum sound
+        # metronome (Bricklab): "off", "rec" (while counting in, armed or recording) or "on"
+        self.metro, self.metro_lvl, self.metro_snd = "off", 0.7, None
         # chord / pattern state
         self.mode = "Chord"
         self.chord = None         # dict: notes(list), snd(dict midi->(a,l)), ...
@@ -570,6 +572,18 @@ class Engine:
         for v in self.voices:
             if v.part == "ohat" and v.trk == key and v.start < at and (v.rel_at is None or v.rel_at > at):
                 v.rel_at, v.rel_len = int(at), fast
+
+    def c_metro(self, mode, level, snd=None):
+        self.metro = mode if mode in ("off", "rec", "on") else "off"
+        self.metro_lvl = max(0.0, min(1.0, float(level)))
+        if snd:
+            self.metro_snd = snd
+
+    def _click(self, at, bar):
+        snd = self.metro_snd[0 if bar else 1] if self.metro_snd else self.kit.get("click")
+        if snd is not None:
+            self._voice(snd, self.metro_lvl * (1.0 if bar else 0.8), 0.0, at, "drum", srev=0, sdly=0,
+                        rel=int(0.01 * self.sr))
 
     def c_kits(self, kits):
         self.kits = dict(kits)
@@ -1109,9 +1123,11 @@ class Engine:
             self._next_pattern(at)
         self.lp_pos = pos
         if pos < 0:
-            if self.lp_state == "count" and pos % 4 == 0 and "click" in self.kit:
-                self._voice(self.kit["click"], 0.9 if pos % 16 == 0 else 0.5, 0.0, at, "drum", srev=0, sdly=0,
-                            rel=int(0.01 * self.sr))
+            if self.lp_state == "count" and pos % 4 == 0:
+                lvl = self.metro_lvl
+                self.metro_lvl = max(lvl, 0.5)            # the count-in always clicks
+                self._click(at, pos % 16 == 0)
+                self.metro_lvl = lvl
             return
         if pos == 0 and self.lp_state == "count":
             self.lp_rec_p = self.cur
@@ -1120,6 +1136,9 @@ class Engine:
             self.lp_rec_end = self.lp_rec_start + self.pats[self.cur].len
             self.lp_state = "rec"
             self.lp_ver += 1
+        if pos % 4 == 0 and self.metro_lvl > 0 and (
+                self.metro == "on" or (self.metro == "rec" and self.lp_state in ("rec", "armed", "count"))):
+            self._click(at, pos % 16 == 0)
         p = self.cur
         self._nocap = True
         try:
@@ -1286,8 +1305,10 @@ class Engine:
                         "chime", srev=1.0, sdly=0.6, rel=int(0.05 * sr))
 
     def c_click(self):
-        if "click" in self.kit:
-            self._voice(self.kit["click"], 0.8, 0.0, self.t, "drum", srev=0, sdly=0, rel=int(0.01 * self.sr))
+        lvl = self.metro_lvl
+        self.metro_lvl = max(lvl, 0.3)
+        self._click(self.t, True)
+        self.metro_lvl = lvl
 
     def c_chord(self, notes, snd, revoice=False):
         mode = self.mode

@@ -718,7 +718,7 @@ def lane_files(files):
 
 
 def kit_arrays(gain=0.5, kit=None):
-    kit = drum_kit() if kit is None else kit
+    kit = matched(builtin_kit("Classic"), drum_kit()) if kit is None else kit
     return {k: (np.repeat((v * gain)[:, None], 2, axis=1).astype(np.float32), None) for k, v in kit.items()}
 
 
@@ -739,12 +739,52 @@ def matched(kit, ref):
     return out
 
 
+METRO_SOUNDS = ["Click", "Wood", "Beep", "Rim"]
+
+
+def metro_click(name):
+    """Metronome sounds: (bar downbeat, other beats) as mono float32."""
+    def one(f, sec, accent):
+        t = np.arange(int(sec * SR)) / SR
+        if name == "Wood":
+            x = (np.sin(2 * np.pi * f * t) + 0.55 * np.sin(2 * np.pi * f * 2.76 * t)) * np.exp(-t * 55)
+            x += _hp(_noise(len(t), 41)) * np.exp(-t * 400) * 0.25
+        elif name == "Beep":
+            x = np.sin(2 * np.pi * f * t) * np.minimum(t / 0.002, 1) * np.exp(-t * 30)
+        elif name == "Rim":
+            x = (np.sin(2 * np.pi * f * 0.55 * t) * 0.7 + _hp(_noise(len(t), 42)) * 0.5) * np.exp(-t * 80)
+        else:
+            x = np.sin(2 * np.pi * f * t) * np.exp(-t * 70)
+        x = x / (np.max(np.abs(x)) + 1e-9) * (0.6 if accent else 0.45)
+        fade = int(0.004 * SR)
+        x[-fade:] *= np.linspace(1, 0, fade)
+        return x.astype(np.float32)
+    hi, lo = {"Wood": (1250, 880), "Beep": (1760, 1320), "Rim": (2900, 2200)}.get(name, (2000, 1500))
+    return one(hi, 0.1, True), one(lo, 0.1, False)
+
+
+def metro_arrays(name):
+    return tuple((np.repeat(x[:, None], 2, axis=1), None) for x in metro_click(name))
+
+
+KITS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kits")
+
+
+def builtin_kit(name):
+    """A built-in kit: the WAVs tools/make_kits.py rendered into kits/<name>/,
+    or (if they are missing) the older kit synthesized here."""
+    if os.path.isdir(os.path.join(KITS_DIR, name)):
+        return sample_kit(KITS_DIR, name)          # lanes missing there come from drum_kit()
+    return drum_kit() if name == "Classic" else drum_kit_style(name)
+
+
 def all_kits(folder=None, gain=0.5):
-    """Every kit, ready for the engine: {name: {lane: (stereo, None)}}."""
+    """Every kit, ready for the engine: {name: {lane: (stereo, None)}}.
+    Levels follow the original Classic kit, so older songs keep their mix."""
     ref = drum_kit()
-    out = {"Classic": kit_arrays(gain, ref)}
-    for k in BUILTIN_KITS[1:]:
-        out[k] = kit_arrays(gain, matched(drum_kit_style(k), ref))
+    out = {}
+    for k in BUILTIN_KITS:
+        out[k] = kit_arrays(gain, matched(builtin_kit(k), ref))
     for k in (sample_kit_names(folder) if folder else []):
         try:
             out[k] = kit_arrays(gain, matched(sample_kit(folder, k), ref))

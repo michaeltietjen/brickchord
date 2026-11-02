@@ -255,6 +255,7 @@ class SongMixin:
             self.ensure_bass(sorted(bass))
         self.eng.post("lp", "song", self.song_rows, self.song_on)
         self.eng.post("lp", "pat", self.start_p)
+        self.push_metro()
         self._saved = {}
 
     def migrate_drum_track(self, p, evs):
