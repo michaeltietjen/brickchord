@@ -1752,6 +1752,9 @@ class App(modes.ModesMixin):
             self.eng.underruns, self.eng.load, len(e.voices) if e else -1, getattr(self.eng, "misses", 0),
             len(getattr(self.eng, "cache", ())), (e.t / e.sr) if e else -1, synth.PATCHES[self.patch]["name"],
             self.mode()), flush=True)
+        prof = getattr(e, "prof", None)
+        if prof:
+            print("profile ms/block: " + "  ".join("%s %.1f" % kv for kv in prof), flush=True)
 
     def frame_interval(self, now):
         """30 fps while something is moving, 15 fps at rest, and back off
@@ -1785,6 +1788,8 @@ class App(modes.ModesMixin):
             if self.audition_until and time.perf_counter() > self.audition_until:
                 self.audition_until = 0
                 self.stop_chord()
+            if hasattr(self.eng, "pump"):
+                self.eng.pump()
             self.modes_tick(time.perf_counter())
             now = time.perf_counter()
             if now - last_poll > 0.3 and hasattr(self.eng, "poll"):
@@ -1833,7 +1838,7 @@ def main():
     cfg = load_cfg()
     s = cfg["settings"]
     block = s.get("latency", 1024) if s.get("latency") in (512, 1024, 2048) else 1024
-    eng = host.start(SR, block, cfg.get("engine_mode", "local"))
+    eng = host.start(SR, block, cfg.get("engine_mode", "split"))
     print("audio host:", eng.kind, "block", block, flush=True)
     try:
         App(eng, cfg).run()

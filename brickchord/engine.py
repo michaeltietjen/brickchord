@@ -1114,6 +1114,7 @@ class Engine:
             when, _, fn, args = heapq.heappop(self.events)
             fn(max(when, t), *args) if fn in (self._ev_note, self._ev_bass) else fn(*args)
 
+        t1 = time.perf_counter()
         mix = np.zeros((N, 2), np.float32)
         dmix = np.zeros((N, 2), np.float32)      # drums: dry, no effects
         tb = {}                                  # looper track buses
@@ -1163,8 +1164,10 @@ class Engine:
         mv = self.master + (self.master_t - self.master) * ramp
         self.rev, self.dly, self.master = self.rev_t, self.dly_t, self.master_t
 
+        t2 = time.perf_counter()
         # live synth: its rack, then its filter, then sends to the shared delay/reverb
         x = self._filter(self.live, self._rack(self.live, mix, N, sr))
+        t3 = time.perf_counter()
         out = x.copy()
         rsend = x * rv
         dsend = x * dv
@@ -1188,10 +1191,13 @@ class Engine:
             if tr.ds:
                 dsend += y * tr.ds
         self.rack_beat += N * self.bpm / 60.0 / sr
+        t4 = time.perf_counter()
         # delay (type chosen in Settings), tempo synced except Slapback
         y = self._delay(dsend, N, sr)
         out += y
+        t5 = time.perf_counter()
         out += self._reverb(rsend + y * 0.35) * 1.1
+        t6 = time.perf_counter()
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]
         out = np.tanh((out + frame[:N]) * mv)
@@ -1199,6 +1205,11 @@ class Engine:
         self.t += N
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)
         el = time.perf_counter() - t0
+        st = (("cmds+clock", t1 - t0), ("voices", t2 - t1), ("live fx", t3 - t2), ("tracks", t4 - t3),
+              ("delay", t5 - t4), ("reverb", t6 - t5), ("total", el))
+        pa = getattr(self, "_pacc", None)
+        self._pacc = [(k, v * 1000 if pa is None else pa[i][1] * 0.97 + v * 1000 * 0.03) for i, (k, v) in enumerate(st)]
+        self.prof = [(k, round(v, 2)) for k, v in self._pacc]
         if el > N / sr:
             self.underruns += 1
         self.load = 0.9 * self.load + 0.1 * (el / (N / sr))

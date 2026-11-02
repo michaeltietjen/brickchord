@@ -308,22 +308,9 @@ class ModesMixin:
         self.lp_resolve_after = time.perf_counter() + 0.3     # once the engine has the events
 
     def lp_resolve(self, k, replace=False):
-        e = self.lp_e()
         pj = self.lp_meta[k]["pj"]
-        if e is None or not pj or not hasattr(self.eng, "track_sounds"):
-            return
-        tr = e.lp_tracks[k]
-        midis = sorted({ev[2] for ev in list(tr.ev) if ev[1] == "n"})
-        if not replace:
-            midis = [m for m in midis if m not in tr.snd]
-        if not midis:
-            return
-        snd, missing = self.eng.track_sounds({m: (m, pj) for m in midis})
-        self.eng.post("lp", "snd", k, snd, replace)
-        if missing:
-            self.lp_pending[k] = {kk[0]: kk for kk in missing}
-        else:
-            self.lp_pending.pop(k, None)
+        if pj and hasattr(self.eng, "lp_sound"):
+            self.eng.lp_sound(k, pj, replace)
 
     def looper_combo(self, name, down):
         """SELECT held + a button: run the looper without leaving your instrument."""
@@ -584,17 +571,6 @@ class ModesMixin:
                         self.flash("TRACK %d RECORDED" % (k + 1))
                 self.lp_dirty = True
             self.lp_last_state = st
-        if self.lp_pending and now - self.lp_retry_t > 1.5 and hasattr(self.eng, "track_sounds"):
-            self.lp_retry_t = now
-            for k, keys in list(self.lp_pending.items()):
-                snd, missing = self.eng.track_sounds(keys, standins=False)
-                if snd:
-                    self.eng.post("lp", "snd", k, snd, False)
-                left = {kk[0]: kk for kk in missing}
-                if left:
-                    self.lp_pending[k] = left
-                else:
-                    del self.lp_pending[k]
         if self.lp_dirty and not st and now - self.lp_save_t > 3.0:
             self.lp_save_t = now
             self.lp_dirty = False

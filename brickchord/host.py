@@ -185,6 +185,11 @@ class ProcHost:
                 p.terminate()
 
 
+class Ref(tuple):
+    """A note key standing in for its sound: the audio process swaps in the
+    actual samples, so the UI never ships sample arrays around."""
+
+
 def _resample(e, r):
     """Pitch a rendered note by ratio r (attack plays once, loop wraps)."""
     a, l = e
@@ -235,6 +240,8 @@ class LocalHost:
         self.last_play = 0.0
         self.root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
         self.kind = "local"
+        self.lp_pending = {}
+        self.lp_retry = 0.0
 
     # ---------------- disk cache
     def _dir(self, pjson):
@@ -364,7 +371,34 @@ class LocalHost:
         if self.pending and done:
             _log("background render stopped with %d notes left" % len(self.pending))
             self.pending = {}
+        if self.lp_pending and time.time() - self.lp_retry > 1.5:
+            self.lp_retry = time.time()
+            for k, keys in list(self.lp_pending.items()):
+                snd, missing = self.track_sounds(keys, standins=False)
+                if snd:
+                    self.eng.post("lp", "snd", k, snd, False)
+                left = {kk[0]: kk for kk in missing}
+                if left:
+                    self.lp_pending[k] = left
+                else:
+                    del self.lp_pending[k]
         return got
+
+    def lp_sound(self, k, pj, replace=False):
+        """Give looper track k its notes in sound pj (stand-ins first if needed;
+        the real notes are swapped in by poll() as they arrive)."""
+        tr = self.eng.lp_tracks[k]
+        midis = sorted({ev[2] for ev in list(tr.ev) if ev[1] == "n"})
+        if not replace:
+            midis = [m for m in midis if m not in tr.snd]
+        if not midis or not pj:
+            return
+        snd, missing = self.track_sounds({m: (m, pj) for m in midis})
+        self.eng.post("lp", "snd", k, snd, replace)
+        if missing:
+            self.lp_pending[k] = {kk[0]: kk for kk in missing}
+        else:
+            self.lp_pending.pop(k, None)
 
     # ---------------- host interface
     def post(self, name, *args):
@@ -483,7 +517,145 @@ class LocalHost:
         self.eng.stop()
 
 
-def start(sr, block, mode="local"):
+# ---------------------------------------------------------------- split: audio in its own process
+class _MTrack:
+    def __init__(self):
+        self.ev = []
+        self.snd = set()
+
+
+class _MChain:
+    flt_user = (0.0, 0.0)
+
+
+class Mirror:
+    """What the UI can see of the engine in the audio process (refreshed from
+    its snapshots). Same attribute names as engine.Engine."""
+    def __init__(self, sr):
+        import engine
+        self.sr, self.t, self.bpm, self.load, self.underruns, self.step16 = sr, 0, 96.0, 0.0, 0, 0
+        self.sink, self.voices, self.active, self.scope = "starting", [], frozenset(), None
+        self.live = _MChain()
+        self.rev_t = self.dly_t = 0.0
+        self.lp_tracks = [_MTrack() for _ in range(engine.LOOP_TRACKS)]
+        self.lp_on, self.lp_state, self.lp_rec, self.lp_cur, self.lp_step_at = False, None, None, -1, 0
+        self.lp_len, self.lp_rec_start, self.lp_rec_end, self.lp_undo, self.lp_ver = 32, 0.0, 0.0, None, 0
+        self.left = self.misses = self.ncache = 0
+        self.prof = None
+
+    def update(self, s):
+        self.t, self.sr, self.bpm, self.load = s["t"], s["sr"], s["bpm"], s["load"]
+        self.underruns, self.step16, self.sink = s["under"], s["step16"], s["sink"]
+        self.left, self.misses, self.ncache = s["left"], s["misses"], s["cache"]
+        self.voices = [None] * s["nvoices"]
+        self.active, self.scope = s["active"], s["scope"]
+        self.live.flt_user, self.rev_t, self.dly_t = s["flt"], s["rev_t"], s["dly_t"]
+        (self.lp_on, self.lp_state, self.lp_rec, self.lp_cur, self.lp_step_at, self.lp_len,
+         self.lp_rec_start, self.lp_rec_end, u, self.lp_ver) = s["lp"]
+        self.lp_undo = None if u is None else [u]
+        self.prof = s.get("prof")
+        if s.get("tracks") is not None:
+            for tr, (ev, snd) in zip(self.lp_tracks, s["tracks"]):
+                tr.ev, tr.snd = ev, set(snd)
+
+
+class SplitHost:
+    """The audio engine runs in audio_proc.py, a separate process, so the UI's
+    drawing can't hold up the audio thread (Python lets only one thread run
+    at a time inside a process)."""
+    def __init__(self, sr, block):
+        import subprocess
+        from multiprocessing.connection import Pipe
+        self.conn, child = Pipe(True)
+        fd = child.fileno()
+        app = os.path.dirname(os.path.abspath(__file__))
+        self.proc = subprocess.Popen([sys.executable, "-u", "-B", os.path.join(app, "audio_proc.py"),
+                                      str(fd), str(sr), str(block)], pass_fds=(fd,))
+        child.close()
+        if not self.conn.poll(20):
+            self.proc.kill()
+            raise RuntimeError("audio process did not start")
+        msg = self.conn.recv()
+        if msg[0] != "ready":
+            raise RuntimeError("audio process: %r" % (msg,))
+        self.eng = Mirror(sr)
+        self.eng.sink = msg[1]
+        self.kind = "split"
+        self.cache = ()
+
+    def _send(self, *msg):
+        try:
+            self.conn.send(msg)
+        except (BrokenPipeError, OSError) as e:
+            _log("audio process gone:", e)
+
+    def pump(self):
+        """Read the audio process's snapshots. Call every loop iteration."""
+        try:
+            while self.conn.poll():
+                msg = self.conn.recv()
+                if msg[0] == "state":
+                    self.eng.update(msg[1])
+        except (EOFError, OSError):
+            pass
+
+    def post(self, name, *args):
+        self._send("post", name, args)
+
+    def chord(self, notes, keys, revoice):
+        self._send("chord", notes, keys, revoice)
+
+    def resolve(self, keys):
+        return {m: Ref(k) for m, k in keys.items()}
+
+    def request(self, pri, keys):
+        self._send("request", pri, list(keys))
+
+    def preload(self, progress=None):
+        self._send("preload")
+        t0 = time.time()
+        while time.time() - t0 < 120:
+            if not self.conn.poll(0.1):
+                continue
+            msg = self.conn.recv()
+            if msg[0] == "state":
+                self.eng.update(msg[1])
+            elif msg[0] == "progress" and progress:
+                progress(msg[1], msg[2])
+            elif msg[0] == "preloaded":
+                return
+
+    def lp_sound(self, k, pj, replace=False):
+        self._send("lp_sound", k, pj, replace)
+
+    def poll(self):
+        self.pump()
+        return 0
+
+    load = property(lambda self: self.eng.load)
+    step16 = property(lambda self: self.eng.step16)
+    remaining = property(lambda self: self.eng.left)
+    underruns = property(lambda self: self.eng.underruns)
+    misses = property(lambda self: self.eng.misses)
+    sink = property(lambda self: self.eng.sink)
+
+    def alive(self):
+        return self.proc.poll() is None
+
+    def stop(self):
+        self._send("quit")
+        try:
+            self.proc.wait(2.0)
+        except Exception:
+            self.proc.kill()
+
+
+def start(sr, block, mode="split"):
+    if mode == "split":
+        try:
+            return SplitHost(sr, block)
+        except Exception as e:
+            _log("split audio process unavailable (%s); using local" % e)
     if mode == "process":
         try:
             return ProcHost(sr, block)
