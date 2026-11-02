@@ -28,7 +28,9 @@ RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
                "Vibrato": (0.3, 0), "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4),
                "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Glide": (0.3, 0)}
-TFX_ROWS = ["Sound", "Level", "Pan", "Reverb", "Delay", "Filter", "Resonance"] + FX_ORDER
+TFX_ROWS = ["Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "Cutoff", "Resonance"] + FX_ORDER
+TFX_SECTION = {"Sound": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "LIVE FILTER", "Drive": "EFFECTS"}
+NO_RATE = ("Drive", "Lo-fi", "Wide")
 TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), (120, 200, 110), (255, 120, 160)]
 DRUM_ROW = {"kick": 0.85, "snare": 0.6, "clap": 0.55, "tom": 0.7, "rim": 0.45, "hat": 0.25, "ohat": 0.2, "shk": 0.35}
 DRUM_ABBR = {"kick": "BD", "snare": "SD", "clap": "CP", "tom": "LT", "rim": "RS", "hat": "CH", "ohat": "OH", "shk": "SH"}
@@ -56,7 +58,7 @@ def new_drum():
 def new_track(k=1):
     t = {"name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
          "rs": 0.25, "ds": 0.0, "mute": False,
-         "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER + ["Glide"]},
+         "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER},
          "flt": [0.0, 0.0]}
     if k == DT:
         t.update(name="Drums", rs=0.0, vol=0.9, drum=new_drum())
@@ -316,12 +318,8 @@ class SongMixin:
         self.base_rev, self.base_dly = m["rs"], m["ds"]
         self.rev, self.dly = self.base_rev, self.base_dly
         self.push_fx()
-        glide = list(self.rack["Glide"]) if hasattr(self, "rack") and "Glide" in self.rack else None
-        self.rack = m["rack"]
-        if glide and "Glide" not in self.rack:
-            self.rack["Glide"] = glide
-        self.push_rack()
         self.eng.post("lp", "sel", k)
+        self.lp_push_track(p, k)                # the track's rack and filter are what you hear
         self.eng.post("filter", 0.0, 0.0)
         self.sel_key = (p, k)
 
@@ -512,6 +510,8 @@ class SongMixin:
                 e = self.lp_e()
                 if e:
                     self.lp_mute(e.cur, self.lp_sel)
+            elif not self.y_used and self.sg_page == "fx":
+                self.track_copy_all()
             elif not self.y_used and self.sg_page == "song":
                 self.song_on = not self.song_on
                 self.eng.post("lp", "song", self.song_rows, self.song_on)
@@ -932,16 +932,20 @@ class SongMixin:
             if "drum" in m:
                 return "Kit: " + m["drum"]["kit"]
             return m["name"] or synth.PATCHES[self.patch]["name"]
-        return {"Level": m["vol"], "Pan": m["pan"], "Reverb": m["rs"], "Delay": m["ds"],
-                "Filter": m["flt"][0], "Resonance": m["flt"][1]}.get(row) if row not in FX_ORDER else m["rack"][row]
+        if row in FX_ORDER:
+            return m["rack"][row]
+        return {"Level": m["vol"], "Pan": m["pan"], "Mute": m["mute"], "Reverb": m["rs"], "Delay": m["ds"],
+                "Cutoff": m["flt"][0], "Resonance": m["flt"][1]}[row]
 
     def tfx_input(self, name):
+        """The track page (SONG > X, or the Effects mode in Bricklab): one track of
+        the playing pattern, its sound, mix, sends, live filter and effects rack."""
         e = self.lp_e()
         p, k = e.cur, self.lp_sel
         m = self.pm[p][k]
         row = TFX_ROWS[self.tfx_i]
         fx = row in FX_ORDER
-        sel = (p, k) == self.sel_key
+        y = "Y" in self.inp.held
         if name in ("UP", "DOWN"):
             self.tfx_i = (self.tfx_i + (1 if name == "DOWN" else -1)) % len(TFX_ROWS)
             return True
@@ -952,14 +956,9 @@ class SongMixin:
             self.lp_toggle_play()
             return True
         if name in ("L1", "R1"):
-            d = 1 if name == "R1" else -1
-            if fx:
-                v = m["rack"][row]
-                v[2] = (v[2] + d) % len(RATES)
-            else:
-                self.lp_select(k + d)
-                return True
-        elif name in ("LEFT", "RIGHT"):
+            self.lp_select(k + (1 if name == "R1" else -1))
+            return True
+        if name in ("LEFT", "RIGHT"):
             d = 1 if name == "RIGHT" else -1
             self.nudge = (time.perf_counter(), d)
             if row == "Sound":
@@ -967,41 +966,81 @@ class SongMixin:
                 return True
             if fx:
                 v = m["rack"][row]
-                v[1] = round(max(0.0, min(1.0, v[1] + 0.1 * d)), 2)
-                v[0] = v[1] > 0.0
+                if y and row not in NO_RATE:
+                    v[2] = (v[2] + d) % len(RATES)
+                else:
+                    v[1] = round(max(0.0, min(1.0, v[1] + 0.1 * d)), 2)
+                    v[0] = v[1] > 0.0
             elif row == "Level":
                 m["vol"] = round(max(0.0, min(1.0, m["vol"] + 0.05 * d)), 2)
             elif row == "Pan":
                 m["pan"] = round(max(-1.0, min(1.0, m["pan"] + 0.1 * d)), 2)
+            elif row == "Mute":
+                self.lp_mute(p, k)
+                return True
             elif row in ("Reverb", "Delay"):
                 f = "rs" if row == "Reverb" else "ds"
                 m[f] = round(max(0.0, min(1.0, m[f] + 0.05 * d)), 2)
-                if sel:
+                if (p, k) == self.sel_key:
                     self.base_rev, self.base_dly = m["rs"], m["ds"]
                     self.rev, self.dly = self.base_rev, self.base_dly
                     self.push_fx()
-            elif row in ("Filter", "Resonance"):
-                i = 0 if row == "Filter" else 1
+            elif row in ("Cutoff", "Resonance"):
+                i = 0 if row == "Cutoff" else 1
                 m["flt"][i] = round(max(0.0, min(1.0, m["flt"][i] + 0.05 * d)), 2)
         elif name == "A":
             if fx:
                 m["rack"][row][0] = not m["rack"][row][0]
-            elif row == "Pan":
-                m["pan"] = 0.0
-            else:
+            elif row == "Mute":
                 self.lp_mute(p, k)
                 return True
+            elif row == "Pan":
+                m["pan"] = 0.0
+            elif row in ("Cutoff", "Resonance"):
+                m["flt"] = [0.0, 0.0]
+            elif row == "Sound" and not self.is_drum(k):
+                self.audition_track(p, k)
+                return True
+            else:
+                return True
         elif name == "X":
-            self.lp_randomize(p, k)
-            self.lp_dirty = True
-            return True
-        elif name == "Y":
-            return True
+            if y:
+                for v in m["rack"].values():
+                    v[0] = False
+                self.flash("TRACK %d: ALL EFFECTS OFF" % (k + 1))
+            else:
+                self.lp_randomize(p, k)
+                return True
         else:
             return False
         self.lp_push_track(p, k)
         self.lp_dirty = True
         return True
+
+    def audition_track(self, p, k):
+        """A on the Sound row: hear the track's sound (root and fifth) through its chain."""
+        root = 60 + self.key - (12 if self.key >= 7 else 0) + 12 * self.octave
+        self.grid_preview([[0, "n", root, 0.9, 0.0, 1.0, 0.3], [0, "n", root + 7, 0.8, 0.0, 1.0, 0.3]], 0)
+
+    def track_copy_all(self):
+        """Y tap on the track page: this track's sound, mix, sends, filter, effects
+        (and drum settings) go to the same track in every pattern."""
+        e = self.lp_e()
+        if e is None:
+            return
+        p, k = e.cur, self.lp_sel
+        src = self.pm[p][k]
+        for q in range(NP):
+            if q == p:
+                continue
+            dst = copy_track(src)
+            dst["mute"] = self.pm[q][k]["mute"]
+            self.pm[q][k] = dst
+            self.lp_push_track(q, k)
+            if dst["pj"] and e.pats[q].tracks[k].ev:
+                self.lp_resolve(q, k, replace=True)
+        self.lp_dirty = True
+        self.flash("TRACK %d SETTINGS COPIED TO ALL PATTERNS" % (k + 1))
 
     # ------------------------------------------------------------ tick
     def song_tick(self, now):
@@ -1066,10 +1105,10 @@ class SongMixin:
         self.text(c, t, self.f_small, mm.BG if col != mm.PANEL else mm.INK, (x + w // 2, y + 10), center=True)
         return x + w + 6
 
-    def song_hint(self):
-        pg = self.sg_page
+    def song_hint(self, pg=None):
+        pg = pg or self.sg_page
         if pg == "fx":
-            return "LEFT/RIGHT value  A on/off  L1/R1 rate  X random  B back"
+            return "<> value  A on/off  Y+<> rate  L1/R1 track  X random  Y copy to all patterns  B back"
         if pg == "grid" and self.is_drum(self.lp_sel):
             return "A step  B accent/ghost  X beat  Y+X kit  Y+^v lane level  Y+A mute  Y+B clear  Y+<> swing"
         if pg == "grid":
@@ -1317,47 +1356,75 @@ class SongMixin:
         top = 46
         bottom = mm.L["tiles_y"] + mm.L["tile_h"]
         col = TRACK_COLS[k % len(TRACK_COLS)]
-        self.text(c, "P%02d TRACK %d" % (p + 1, k + 1), self.f_med, col, (20, top))
-        self.text(c, "sound, effects, level, sends   L1/R1 track   B back", self.f_small, mm.DIM, (190, top + 6))
-        y0 = top + 32
-        rh = 24
-        vis = max(6, (bottom - y0) // rh)
-        first = max(0, min(self.tfx_i - vis // 2, len(TFX_ROWS) - vis))
+        nm = ("Drums  " + m["drum"]["kit"]) if self.is_drum(k) else (m["name"] or synth.PATCHES[self.patch]["name"])
+        self.text(c, "P%02d  TRACK %d" % (p + 1, k + 1), self.f_med, col, (20, top))
+        self.text(c, nm, self.f_med, mm.INK, (210, top))
+        if m["mute"]:
+            self.text(c, "MUTED", self.f_small, REC, (mm.BASE_W - 28, top + 6), right=True)
+        y0 = top + 34
+        rh = 22
+        sec_h = 16
+        # rows with their section labels, laid out once so scrolling stays stable
+        lines = []
+        for row in TFX_ROWS:
+            if row in TFX_SECTION:
+                lines.append(("sec", TFX_SECTION[row]))
+            lines.append(("row", row))
+        heights = [sec_h if kind == "sec" else rh for kind, _ in lines]
+        ys = [0]
+        for h in heights:
+            ys.append(ys[-1] + h)
+        sel_line = next(i for i, (kind, v) in enumerate(lines) if kind == "row" and v == TFX_ROWS[self.tfx_i])
+        avail = bottom - y0
+        off = max(0, min(ys[sel_line] - avail // 2, ys[-1] - avail))        # keep the selected row in view
+        off = int(self.sm("tfx_off", off, 24))
         nt, nd = self.nudge
-        ty = self.sm("tfx_sel", y0 + (self.tfx_i - first) * rh, 24)
-        pygame.draw.rect(c, mm.PANEL, (14, int(ty) - 2, mm.BASE_W - 28, rh), border_radius=6)
-        for r in range(first, min(len(TFX_ROWS), first + vis)):
-            row = TFX_ROWS[r]
-            y = y0 + (r - first) * rh
-            sel = r == self.tfx_i
+        c.set_clip(pygame.Rect(0, y0, mm.BASE_W, avail))
+        for (kind, v), y_rel, h in zip(lines, ys, heights):
+            y = y0 + y_rel - off
+            if y + h < y0 or y > bottom:
+                continue
+            if kind == "sec":
+                self.text(c, v, self.f_small, mm.DIM, (28, y + 2))
+                continue
+            row = v
+            sel = row == TFX_ROWS[self.tfx_i]
             fx = row in FX_ORDER
-            v = self.tfx_value(m, row)
-            on = v[0] if fx else True
-            self.text(c, row, self.f_small if len(row) > 9 else self.f_med, mm.ACCENT if sel else (mm.INK if on else mm.DIM),
-                      (28, y + 1))
+            val = self.tfx_value(m, row)
+            on = val[0] if fx else True
+            if sel:
+                pygame.draw.rect(c, mm.PANEL, (14, y - 1, mm.BASE_W - 28, rh), border_radius=6)
+            self.text(c, row, self.f_small if len(row) > 9 else self.f_med,
+                      mm.ACCENT if sel else (mm.INK if on else mm.DIM), (28, y + 1))
             kick = int(6 * nd * (1 - self.since(nt, 0.18)) ** 2) if sel else 0
             if row == "Sound":
-                self.text(c, "< %s >" % v, self.f_med, mm.INK, (300 + kick, y + 1))
+                self.text(c, "< %s >" % val, self.f_med, mm.INK, (230 + kick, y + 1))
+                continue
+            if row == "Mute":
+                pill = pygame.Rect(230, y + 3, 54, rh - 7)
+                pygame.draw.rect(c, REC if val else mm.BG, pill, border_radius=8)
+                self.text(c, "MUTED" if val else "on", self.f_small, mm.INK if val else mm.DIM, pill.center, center=True)
                 continue
             if fx:
-                pill = pygame.Rect(170, y + 3, 42, rh - 8)
+                pill = pygame.Rect(170, y + 3, 42, rh - 7)
                 pygame.draw.rect(c, mm.MOD_ON if on else mm.BG, pill, border_radius=8)
                 self.text(c, "ON" if on else "off", self.f_small, mm.BG if on else mm.DIM, pill.center, center=True)
-                amt = v[1]
+                amt = val[1]
             else:
-                amt = v
-            bx, bw = 230, 230
+                amt = val
+            bx, bw = 230, 210
             pygame.draw.rect(c, mm.BG, (bx, y + rh // 2 - 4, bw, 8), border_radius=4)
             if row == "Pan":
                 cx = bx + bw // 2
                 px = int(cx + amt * bw / 2)
                 pygame.draw.rect(c, mm.ACCENT, (min(cx, px), y + rh // 2 - 4, max(3, abs(px - cx)), 8), border_radius=4)
-                val = "C" if abs(amt) < 0.05 else ("L%d" % round(-amt * 100) if amt < 0 else "R%d" % round(amt * 100))
+                txt = "C" if abs(amt) < 0.05 else ("L%d" % round(-amt * 100) if amt < 0 else "R%d" % round(amt * 100))
             else:
                 fill = int(bw * self.sm("tfx_%d_%d_%s" % (p, k, row), amt, 18))
                 if fill:
                     pygame.draw.rect(c, mm.ACCENT if on else mm.DIM, (bx, y + rh // 2 - 4, fill, 8), border_radius=4)
-                val = RATES[v[2]][0] if fx and row not in ("Drive", "Lo-fi", "Wide") else "%d%%" % round(amt * 100)
-            self.text(c, val, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28 + kick, y + 5), right=True)
-        if first + vis < len(TFX_ROWS):
-            self.text(c, "more", self.f_small, mm.DIM, (mm.BASE_W // 2, bottom - 4), center=True)
+                txt = "%d%%" % round(amt * 100)
+                if fx and row not in NO_RATE:
+                    txt += "   " + RATES[val[2]][0]
+            self.text(c, txt, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28 + kick, y + 5), right=True)
+        c.set_clip(None)

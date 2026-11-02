@@ -135,8 +135,27 @@ class ModesMixin(song.SongMixin):
         if im == "Song":
             return self.song_input(name, down)
         if im == "Effects":
+            if edition.LAB and self.lp_e() is not None:
+                return self.track_mode_input(name, down)
             return self.fx_input(name, down)
         return False
+
+    def track_mode_input(self, name, down):
+        """Bricklab's Effects mode: the track page for the selected track."""
+        if name == "Y":
+            if down:
+                self.y_used = False
+            elif not self.y_used:
+                self.track_copy_all()
+            return True
+        if not down:
+            return name not in ("SELECT", "START", "R3")
+        if "Y" in self.inp.held:
+            self.y_used = True
+        if name == "B":
+            self.set_mode(self.prev_imode if self.prev_imode != "Effects" else "Play")
+            return True
+        return self.tfx_input(name)
 
     def mode_stick(self, x, y):
         if self.imode != "Lead":
@@ -315,7 +334,8 @@ class ModesMixin(song.SongMixin):
                 "Drums": ("8 pads  L1 soft  R1 accent  SELECT+A record track 1  L3 modes" if edition.LAB
                           else "8 pads  L1 soft  R1 accent  L3 modes"),
                 "Song": self.song_hint(),
-                "Effects": "A on/off  LEFT/RIGHT amount  L1/R1 rate  X random  Y all off  B back"}.get(self.imode)
+                "Effects": (self.song_hint("fx") if edition.LAB and self.lp_e() is not None else
+                            "A on/off  LEFT/RIGHT amount  L1/R1 rate  X random  Y all off  B back")}.get(self.imode)
 
     def mode_pills(self, h):
         if self.imode == "Lead":
@@ -382,6 +402,8 @@ class ModesMixin(song.SongMixin):
     def draw_page(self, c):
         if self.imode == "Song":
             self.draw_song(c)
+        elif edition.LAB and self.lp_e() is not None:
+            self.draw_track_fx(c, self.lp_e())
         else:
             self.draw_fx_page(c)
 

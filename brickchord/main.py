@@ -68,7 +68,7 @@ MENU_PAGES = {
                "Volume", "Latency",
                "Relearn buttons", "Learn sticks", "Quit"],
     "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
-               "Bass", "Bass Level"],
+               "Lead glide", "Bass", "Bass Level"],
     "Drums": None,
     "FX": ["Reverb", "Reverb Type", "Delay", "Delay Type", "Delay Time"],
 }
@@ -367,7 +367,7 @@ class App(modes.ModesMixin):
         self.push_bass()
         if not edition.LAB:
             self.eng.post("lp", "route", False)     # Brickchord: no tracks, live sound goes straight out
-        self.push_rack()
+            self.push_rack()                        # Bricklab: every track has its own rack (lp_push_track)
         self.intro()
         self.queue_precache()
 
@@ -915,6 +915,8 @@ class App(modes.ModesMixin):
             ("Tempo", "%d BPM" % self.bpm),
             ("Spread", "%d ms" % self.spread),
             ("Latch", "On" if self.latch else "Off"),
+        ] + ([("Lead glide", ("%d ms" % round(self.rack["Glide"][1] * 400)) if self.rack["Glide"][0] else "Off")]
+             if edition.LAB else []) + [
             ("Quantize", "On" if self.quantize else "Off"),
         ] + ([("Count-in", ("%d bar%s" % (self.countin, "" if self.countin == 1 else "s")) if self.countin
                             else "Off, starts on first note"),
@@ -987,6 +989,10 @@ class App(modes.ModesMixin):
             self.bpm = clamp(self.bpm + 2 * d, 50, 200)
         elif name == "Spread":
             self.spread = clamp(self.spread + 10 * d, 0, 120)
+        elif name == "Lead glide":
+            g = self.rack["Glide"]
+            g[1] = round(max(0.0, min(1.0, g[1] + 0.1 * d)), 2)
+            g[0] = g[1] > 0.0
         elif name == "Latch":
             self.latch = not self.latch
             if not self.latch and self.cur_btn not in self.inp.held:
