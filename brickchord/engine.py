@@ -163,16 +163,23 @@ class Engine:
 
     # ------------------------------------------------------------ reverb
     def _setup_reverb(self, ir):
-        N = self.N
+        """Partitioned FFT convolution run at half the sample rate: reverb tails
+        have little above 5 kHz, and it costs about a quarter as much."""
+        N2 = self.N // 2
         if ir is None:
-            ir = np.zeros((N, 2), np.float32)
-        P = int(math.ceil(len(ir) / N))
-        pad = np.zeros((P * N, 2), np.float32)
-        pad[:len(ir)] = ir
-        parts = pad.reshape(P, N, 2)
-        self.H = np.fft.rfft(parts, 2 * N, axis=1).astype(np.complex64)      # (P, N+1, 2)
-        self.FDL = np.zeros_like(self.H)
-        self.rprev = np.zeros((N, 2), np.float32)
+            ir = np.zeros((self.N, 2), np.float32)
+        ir = np.asarray(ir, np.float32)
+        m = len(ir) // 2
+        ir2 = ir[0:2 * m:2] + ir[1:2 * m:2]           # decimate, keeping the level
+        P = max(1, int(math.ceil(len(ir2) / N2)))
+        pad = np.zeros((P * N2, 2), np.float32)
+        pad[:len(ir2)] = ir2
+        self.H = np.fft.rfft(pad.reshape(P, N2, 2), 2 * N2, axis=1).astype(np.complex64)   # (P, N2+1, 2)
+        self.rv_P = P
+        self.FDL = np.zeros((2 * P,) + self.H.shape[1:], np.complex64)   # ring buffer, written twice
+        self.rv_i = 0
+        self.rprev = np.zeros((N2, 2), np.float32)
+        self.rv_last = np.zeros(2, np.float32)
 
     # ------------------------------------------------------------ live filter
     # Notes are pre-rendered, so a filter you can sweep while playing has to run on
@@ -343,13 +350,22 @@ class Engine:
         self._setup_reverb(ir)
 
     def _reverb(self, x):
-        N = self.N
-        buf = np.concatenate([self.rprev, x])
-        self.rprev = x
-        self.FDL[1:] = self.FDL[:-1]
-        self.FDL[0] = np.fft.rfft(buf, 2 * N, axis=0)
-        Y = np.einsum("pkc,pkc->kc", self.FDL, self.H)
-        return np.fft.irfft(Y, 2 * N, axis=0)[N:].astype(np.float32)
+        N2 = self.N // 2
+        P = self.rv_P
+        xh = (x[0::2] + x[1::2]) * 0.5
+        buf = np.concatenate([self.rprev, xh])
+        self.rprev = xh
+        i = self.rv_i = (self.rv_i - 1) % P
+        X = np.fft.rfft(buf, 2 * N2, axis=0)
+        self.FDL[i] = X
+        self.FDL[i + P] = X
+        Y = np.einsum("pkc,pkc->kc", self.FDL[i:i + P], self.H)       # newest block first
+        yh = np.fft.irfft(Y, 2 * N2, axis=0)[N2:].astype(np.float32)
+        y = np.empty((self.N, 2), np.float32)
+        y[1::2] = yh
+        y[0::2] = 0.5 * (yh + np.concatenate([self.rv_last[None, :], yh[:-1]]))
+        self.rv_last = yh[-1]
+        return y
 
     # ------------------------------------------------------------ commands (UI thread)
     def post(self, name, *args):
@@ -695,6 +711,8 @@ class Engine:
         k = self.lp_rec
         if k is None or not self.lp_state:
             return None
+        if self.lp_state == "count":
+            return None
         if self.lp_state == "armed":
             self._lp_begin(T)
         if self.cur != self.lp_rec_p:
@@ -776,6 +794,10 @@ class Engine:
             old = self._sel_chain()
             self.sel = int(a[0])
             self._route_changed(old)
+        elif op == "route":
+            old = self._sel_chain()
+            self.route = bool(a[0])
+            self._route_changed(old)
         elif op == "pat":
             p = int(a[0]) % NPATS
             if self.lp_on:
@@ -794,12 +816,22 @@ class Engine:
             self._bump(p)
         elif op == "arm":
             k = a[0]
+            count = int(a[1]) if len(a) > 1 and a[1] else 0
             if self.lp_state:
                 self._lp_rec_stop(self.t)
             if k is not None:
-                self.lp_rec, self.lp_state = int(k), "armed"
-                if self._has() and not self.lp_on:
-                    self._start_transport()
+                self.lp_rec = int(k)
+                if count:
+                    # count-in: clicks, then recording starts on the one. If the
+                    # transport is already running, it starts at the next pattern start.
+                    self.lp_state = "count"
+                    if not self.lp_on:
+                        self._start_transport()
+                        self.lp_pos = self.lp_abs = -count - 1
+                else:
+                    self.lp_state = "armed"         # starts on the first note you play
+                    if self._has() and not self.lp_on:
+                        self._start_transport()
             self.lp_ver += 1
         elif op in ("clear", "clearpat"):
             p = int(a[0])
@@ -957,7 +989,17 @@ class Engine:
             self._next_pattern(at)
         self.lp_pos = pos
         if pos < 0:
+            if self.lp_state == "count" and pos % 4 == 0 and "click" in self.kit:
+                self._voice(self.kit["click"], 0.9 if pos % 16 == 0 else 0.5, 0.0, at, "drum", srev=0, sdly=0,
+                            rel=int(0.01 * self.sr))
             return
+        if pos == 0 and self.lp_state == "count":
+            self.lp_rec_p = self.cur
+            self._snap_undo(self.cur)
+            self.lp_rec_start = float(self.lp_abs)
+            self.lp_rec_end = self.lp_rec_start + self.pats[self.cur].len
+            self.lp_state = "rec"
+            self.lp_ver += 1
         p = self.cur
         self._nocap = True
         try:

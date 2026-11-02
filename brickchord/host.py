@@ -238,7 +238,11 @@ class LocalHost:
         self.job_patch = None
         self.paused = False
         self.last_play = 0.0
-        self.root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+        here = os.path.dirname(os.path.abspath(__file__))
+        self.root = os.path.join(here, "cache")
+        shared = os.path.join(os.path.dirname(here), "brickchord", "cache")
+        if os.path.basename(here) != "brickchord" and not os.path.isdir(self.root) and os.path.isdir(shared):
+            self.root = shared            # Bricklab next to Brickchord: share its rendered sounds
         self.kind = "local"
         self.lp_pending = {}
         self.lp_retry = 0.0

@@ -27,6 +27,9 @@ and everything plays on a single sample-accurate clock with a built-in drum mach
 - **An animated screen**: a self-playing Tetris well that drops a piece on every chord and clears lines in a burst of bricks, shattering chord tiles, falling chord names, a live oscilloscope, and a launch animation that plays the home chord of your key
 - **Instant sound loading** from a disk cache, with an optional pre-rendered factory pack
 
+## Bricklab
+Bricklab is Brickchord plus song mode: 16 patterns of 6 recorded tracks, each track with its own sound and effects, a step grid, a song page that chains patterns, and a count-in. It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`, add a file `edition.txt` containing `lab`, and copy `Bricklab.sh` into `ports`. It shares Brickchord's sound cache when both are installed.
+
 ## Install (KNULLI)
 1. Download the latest zip from **[Releases](https://github.com/michaeltietjen/brickchord/releases)** (it bundles the ARM64 NumPy that Brickchord needs).
 2. Copy `brickchord/` and `Brickchord.sh` into `/userdata/roms/ports/` (on the SD card: `roms/ports/`).

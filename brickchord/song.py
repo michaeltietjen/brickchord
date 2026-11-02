@@ -268,7 +268,7 @@ class SongMixin:
             self.lp_select(k)
         self.lp_watch = (e.cur, k)
         self.lp_was_empty = not e.pats[e.cur].tracks[k].ev
-        self.eng.post("lp", "arm", k)
+        self.eng.post("lp", "arm", k, 16 * self.countin)
         if not stay:
             back = self.lp_return if self.lp_return in ("Play", "Lead", "Drone", "Drums") else "Play"
             self.set_mode(back)
@@ -612,7 +612,9 @@ class SongMixin:
                 self.lp_resolve(pk[0], pk[1], rep)
         st = e.lp_state
         if st != self.lp_last_state:
-            if st == "rec":
+            if st == "count":
+                self.flash("COUNT-IN: RECORDING STARTS ON THE ONE")
+            elif st == "rec":
                 self.flash("RECORDING P%02d TRACK %d" % (e.cur + 1, (e.lp_rec or 0) + 1))
             elif st is None and self.lp_last_state == "rec":
                 w = self.lp_watch
@@ -641,7 +643,7 @@ class SongMixin:
         if e is None:
             return x
         if e.lp_state:
-            t = "REC P%02d T%d" % (e.cur + 1, (e.lp_rec or 0) + 1)
+            t = ("COUNT" if e.lp_state == "count" else "REC") + " P%02d T%d" % (e.cur + 1, (e.lp_rec or 0) + 1)
             col = REC if (e.lp_state == "rec" or int(time.perf_counter() * 3) % 2 == 0) else mm.PANEL
         elif e.lp_on:
             t = ("SONG %d/%d " % (e.song_row + 1, len(self.song_rows)) if e.song_on else "") + "P%02d T%d" % (e.cur + 1, self.lp_sel + 1)
@@ -770,7 +772,7 @@ class SongMixin:
             nm = m["name"] or (synth.PATCHES[self.patch]["name"] if k == self.lp_sel else "empty")
             self.text(c, nm[:14], self.f_small, mm.INK if (k == self.lp_sel or tr.ev) else mm.DIM, (50, y + rh // 2 - 15))
             if rec:
-                sub = "REC" if e.lp_state == "rec" else "play to start"
+                sub = {"rec": "REC", "count": "count-in"}.get(e.lp_state, "play to start")
             else:
                 nfx = sum(1 for n, v in m["rack"].items() if v[0] and n != "Glide")
                 sub = ("%d notes" % len(tr.ev) if tr.ev else "") + ("  fx %d" % nfx if nfx else "")

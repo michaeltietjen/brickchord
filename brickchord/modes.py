@@ -16,11 +16,13 @@ import time
 
 import pygame
 
+import edition
 import engine
 import song
 import synth
 
-IMODES = ["Play", "Lead", "Drone", "Drums", "Song", "Effects"]   # clockwise from the top
+IMODES = (["Play", "Lead", "Drone", "Drums", "Song", "Effects"] if edition.LAB   # clockwise from the top
+          else ["Play", "Lead", "Drone", "Drums", "Effects"])
 FX_ROWS = engine.Engine.FX_ORDER + ["Glide"]
 RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
@@ -75,7 +77,7 @@ class ModesMixin(song.SongMixin):
         mag = math.hypot(x, y)
         if mag > 0.6:
             ang = math.degrees(math.atan2(y, x))
-            sel = int(round((90 - ang) / 60.0)) % len(IMODES)
+            sel = int(round((90 - ang) / (360.0 / len(IMODES)))) % len(IMODES)
             if sel != self.wheel_sel:
                 self.wheel_sel = sel
                 self.eng.post("click")
@@ -274,7 +276,8 @@ class ModesMixin(song.SongMixin):
         return True
 
     def modes_tick(self, now):
-        self.song_tick(now)
+        if edition.LAB:
+            self.song_tick(now)
         t = self.anim.get("_lead_preview")
         if t and now - t > 0.45:
             self.anim["_lead_preview"] = None
@@ -296,7 +299,8 @@ class ModesMixin(song.SongMixin):
             pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT2, 0.4 + 0.4 * b), (x, y, w, 20), border_radius=10)
             self.text(c, t, self.f_small, mm.BG, (x + w // 2, y + 10), center=True)
             x += w + 6
-        x = self.song_chip(c, x, y)
+        if edition.LAB:
+            x = self.song_chip(c, x, y)
         return x
 
     def mode_hint(self):
@@ -415,7 +419,7 @@ class ModesMixin(song.SongMixin):
         rad = int(150 * (0.7 + 0.3 * a))
         pygame.draw.circle(c, self.mix(mm.BG, mm.PANEL, a), (cx, cy), rad + 40)
         for i, nm in enumerate(IMODES):
-            ang = math.radians(90 - i * 60)
+            ang = math.radians(90 - i * 360.0 / len(IMODES))
             x, y = cx + math.cos(ang) * rad, cy - math.sin(ang) * rad
             sel = i == self.wheel_sel
             lv = self.sm("wsel%d" % i, 1.0 if sel else 0.0, 22)

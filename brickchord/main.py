@@ -13,6 +13,7 @@ import time
 
 import pygame
 
+import edition
 import host
 import modes
 import synth
@@ -276,6 +277,7 @@ class App(modes.ModesMixin):
         self.rev_type = s.get("reverb_type", "Hall") if s.get("reverb_type") in synth.REVERBS else "Hall"
         self.dly_type = s.get("delay_type", "Ping-Pong") if s.get("delay_type") in DELAY_TYPES else "Ping-Pong"
         self.quantize = s.get("quantize", True)
+        self.countin = s.get("countin", 1) if s.get("countin", 1) in (0, 1, 2) else 1
         self.bass = s.get("bass", 0) if 0 <= s.get("bass", 0) < len(synth.BASS_MODES) else 0
         self.bass_lvl = s.get("bass_lvl", 1.0)
         self.arp_oct = s.get("arp_oct", 2)
@@ -291,7 +293,7 @@ class App(modes.ModesMixin):
         else:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         pygame.mouse.set_visible(False)
-        pygame.display.set_caption("Brickchord")
+        pygame.display.set_caption(edition.NAME)
         self.canvas = pygame.Surface((BASE_W, BASE_H))
         self.f_huge = pygame.font.Font(None, 132)
         self.f_big = pygame.font.Font(None, 54)
@@ -347,6 +349,8 @@ class App(modes.ModesMixin):
         self.push_fx()
         self.push_types()
         self.push_bass()
+        if not edition.LAB:
+            self.eng.post("lp", "route", False)     # Brickchord: no tracks, live sound goes straight out
         self.push_rack()
         self.intro()
         self.queue_precache()
@@ -644,7 +648,7 @@ class App(modes.ModesMixin):
                                     reverb_type=self.rev_type, delay_type=self.dly_type,
                                     latency=self.block, quantize=self.quantize,
                                     bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
-                                    imode=getattr(self, "imode", "Play"))
+                                    imode=getattr(self, "imode", "Play"), countin=getattr(self, "countin", 1))
         if hasattr(self, "rack"):
             self.cfg["rack"] = self.rack
             self.cfg.pop("seq", None)
@@ -856,6 +860,8 @@ class App(modes.ModesMixin):
             ("Spread", "%d ms" % self.spread),
             ("Latch", "On" if self.latch else "Off"),
             ("Quantize", "On" if self.quantize else "Off"),
+        ] + ([("Count-in", ("%d bar%s" % (self.countin, "" if self.countin == 1 else "s")) if self.countin
+                            else "Off, starts on first note")] if edition.LAB else []) + [
             ("Volume", "%d%%" % round(self.volume * 100)),
             ("Latency", {512: "Low", 1024: "Normal", 2048: "Safe"}.get(self.block, str(self.block))),
             ("Relearn buttons", ""),
@@ -929,6 +935,8 @@ class App(modes.ModesMixin):
         elif name == "Quantize":
             self.quantize = not self.quantize
             self.push_params()
+        elif name == "Count-in":
+            self.countin = (self.countin + d) % 3
         elif name == "Latency":
             self.block = {512: 1024, 1024: 2048, 2048: 512}[self.block] if d > 0 else {512: 2048, 1024: 512, 2048: 1024}[self.block]
             self.flash("latency applies next launch")
@@ -1103,13 +1111,17 @@ class App(modes.ModesMixin):
                 self.wheel_open = False
             return
         # SELECT: tap = settings, hold = looper controls from any mode
+        if name == "SELECT" and not edition.LAB:
+            if down:
+                self.menu = True
+            return
         if name == "SELECT":
             if down:
                 self.sel_combo = False
             elif not getattr(self, "sel_combo", True):
                 self.menu = True
             return
-        if "SELECT" in held and self.looper_combo(name, down):
+        if edition.LAB and "SELECT" in held and self.looper_combo(name, down):
             self.sel_combo = True
             return
         if self.imode != "Play" and self.mode_input(name, down):
@@ -1200,7 +1212,7 @@ class App(modes.ModesMixin):
         # ---- header: mini logo that steps with the beat, info slides when it changes
         pygame.draw.rect(c, PANEL, (0, 0, BASE_W, 38))
         self.draw_mini_mark(c, 14, 12, st)
-        self.text(c, "BRICKCHORD", self.f_small, ACCENT, (62, 12))
+        self.text(c, edition.NAME.upper(), self.f_small, ACCENT, (62, 12))
         chips_end = self.draw_mode_chip(c, 172, 9)
         info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
                                                    synth.PATCHES[self.patch]["name"], self.mode(), self.bpm)
@@ -1367,7 +1379,8 @@ class App(modes.ModesMixin):
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
-        hint = self.mode_hint() or "SELECT menu (hold: looper)   START beat   L3 modes"
+        hint = self.mode_hint() or ("SELECT menu (hold: song)   START beat   L3 modes" if edition.LAB
+                                    else "SELECT menu   START beat   L3 modes")
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
         on = self.sm("beatrow", 1.0 if self.drums_on else 0.0, 10)

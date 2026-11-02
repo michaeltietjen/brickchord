@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: modes, engines, effects rack, song mode
+## Unreleased: modes, engines, effects rack, Bricklab
 - Mode wheel: click the left stick (L3) to open it, push the stick toward Play, Lead, Drone, Drums, Sequencer or Effects, let go to switch. L3 is learned once on first launch.
 - New synth engines: FM (FM Keys, FM Bell, FM Brass), Karplus-Strong plucked strings (Nylon Guitar, Steel Guitar), Drawbar Organ, Vox Pad (formant vowels that morph) and Air Pad (shaped noise). 23 sounds in total.
 - Effects rack with LFOs, stackable: Drive, Lo-fi, Chorus, Flanger, Vibrato, Tremolo, Gate, Auto-Pan, Wide (stereo) and Filter LFO, each with an amount and a tempo-synced rate (1/16 to 4 bars), plus Glide. Randomize with X. Runs alongside the existing reverbs and delays.
@@ -8,6 +8,9 @@
 - Drone mode: tap a degree to sustain a drone of that chord root (Y adds the 3rd), play other modes on top.
 - Drums mode: 8 finger-drum pads (kick, snare, hats, clap, tom, rim, shaker), L1 soft, R1 accent.
 - Repeat play modes: Repeat 1/4, 1/8, 1/16 retrigger the held chord in time.
+- Two apps from one codebase: Brickchord (the chord machine, no song mode) and Bricklab (Brickchord plus song mode). A file `brickchord/edition.txt` containing `lab` makes a folder run as Bricklab; Bricklab.sh launches it from `ports/bricklab/`, sharing Brickchord's sound cache.
+- Bricklab: count-in for recording (Settings > Count-in: Off, 1 or 2 bars). With a count-in, clicks play and recording starts on the one; if the transport is already running it starts at the next pattern.
+- Reverb runs at half the sample rate (about twice as fast; it was the biggest cost on the Brick).
 - Song mode (replaces the looper): 16 patterns of 1 to 8 bars, each with 6 tracks that record what you play. Every track in every pattern keeps its own sound, effects rack, filter, level, pan and sends. Pages: PATTERN (mixer, Y+LEFT/RIGHT length, Y+A copy to the next empty pattern), GRID (step edit: add, delete, transpose, length, quantize, all undoable), SONG (chain patterns with repeats). Patterns switch at the end of the bar, Digitone style.
 - Live playing goes through the selected track, so the Effects page, Settings > Sound / Reverb / Delay and the right stick act on that track and what you hear is what it records. (Before, recorded tracks ignored the Effects page.)
 - Hold SELECT in any mode: A record, B undo/redo, X play/stop, Y mute, UP/DOWN track, LEFT/RIGHT pattern. A tap on SELECT still opens Settings.
