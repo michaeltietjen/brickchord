@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Bricklab drum machine: track 1 of every pattern is now a drum track with an 8-lane step grid (kick, snare, clap, rim, tom, hat, open hat, shaker). On SONG > GRID with track 1 selected: A toggles a step, B cycles accent / ghost, X loads the next preset beat as a starting point, Y+X changes kit, Y+UP/DOWN sets a lane's level, Y+A mutes a lane, Y+B clears it, Y+LEFT/RIGHT sets swing. Every pattern keeps its own drums, so songs get real verses and fills. The Drums pads play and record into track 1, through its effects.
+- Drum kits: Classic, 808, 909, Lo-fi and Acoustic, plus your own WAV kits in `samples/<kit name>/` (kick.wav, snare.wav, hat.wav ...; levels matched automatically). See samples_README.txt.
+- The START beat steps aside while a pattern's drum track is playing, so the two never double up.
+- Older songs: notes recorded on track 1 move to the first empty track.
+- Brickchord: Drums mode removed (it didn't connect to the beat). The preset beat stays on START.
 - Mode wheel: click the left stick (L3) to open it, push the stick toward Play, Lead, Drone, Drums, Sequencer or Effects, let go to switch. L3 is learned once on first launch.
 - New synth engines: FM (FM Keys, FM Bell, FM Brass), Karplus-Strong plucked strings (Nylon Guitar, Steel Guitar), Drawbar Organ, Vox Pad (formant vowels that morph) and Air Pad (shaped noise). 23 sounds in total.
 - Effects rack with LFOs, stackable: Drive, Lo-fi, Chorus, Flanger, Vibrato, Tremolo, Gate, Auto-Pan, Wide (stereo) and Filter LFO, each with an amount and a tempo-synced rate (1/16 to 4 bars), plus Glide. Randomize with X. Runs alongside the existing reverbs and delays.

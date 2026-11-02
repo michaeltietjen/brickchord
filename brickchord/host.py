@@ -19,6 +19,10 @@ import time
 import traceback
 
 
+# your own drum kits: samples/<kit name>/kick.wav, snare.wav, hat.wav ... next to the app
+SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+
+
 def _log(*a):
     print(*a, flush=True)
 
@@ -35,6 +39,7 @@ def _engine_main(cmd_q, req_q, sh, sr, block):
         eng = engine.Engine(sr, block, synth.reverb_ir(1.2))
         cache = collections.OrderedDict()
         eng.post("drums", False, None, synth.kit_arrays())
+        eng.post("kits", synth.all_kits(SAMPLES))
         eng.start("stream")
         sh["sink"].value = 1 if eng.sink == "callback" else 2
         _log("engine process: sink", eng.sink, "block", block)
@@ -227,6 +232,7 @@ class LocalHost:
         self.synth = synth
         self.eng = engine.Engine(sr, block, synth.reverb_ir(1.2))
         self.eng.post("drums", False, None, synth.kit_arrays())
+        self.eng.post("kits", synth.all_kits(SAMPLES))
         self.eng.start("stream")
         _log("local host: sink", self.eng.sink, "block", block)
         self.cache = {}

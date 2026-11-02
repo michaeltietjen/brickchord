@@ -7,6 +7,8 @@ come out alias-free and cheap enough for an ARM handheld.
 Each note is split into an attack segment and a seamless sustain loop.
 """
 import math
+import os
+
 import numpy as np
 
 SR = 22050
@@ -501,8 +503,254 @@ def drum_kit():
     return kit
 
 
-def kit_arrays(gain=0.5):
-    return {k: (np.repeat((v * gain)[:, None], 2, axis=1).astype(np.float32), None) for k, v in drum_kit().items()}
+def _env(tt, rate, att=0.0):
+    e = np.exp(-tt * rate)
+    if att:
+        e *= np.minimum(tt / att, 1.0)
+    return e
+
+
+def _hp(nz, k=1):
+    return nz - np.roll(nz, k)
+
+
+def drum_kit_style(style):
+    """The other built-in kits, made the same way as drum_kit()."""
+    t = lambda sec: np.arange(int(sec * SR)) / SR
+    kit = dict(drum_kit())
+    if style == "808":
+        tt = t(1.1)
+        f = 48 + 60 * np.exp(-tt * 30)
+        kit["kick"] = (np.tanh(np.sin(2 * np.pi * np.cumsum(f) / SR) * _env(tt, 3.2) * 1.6) * 0.95).astype(np.float32)
+        tt = t(0.3)
+        nz = _noise(len(tt), 11)
+        tone = (np.sin(2 * np.pi * 238 * tt) + 0.6 * np.sin(2 * np.pi * 476 * tt)) * _env(tt, 26)
+        kit["snare"] = (_hp(nz) * _env(tt, 18) * 0.5 + tone * 0.45).astype(np.float32)
+        tt = t(0.06)
+        sq = sum(np.sign(np.sin(2 * np.pi * f0 * tt)) for f0 in (205, 304, 369, 522, 540, 800))
+        kit["hat"] = (_hp(sq / 6.0, 1) * _env(tt, 80) * 0.5).astype(np.float32)
+        tt = t(0.45)
+        sq = sum(np.sign(np.sin(2 * np.pi * f0 * tt)) for f0 in (205, 304, 369, 522, 540, 800))
+        kit["ohat"] = (_hp(sq / 6.0, 1) * _env(tt, 8) * 0.38).astype(np.float32)
+        tt = t(0.07)
+        kit["rim"] = (np.sin(2 * np.pi * 1690 * tt) * _env(tt, 90) * 0.8).astype(np.float32)
+        tt = t(0.6)
+        f = 110 + 25 * np.exp(-tt * 12)
+        kit["tom"] = (np.sin(2 * np.pi * np.cumsum(f) / SR) * _env(tt, 6) * 0.9).astype(np.float32)
+        tt = t(0.05)
+        kit["shk"] = (_hp(_noise(len(tt), 12)) * _env(tt, 60, 0.004) * 0.3).astype(np.float32)
+    elif style == "909":
+        tt = t(0.5)
+        f = 52 + 180 * np.exp(-tt * 45)
+        body = np.sin(2 * np.pi * np.cumsum(f) / SR) * _env(tt, 9)
+        click = _hp(_noise(len(tt), 21)) * _env(tt, 400) * 0.5
+        kit["kick"] = (np.tanh((body + click) * 1.4) * 0.95).astype(np.float32)
+        tt = t(0.28)
+        nz = _noise(len(tt), 22)
+        tone = np.sin(2 * np.pi * 180 * tt) * _env(tt, 30) + np.sin(2 * np.pi * 330 * tt) * _env(tt, 40) * 0.5
+        kit["snare"] = (_hp(nz) * _env(tt, 11) * 0.6 + tone * 0.5).astype(np.float32)
+        tt = t(0.09)
+        kit["hat"] = (_hp(_hp(_noise(len(tt), 23)), 1) * _env(tt, 55) * 0.32).astype(np.float32)
+        tt = t(0.5)
+        kit["ohat"] = (_hp(_hp(_noise(len(tt), 24)), 1) * _env(tt, 6.5) * 0.26).astype(np.float32)
+        tt = t(0.35)
+        nz = _hp(_noise(len(tt), 25), 2)
+        env = sum(np.where(tt >= d, np.exp(-(tt - d) * 160), 0) for d in (0.0, 0.009, 0.018, 0.027))
+        env = env + np.where(tt >= 0.035, np.exp(-(tt - 0.035) * 14) * 0.6, 0)
+        kit["clap"] = (nz * env * 0.42).astype(np.float32)
+    elif style == "Lo-fi":
+        for k, v in list(kit.items()):
+            if k == "click":
+                continue
+            x = np.round(v * 12) / 12                         # crush the bits
+            x = np.repeat(x[::3], 3)[:len(v)]                 # and the sample rate
+            lp = np.convolve(x, np.ones(5) / 5, mode="same")  # dull it
+            kit[k] = (lp * 1.15).astype(np.float32)
+        tt = t(0.45)
+        f = 42 + 70 * np.exp(-tt * 22)
+        kit["kick"] = (np.tanh(np.sin(2 * np.pi * np.cumsum(f) / SR) * _env(tt, 6) * 2.2) * 0.8).astype(np.float32)
+    elif style == "Acoustic":
+        tt = t(0.5)
+        f = 60 + 55 * np.exp(-tt * 40)
+        body = np.sin(2 * np.pi * np.cumsum(f) / SR) * _env(tt, 10)
+        beater = np.convolve(_noise(len(tt), 31), np.ones(8) / 8, "same") * _env(tt, 120) * 0.9
+        kit["kick"] = ((body + beater) * 1.0).astype(np.float32)
+        tt = t(0.35)
+        nz = np.convolve(_noise(len(tt), 32), np.array([1, -0.3, -0.3]), "same")
+        tone = np.sin(2 * np.pi * 200 * tt) * _env(tt, 25) + np.sin(2 * np.pi * 290 * tt) * _env(tt, 30) * 0.6
+        kit["snare"] = (nz * _env(tt, 13) * 0.55 + tone * 0.4).astype(np.float32)
+        tt = t(0.12)
+        hh = _hp(_noise(len(tt), 33)) * _env(tt, 40, 0.002)
+        kit["hat"] = (hh * 0.35).astype(np.float32)
+        tt = t(0.8)
+        kit["ohat"] = (_hp(_noise(len(tt), 34)) * _env(tt, 4.5, 0.003) * 0.25).astype(np.float32)
+        tt = t(0.5)
+        f = 120 + 30 * np.exp(-tt * 10)
+        tom = np.sin(2 * np.pi * np.cumsum(f) / SR) * _env(tt, 7) + _noise(len(tt), 35) * _env(tt, 60) * 0.15
+        kit["tom"] = (tom * 0.9).astype(np.float32)
+        tt = t(0.1)
+        kit["rim"] = ((np.sin(2 * np.pi * 520 * tt) + np.sin(2 * np.pi * 1450 * tt) * 0.6) * _env(tt, 55) * 0.6).astype(np.float32)
+    return kit
+
+
+BUILTIN_KITS = ["Classic", "808", "909", "Lo-fi", "Acoustic"]
+DRUM_LANES = ["kick", "snare", "clap", "rim", "tom", "hat", "ohat", "shk"]
+# file names a sample kit may use for each lane (samples/<kit>/<name>.wav)
+LANE_ALIASES = {"kick": ("kick", "bd", "bassdrum", "kik"), "snare": ("snare", "sd", "snr"),
+                "clap": ("clap", "cp", "hc"), "rim": ("rim", "rs", "rimshot", "sidestick", "stick"),
+                "tom": ("tom", "lt", "mt", "ht", "tom1"), "hat": ("hat", "ch", "hh", "closedhat", "hihat"),
+                "ohat": ("ohat", "oh", "openhat"), "shk": ("shk", "shaker", "sh", "perc", "cowbell", "cb")}
+
+
+def sample_kit_names(folder):
+    """Kits made of WAV files: one sub-folder each, inside folder."""
+    try:
+        return sorted(d for d in os.listdir(folder) if not d.startswith(".") and os.path.isdir(os.path.join(folder, d))
+                      and any(f.lower().endswith(".wav") for f in os.listdir(os.path.join(folder, d))))
+    except OSError:
+        return []
+
+
+def kit_names(folder=None):
+    return BUILTIN_KITS + (sample_kit_names(folder) if folder else [])
+
+
+def read_wav(path, sr=None, max_sec=2.5):
+    """Mono float32 at sr from a PCM WAV (8/16/24/32-bit int or 32-bit float)."""
+    import wave
+    import struct
+    sr = sr or SR
+    try:
+        w = wave.open(path, "rb")
+        ch, width, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+        raw = w.readframes(min(n, int(rate * max_sec)))
+        w.close()
+        if width == 1:
+            x = (np.frombuffer(raw, np.uint8).astype(np.float32) - 128) / 128.0
+        elif width == 2:
+            x = np.frombuffer(raw, "<i2").astype(np.float32) / 32768.0
+        elif width == 3:
+            b = np.frombuffer(raw, np.uint8).reshape(-1, 3).astype(np.int32)
+            x = ((b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)) << 8 >> 8).astype(np.float32) / 8388608.0
+        else:
+            x = np.frombuffer(raw, "<i4").astype(np.float32) / 2147483648.0
+    except Exception:
+        x, ch, rate = _read_float_wav(path, max_sec)
+        if x is None:
+            return None
+    if ch > 1:
+        x = x[: len(x) // ch * ch].reshape(-1, ch).mean(axis=1)
+    if rate != sr and len(x) > 1:
+        m = int(len(x) * sr / rate)
+        x = np.interp(np.arange(m) * (rate / sr), np.arange(len(x)), x)
+    pk = float(np.max(np.abs(x))) if len(x) else 0.0
+    if pk < 1e-4:
+        return None
+    x = x / pk * 0.9
+    fade = min(len(x), int(0.004 * sr))
+    if fade:
+        x[-fade:] *= np.linspace(1, 0, fade)
+    return x.astype(np.float32)
+
+
+def _read_float_wav(path, max_sec):
+    """The wave module can't read IEEE float WAVs; parse those by hand."""
+    import struct
+    try:
+        with open(path, "rb") as f:
+            d = f.read()
+        if d[:4] != b"RIFF" or d[8:12] != b"WAVE":
+            return None, 0, 0
+        i, fmt, data = 12, None, None
+        while i + 8 <= len(d):
+            cid, size = d[i:i + 4], struct.unpack("<I", d[i + 4:i + 8])[0]
+            if cid == b"fmt ":
+                fmt = struct.unpack("<HHIIHH", d[i + 8:i + 24])
+            elif cid == b"data":
+                data = d[i + 8:i + 8 + size]
+            i += 8 + size + (size & 1)
+        if not fmt or data is None or fmt[0] not in (3, 0xFFFE) or fmt[5] != 32:
+            return None, 0, 0
+        ch, rate = fmt[1], fmt[2]
+        x = np.frombuffer(data[: int(rate * max_sec) * ch * 4], "<f4").astype(np.float32)
+        return x, ch, rate
+    except Exception:
+        return None, 0, 0
+
+
+def sample_kit(folder, name):
+    """Lanes found in samples/<name>; missing lanes come from the Classic kit."""
+    kit = dict(drum_kit())
+    d = os.path.join(folder, name)
+    try:
+        files = {os.path.splitext(f)[0].lower().replace(" ", "").replace("_", "").replace("-", ""): f
+                 for f in os.listdir(d) if f.lower().endswith(".wav")}
+    except OSError:
+        return kit
+    for lane, f in lane_files(files).items():
+        x = read_wav(os.path.join(d, f))
+        if x is not None:
+            kit[lane] = x * 0.85
+    return kit
+
+
+# open hat before closed hat, so "openhat" doesn't land on the closed hat
+_LANE_PRI = ["ohat", "hat", "kick", "snare", "clap", "rim", "tom", "shk"]
+
+
+def lane_files(files):
+    """{lane: file} from {simplified name: file}: exact names win, then a name
+    that starts or ends with an alias (BD_kick 01 -> kick)."""
+    out = {}
+    for exact in (True, False):
+        for key in sorted(files):
+            if files[key] in out.values():
+                continue
+            base = key.rstrip("0123456789")
+            for lane in _LANE_PRI:
+                if lane in out:
+                    continue
+                names = LANE_ALIASES[lane]
+                if exact and base in names or not exact and any(base.startswith(a) or base.endswith(a) for a in names):
+                    out[lane] = files[key]
+                    break
+    return out
+
+
+def kit_arrays(gain=0.5, kit=None):
+    kit = drum_kit() if kit is None else kit
+    return {k: (np.repeat((v * gain)[:, None], 2, axis=1).astype(np.float32), None) for k, v in kit.items()}
+
+
+def _loud(x):
+    """Rough loudness: RMS of the first 120 ms (where a drum hit lives)."""
+    n = min(len(x), int(0.12 * SR))
+    return float(np.sqrt(np.mean(x[:n] ** 2))) if n else 0.0
+
+
+def matched(kit, ref):
+    """Each lane brought to the loudness of the same lane in ref, so switching
+    kits (or loading your own samples) keeps the mix where it was."""
+    out = {}
+    for k, v in kit.items():
+        a, b = _loud(v), _loud(ref.get(k, v))
+        g = b / a if a > 1e-6 else 1.0
+        out[k] = np.clip(v * min(g, 8.0), -1.0, 1.0).astype(np.float32)
+    return out
+
+
+def all_kits(folder=None, gain=0.5):
+    """Every kit, ready for the engine: {name: {lane: (stereo, None)}}."""
+    ref = drum_kit()
+    out = {"Classic": kit_arrays(gain, ref)}
+    for k in BUILTIN_KITS[1:]:
+        out[k] = kit_arrays(gain, matched(drum_kit_style(k), ref))
+    for k in (sample_kit_names(folder) if folder else []):
+        try:
+            out[k] = kit_arrays(gain, matched(sample_kit(folder, k), ref))
+        except Exception as ex:
+            print("sample kit %s: %s" % (k, ex), flush=True)
+    return out
 
 
 def mono_to_bytes(x, gain=0.5):

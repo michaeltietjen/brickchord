@@ -16,7 +16,7 @@ and everything plays on a single sample-accurate clock with a built-in drum mach
 - **Chord modifiers**: hold Y (flip major/minor), L1 (7th), R1 (sus4), L1+R1 (9th)
 - **Left stick** bends the held chord 8 ways: 7, maj7, 9, aug, flip, dim, sus4, sus2
 - **Right stick** for effects: up = wetter (reverb and delay together), down = dry; left = filter, right = resonance; click to hold
-- **Six modes** on a wheel (click the left stick): Play, Lead (melodies with bend, vibrato and glide), Drone, Drums (8 pads), Song and Effects
+- **Modes** on a wheel (click the left stick): Play, Lead (melodies with bend, vibrato and glide), Drone and Effects. Bricklab adds Drums (8 pads) and Song
 - **Synth engines**: analog-VA (detuned saws, PWM, sub, resonant filter), FM, plucked strings, drawbar organ, formant vox and noise pads. 23 sounds, editable in the Sound Editor
 - **Effects rack with LFOs**: Drive, Lo-fi, Chorus, Flanger, Vibrato, Tremolo, Gate, Auto-Pan, Wide, Filter LFO and Glide, stackable, tempo-synced, with randomize
 - **Song mode**: 16 patterns of up to 8 bars with 6 recorded tracks each, a step grid for editing, and a song page that chains patterns. Every track keeps its own sound and effects, changeable after recording, with undo

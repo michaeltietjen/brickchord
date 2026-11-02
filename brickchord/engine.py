@@ -63,6 +63,11 @@ class _Track:
         self.vol, self.pan, self.rs, self.ds = 0.85, 0.0, 0.25, 0.0
         self.ch = chain
         self.idle = 99
+        # drum track (Bricklab track 1): kit name, per-lane [level, mute], swing 0..0.5 of a step
+        self.drum = False
+        self.kit = None
+        self.lanes = {}
+        self.swing = 0.0
 
 
 class _Pattern:
@@ -88,6 +93,7 @@ class Engine:
         self.drums_on = False
         self.drum_pat = None
         self.kit = {}
+        self.kits = {}            # name -> kit (the Classic one is also self.kit)
         # chord / pattern state
         self.mode = "Chord"
         self.chord = None         # dict: notes(list), snd(dict midi->(a,l)), ...
@@ -385,7 +391,7 @@ class Engine:
         v.rel_at = int(start + gate) if gate else None
         v.tag, v.midi, v.srev, v.sdly, v.done = tag, midi, srev, sdly, False
         v.trk = v.rec = None
-        if self.route and tag in LIVE_TAGS and not self._nocap:
+        if self.route and tag in LIVE_TAGS and not self._nocap and not self._seltr().drum:
             v.trk = (self.cur, self.sel)
         self.voices.append(v)
         if self.lp_state and not self._nocap and tag in CAP_TAGS and midi is not None:
@@ -521,11 +527,24 @@ class Engine:
 
     # ------------------------------------------------------------ drum pads
     def c_hit(self, part, gain=1.0):
-        if part in self.kit:
-            g, pan = DRUM_GAIN.get(part, 0.75) * gain, DRUM_PAN.get(part, 0.0)
-            self._voice(self.kit[part], g, pan, self.t, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
-            if self.lp_state:
-                self._cap(self.t, "d", part, g, pan, None, 0.02)
+        tr = self._seltr() if self.route else None
+        if tr is not None and tr.drum:
+            snd, lv = self._drum_snd(tr, part)
+        else:
+            snd, lv = self.kit.get(part), 1.0
+        if snd is None:
+            return
+        g, pan = DRUM_GAIN.get(part, 0.75) * gain, DRUM_PAN.get(part, 0.0)
+        v = self._voice(snd, g * lv, pan, self.t, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
+        if tr is not None and tr.drum:
+            v.trk = (self.cur, self.sel)            # heard through the drum track's effects
+        if self.lp_state:
+            self._cap(self.t, "d", part, g, pan, None, 0.02)
+
+    def c_kits(self, kits):
+        self.kits = dict(kits)
+        if "Classic" in kits:
+            self.kit = kits["Classic"]
 
     # ------------------------------------------------------------ drone layer
     def c_drone(self, notes, snd):
@@ -674,6 +693,17 @@ class Engine:
     def _sel_chain(self):
         return self.pats[self.cur].tracks[self.sel].ch if self.route else self.live
 
+    def _seltr(self):
+        return self.pats[self.cur].tracks[self.sel]
+
+    def _drum_snd(self, tr, part):
+        """A drum lane's sound and level on a drum track (its kit, lane level, mute)."""
+        kit = self.kits.get(tr.kit) or self.kit
+        lv = tr.lanes.get(part)
+        if lv is not None and lv[1]:
+            return None, 0.0
+        return kit.get(part) or self.kit.get(part), (1.0 if lv is None else float(lv[0]))
+
     def _apply_flt(self, ch, stick):
         f, r = ch.flt_base
         if stick:
@@ -724,6 +754,8 @@ class Engine:
         L = pat.len
         pos = self._ppos(T)
         tr = pat.tracks[k]
+        if tr.drum and kind != "d":
+            return None                   # the drum track only takes drum hits
         skip = int(math.floor(ap)) > self.lp_abs     # its step hasn't played yet this pass
         ev = [round(pos, 4), kind, ident, round(float(gain), 3), round(float(pan), 3),
               None if dur is None else min(float(L), dur), round(float(rel), 3), skip]
@@ -852,6 +884,7 @@ class Engine:
                 td.ev = [list(e[:7]) + [False] for e in ts.ev]
                 td.snd = dict(ts.snd)
                 td.mute, td.vol, td.pan, td.rs, td.ds = ts.mute, ts.vol, ts.pan, ts.rs, ts.ds
+                td.drum, td.kit, td.lanes, td.swing = ts.drum, ts.kit, {n: list(v) for n, v in ts.lanes.items()}, ts.swing
                 td.ch.rack = dict(ts.ch.rack)
                 td.ch.flt_base = ts.ch.flt_base
                 self._apply_flt(td.ch, False)
@@ -922,6 +955,13 @@ class Engine:
                 self._bump(p)
         elif op == "ed":
             self._edit(*a)
+        elif op == "drum":
+            p, k, d = int(a[0]), int(a[1]), a[2]
+            tr = self.pats[p].tracks[k]
+            tr.drum = bool(d.get("on", True))
+            tr.kit = d.get("kit")
+            tr.lanes = {n: [float(v[0]), bool(v[1])] for n, v in (d.get("lanes") or {}).items()}
+            tr.swing = max(0.0, min(0.5, float(d.get("swing", 0.0))))
 
     def _edit(self, what, p, k, *a):
         """Step-grid edits on one track. Every edit can be undone."""
@@ -954,6 +994,24 @@ class Engine:
         elif what == "quant":
             for e in tr.ev:
                 e[0] = float(int(round(e[0])) % pat.len)
+        elif what == "dtog":                 # drum step on/off: (step, part, gain, pan)
+            step, part = int(a[0]), a[1]
+            hit = [e for e in tr.ev if e[1] == "d" and e[2] == part and int(round(e[0])) % pat.len == step]
+            if hit:
+                tr.ev = [e for e in tr.ev if not any(e is h for h in hit)]
+            else:
+                tr.ev.append([float(step), "d", part, float(a[2]), float(a[3]), None, 0.02, False])
+        elif what == "dvel":                 # set a drum step's level: (step, part, gain)
+            step, part = int(a[0]), a[1]
+            for e in tr.ev:
+                if e[1] == "d" and e[2] == part and int(round(e[0])) % pat.len == step:
+                    e[3] = float(a[2])
+        elif what == "dlane":                # clear one drum lane: (part,)
+            tr.ev = [e for e in tr.ev if not (e[1] == "d" and e[2] == a[0])]
+            self._release_track(p, k)
+        elif what == "dset":                 # replace the whole track (a preset beat)
+            tr.ev = [list(e[:7]) + [False] for e in a[0]]
+            self._release_track(p, k)
         self._index(pat, tr)
         self._bump(p)
 
@@ -1022,6 +1080,11 @@ class Engine:
             snd = tr.snd.get(ident)
         elif kind == "b":
             snd = self.bass_bank.get(ident)
+        elif tr.drum:
+            snd, lv = self._drum_snd(tr, ident)
+            gain *= lv
+            if tr.swing and pos == int(pos) and int(pos) % 2:
+                start += tr.swing * step
         else:
             snd = self.kit.get(ident)
         if snd is None:
@@ -1258,8 +1321,13 @@ class Engine:
         self._release(("arp",), at, int(0.03 * self.sr))
         self._note(at, n, "arp", 0.85, 0.0, int(step * 0.9), int(min(self.rel_len, step * 0.8)))
 
+    def _drum_track_playing(self):
+        if not (self.route and self.lp_on):
+            return False
+        return any(tr.drum and tr.ev and not tr.mute for tr in self.pats[self.cur].tracks)
+
     def _on_step(self, s, at):
-        if self.drums_on and self.drum_pat:
+        if self.drums_on and self.drum_pat and not self._drum_track_playing():
             sw = self.drum_pat.get("swing", 0.0)
             when = at + (int(sw * 60.0 / self.bpm / 4 * self.sr) if s % 2 else 0)
             for part, pat in self.drum_pat.items():
@@ -1355,7 +1423,7 @@ class Engine:
                 live.append(v)
         self.voices = live
         if self.leads:
-            if self.route:
+            if self.route and not self._seltr().drum:
                 key = (self.cur, self.sel)
                 b = tb.get(key)
                 if b is None:

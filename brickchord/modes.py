@@ -22,7 +22,7 @@ import song
 import synth
 
 IMODES = (["Play", "Lead", "Drone", "Drums", "Song", "Effects"] if edition.LAB   # clockwise from the top
-          else ["Play", "Lead", "Drone", "Drums", "Effects"])
+          else ["Play", "Lead", "Drone", "Effects"])          # Brickchord: the beat is on START
 FX_ROWS = engine.Engine.FX_ORDER + ["Glide"]
 RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
@@ -97,6 +97,12 @@ class ModesMixin(song.SongMixin):
             self.lead_all_off()
         if new == "Effects":
             self.prev_imode = self.imode
+        if edition.LAB and self.lp_e() is not None:
+            if new == "Drums" and self.lp_sel != song.DT:
+                self.pre_drum_sel = self.lp_sel
+                self.lp_select(song.DT)         # pads play (and record into) the drum track
+            elif self.imode == "Drums" and new in ("Play", "Lead", "Drone") and self.lp_sel == song.DT:
+                self.lp_select(getattr(self, "pre_drum_sel", 1) or 1)
         if new == "Song" and self.imode != "Song":
             self.lp_return = self.imode
             if self.sg_page == "fx":
@@ -306,7 +312,8 @@ class ModesMixin(song.SongMixin):
     def mode_hint(self):
         return {"Lead": "Y oct+  L1 oct-  R1 sharp  L-stick bend/vibrato  L3 modes",
                 "Drone": "tap a degree to drone, again to stop  Y adds 3rd  L3 modes",
-                "Drums": "8 pads  L1 soft  R1 accent  L3 modes",
+                "Drums": ("8 pads  L1 soft  R1 accent  SELECT+A record track 1  L3 modes" if edition.LAB
+                          else "8 pads  L1 soft  R1 accent  L3 modes"),
                 "Song": self.song_hint(),
                 "Effects": "A on/off  LEFT/RIGHT amount  L1/R1 rate  X random  Y all off  B back"}.get(self.imode)
 

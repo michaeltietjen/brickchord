@@ -33,6 +33,12 @@ TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), 
 DRUM_ROW = {"kick": 0.85, "snare": 0.6, "clap": 0.55, "tom": 0.7, "rim": 0.45, "hat": 0.25, "ohat": 0.2, "shk": 0.35}
 DRUM_ABBR = {"kick": "BD", "snare": "SD", "clap": "CP", "tom": "LT", "rim": "RS", "hat": "CH", "ohat": "OH", "shk": "SH"}
 PAGES = ["pattern", "grid", "song"]
+DT = 0                      # track 1 is the drum track
+LANES = engine.DRUM_ORDER   # kick snare clap rim tom hat ohat shk
+LANE_NAME = {"kick": "Kick", "snare": "Snare", "clap": "Clap", "rim": "Rim", "tom": "Tom", "hat": "Hat",
+             "ohat": "Open hat", "shk": "Shaker"}
+ACCENT_G, GHOST_G = 1.35, 0.4
+SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
 BARS = [1, 2, 4, 8]
 REC = (230, 70, 70)
 SONG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brickchord_song.json")
@@ -42,18 +48,55 @@ def M():
     return sys.modules["main"]
 
 
-def new_track():
-    return {"name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
-            "rs": 0.25, "ds": 0.0, "mute": False,
-            "rack": {k: [False, FX_DEFAULTS[k][0], FX_DEFAULTS[k][1]] for k in FX_ORDER + ["Glide"]},
-            "flt": [0.0, 0.0]}
+def new_drum():
+    return {"kit": "Classic", "swing": 0.0, "beat": 0, "lanes": {n: [1.0, False] for n in LANES}}
+
+
+def new_track(k=1):
+    t = {"name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
+         "rs": 0.25, "ds": 0.0, "mute": False,
+         "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER + ["Glide"]},
+         "flt": [0.0, 0.0]}
+    if k == DT:
+        t.update(name="Drums", rs=0.0, vol=0.9, drum=new_drum())
+    return t
+
+
+def fix_drum(d):
+    """A saved drum dict, made complete and safe."""
+    out = new_drum()
+    if isinstance(d, dict):
+        out["kit"] = str(d.get("kit") or "Classic")
+        out["swing"] = max(0.0, min(0.5, float(d.get("swing", 0.0) or 0.0)))
+        out["beat"] = int(d.get("beat", 0) or 0)
+        for n, v in (d.get("lanes") or {}).items():
+            if n in out["lanes"] and isinstance(v, (list, tuple)) and len(v) == 2:
+                out["lanes"][n] = [max(0.0, min(1.5, float(v[0]))), bool(v[1])]
+    return out
 
 
 def copy_track(m):
     t = dict(m)
     t["rack"] = {k: list(v) for k, v in m["rack"].items()}
     t["flt"] = list(m["flt"])
+    if "drum" in m:
+        t["drum"] = fix_drum(m["drum"])
     return t
+
+
+def beat_events(i, n):
+    """A preset beat (synth.BEATS) as drum-track events over n steps."""
+    b = synth.BEATS[i][1] or {}
+    evs = []
+    for part, pat in b.items():
+        if part == "swing" or part not in LANES:
+            continue
+        for s in range(n):
+            ch = pat[s % 16]
+            if ch != ".":
+                g = engine.DRUM_GAIN.get(part, 0.75) * (GHOST_G if ch == "g" else 1.0)
+                evs.append([float(s), "d", part, round(g, 3), engine.DRUM_PAN.get(part, 0.0), None, 0.02])
+    return evs, b.get("swing", 0.0)
 
 
 def note_name(m):
@@ -63,7 +106,9 @@ def note_name(m):
 class SongMixin:
     # ------------------------------------------------------------ setup / storage
     def song_init(self):
-        self.pm = [[new_track() for _ in range(NT)] for _ in range(NP)]
+        self.pm = [[new_track(k) for k in range(NT)] for _ in range(NP)]
+        self.drum_lane = 0
+        self.kits = synth.kit_names(SAMPLES)
         self.pbars = [2] * NP
         self.song_rows = [[0, 1]]
         self.song_on = False
@@ -107,8 +152,11 @@ class SongMixin:
                     continue
                 t = self.pm[p][k]
                 for f in t:
-                    if f in sv and f != "rack":
+                    if f in sv and f not in ("rack", "drum"):
                         t[f] = sv[f]
+                if k == DT:
+                    t["drum"] = fix_drum(sv.get("drum"))
+                    t["name"] = "Drums"
                 for n, v in (sv.get("rack") or {}).items():
                     if n in t["rack"] and len(v) == 3:
                         t["rack"][n] = [bool(v[0]), float(v[1]), int(v[2])]
@@ -154,6 +202,8 @@ class SongMixin:
     # ------------------------------------------------------------ engine sync
     def lp_push_track(self, p, k):
         m = self.pm[p][k]
+        if self.is_drum(k):
+            self.drum_push(p)
         self.eng.post("lp", "mix", p, k, {"vol": m["vol"], "pan": m["pan"], "rs": m["rs"], "ds": m["ds"],
                                           "mute": m["mute"]})
         self.eng.post("lp", "fx", p, k, {n: tuple(v) for n, v in m["rack"].items() if n != "Glide"},
@@ -181,6 +231,7 @@ class SongMixin:
             saved = self._saved.get("pats") or []
             trs = ((saved[p] if p < len(saved) else None) or {}).get("tracks") or []
             evs = [(trs[k].get("ev") if k < len(trs) and isinstance(trs[k], dict) else None) for k in range(NT)]
+            evs = self.migrate_drum_track(p, evs)
             if any(evs):
                 self.eng.post("lp", "load", p, self.pbars[p] * 16, evs)
                 for ev_l in evs:
@@ -196,6 +247,40 @@ class SongMixin:
         self.eng.post("lp", "pat", self.start_p)
         self._saved = {}
 
+    def migrate_drum_track(self, p, evs):
+        """Track 1 is the drum track now. Notes an older version recorded there
+        move to the first empty track (drum hits stay)."""
+        old = evs[DT] or []
+        notes = [ev for ev in old if ev[1] != "d"]
+        if not notes:
+            return evs
+        evs = list(evs)
+        evs[DT] = [ev for ev in old if ev[1] == "d"]
+        free = next((k for k in range(1, NT) if not evs[k]), None)
+        if free is not None:
+            evs[free] = notes
+            m = self.pm[p][DT]
+            self.pm[p][free] = dict(copy_track(m), drum=None)
+            self.pm[p][free].pop("drum", None)
+            self.pm[p][free]["name"] = m.get("name") if m.get("name") != "Drums" else None
+            keep = self.pm[p][DT]
+            nd = new_track(DT)
+            nd["drum"] = keep.get("drum") or new_drum()
+            self.pm[p][DT] = nd
+            print("song: P%02d track 1 notes moved to track %d" % (p + 1, free + 1), flush=True)
+        else:
+            print("song: P%02d track 1 notes dropped (no free track)" % (p + 1), flush=True)
+        self.lp_dirty = True
+        return evs
+
+    def is_drum(self, k):
+        return k == DT
+
+    def drum_push(self, p):
+        d = self.pm[p][DT]["drum"]
+        self.eng.post("lp", "drum", p, DT, {"on": True, "kit": d["kit"], "swing": d["swing"],
+                                           "lanes": {n: tuple(v) for n, v in d["lanes"].items()}})
+
     def sync_sel(self, preload=True):
         """The selected track of the playing pattern becomes the live instrument:
         its sound, sends and effects rack are what you play and edit."""
@@ -203,7 +288,9 @@ class SongMixin:
         p = e.cur if e else 0
         k = self.lp_sel
         m = self.pm[p][k]
-        if m["patch"] is None:
+        if self.is_drum(k):
+            pass                                # drums keep the live sound as it is
+        elif m["patch"] is None:
             m.update(patch=self.patch, tone=self.tone, res=self.res, pj=self.ckey(0)[1],
                      name=synth.PATCHES[self.patch]["name"], rs=self.base_rev, ds=self.base_dly)
             self.lp_push_track(p, k)
@@ -230,7 +317,9 @@ class SongMixin:
         p, k = self.sel_key
         m = self.pm[p][k]
         pj = self.ckey(0)[1]
-        if (m["patch"], m["tone"], m["res"], m["pj"]) != (self.patch, self.tone, self.res, pj):
+        if self.is_drum(k):
+            pass
+        elif (m["patch"], m["tone"], m["res"], m["pj"]) != (self.patch, self.tone, self.res, pj):
             m.update(patch=self.patch, tone=self.tone, res=self.res, pj=pj, name=synth.PATCHES[self.patch]["name"])
             e = self.lp_e()
             if e and e.pats[p].tracks[k].ev:
@@ -271,6 +360,10 @@ class SongMixin:
         self.eng.post("lp", "arm", k, 16 * self.countin)
         if not stay:
             back = self.lp_return if self.lp_return in ("Play", "Lead", "Drone", "Drums") else "Play"
+            if self.is_drum(k):
+                back = "Drums"
+            elif back == "Drums":
+                back = "Play"
             self.set_mode(back)
         self.flash("P%02d TRACK %d %s: PLAY TO RECORD" % (e.cur + 1, k + 1, "ARMED" if self.lp_was_empty else "OVERDUB"))
 
@@ -310,6 +403,9 @@ class SongMixin:
 
     def set_track_sound(self, p, k, d):
         m = self.pm[p][k]
+        if self.is_drum(k):
+            self.set_kit(p, d)
+            return
         i = ((m["patch"] if m["patch"] is not None else self.patch) + d) % len(synth.PATCHES)
         if (p, k) == self.sel_key:
             self.patch = i               # pull_live() carries it to the track
@@ -318,6 +414,29 @@ class SongMixin:
             m.update(patch=i, name=synth.PATCHES[i]["name"], pj=self.patch_json(i, m["tone"], m["res"]))
             self.lp_resolve(p, k, replace=True)
         self.lp_dirty = True
+
+    def set_kit(self, p, d):
+        dr = self.pm[p][DT]["drum"]
+        self.kits = synth.kit_names(SAMPLES)
+        i = self.kits.index(dr["kit"]) if dr["kit"] in self.kits else 0
+        dr["kit"] = self.kits[(i + d) % len(self.kits)]
+        self.drum_push(p)
+        self.lp_dirty = True
+        self.flash("KIT: " + dr["kit"].upper())
+        self.eng.post("hit", "kick", 0.9)
+
+    def load_beat(self, p, d):
+        """Next/previous preset beat into this pattern's drum track (undoable)."""
+        e = self.lp_e()
+        dr = self.pm[p][DT]["drum"]
+        n = len(synth.BEATS) - 1
+        dr["beat"] = (dr.get("beat", 0) + d - 1) % n + 1        # 1..n (0 is Off)
+        evs, sw = beat_events(dr["beat"], e.pats[p].len)
+        dr["swing"] = sw
+        self.eng.post("lp", "ed", "dset", p, DT, evs)
+        self.drum_push(p)
+        self.lp_dirty = True
+        self.flash("BEAT: %s   SELECT+B UNDOES" % synth.BEATS[dr["beat"]][0].upper())
 
     def lp_randomize(self, p, k):
         rack = self.pm[p][k]["rack"]
@@ -437,6 +556,8 @@ class SongMixin:
         return [ev for ev in e.pats[e.cur].tracks[self.lp_sel].ev if int(ev[0]) == step]
 
     def input_grid(self, name, e, y):
+        if self.is_drum(self.lp_sel):
+            return self.input_drums(name, e, y)
         p, k = e.cur, self.lp_sel
         n = e.pats[p].len
         x = self.grid_x % n
@@ -471,6 +592,140 @@ class SongMixin:
         else:
             return False
         return True
+
+    # ------------------------------------------------------------ drum machine (track 1)
+    def drum_hits(self, e, p):
+        """{(step, lane): gain} for this pattern's drum track."""
+        n = e.pats[p].len
+        out = {}
+        for ev in e.pats[p].tracks[DT].ev:
+            if ev[1] == "d":
+                out[(int(round(ev[0])) % n, ev[2])] = ev[3]
+        return out
+
+    def input_drums(self, name, e, y):
+        p = e.cur
+        n = e.pats[p].len
+        x = self.grid_x % n
+        lane = LANES[self.drum_lane % len(LANES)]
+        dr = self.pm[p][DT]["drum"]
+        lv = dr["lanes"][lane]
+        base = engine.DRUM_GAIN.get(lane, 0.75)
+        here = self.drum_hits(e, p).get((x, lane))
+        if name in ("LEFT", "RIGHT"):
+            d = 1 if name == "RIGHT" else -1
+            if y:
+                dr["swing"] = round(max(0.0, min(0.5, dr["swing"] + 0.05 * d)), 2)
+                self.drum_push(p)
+                self.flash("SWING %d%%" % round(dr["swing"] * 200))
+            else:
+                self.grid_x = (x + d) % n
+        elif name in ("UP", "DOWN"):
+            d = 1 if name == "DOWN" else -1
+            if y:
+                lv[0] = round(max(0.0, min(1.5, lv[0] - 0.1 * d)), 2)
+                self.drum_push(p)
+                self.flash("%s LEVEL %d%%" % (LANE_NAME[lane].upper(), round(lv[0] * 100)))
+                self.eng.post("hit", lane, 0.9)
+            else:
+                self.drum_lane = (self.drum_lane + d) % len(LANES)
+        elif name == "A":
+            if y:
+                lv[1] = not lv[1]
+                self.drum_push(p)
+                self.flash("%s %s" % (LANE_NAME[lane].upper(), "MUTED" if lv[1] else "ON"))
+            else:
+                self.eng.post("lp", "ed", "dtog", p, DT, x, lane, base, engine.DRUM_PAN.get(lane, 0.0))
+                if here is None:
+                    self.eng.post("hit", lane, 1.0)
+        elif name == "B":
+            if y:
+                self.eng.post("lp", "ed", "dlane", p, DT, lane)
+                self.flash("%s CLEARED   SELECT+B UNDOES" % LANE_NAME[lane].upper())
+            elif here is not None:
+                # normal -> accent -> ghost -> normal
+                if here > base * 1.1:
+                    g, lab = base * GHOST_G, "GHOST"
+                elif here < base * 0.9:
+                    g, lab = base, "NORMAL"
+                else:
+                    g, lab = base * ACCENT_G, "ACCENT"
+                self.eng.post("lp", "ed", "dvel", p, DT, x, lane, round(g, 3))
+                self.eng.post("hit", lane, g / base)
+                self.flash("STEP %d %s" % (x + 1, lab))
+        elif name == "X":
+            if y:
+                self.set_kit(p, 1)
+            else:
+                self.load_beat(p, 1)
+        else:
+            return False
+        return True
+
+    def draw_drum_grid(self, c, e):
+        mm = M()
+        p = e.cur
+        pat = e.pats[p]
+        L = max(16, pat.len)
+        dr = self.pm[p][DT]["drum"]
+        col = TRACK_COLS[0]
+        x = self.grid_x % L
+        page = x // 16
+        s0 = page * 16
+        beat = synth.BEATS[dr.get("beat", 0)][0] if dr.get("beat") else "your own"
+        self.text(c, "P%02d  DRUMS   kit %s   swing %d%%   from %s" % (p + 1, dr["kit"], round(dr["swing"] * 200), beat),
+                  self.f_small, col, (20, 74))
+        self.text(c, "page %d/%d" % (page + 1, L // 16), self.f_small, mm.DIM, (mm.BASE_W - 20, 74), right=True)
+        top, bottom = 94, mm.L["tiles_y"] + mm.L["tile_h"] - 22
+        rh = (bottom - top) // len(LANES)
+        gx0 = 132
+        cw = (mm.BASE_W - 20 - gx0) / 16.0
+        hits = self.drum_hits(e, p)
+        pp = self.playpos(e)
+        play_step = int(pp) if pp is not None else None
+        for li, lane in enumerate(LANES):
+            y = top + li * rh
+            lv = dr["lanes"][lane]
+            sel = li == self.drum_lane % len(LANES)
+            if sel:
+                pygame.draw.rect(c, mm.PANEL, (10, y, mm.BASE_W - 20, rh - 2), border_radius=6)
+            self.text(c, LANE_NAME[lane], self.f_small, (REC if lv[1] else (mm.ACCENT if sel else mm.INK)), (18, y + 2))
+            # lane level
+            bw = 54
+            pygame.draw.rect(c, mm.BG, (18, y + rh - 9, bw, 4), border_radius=2)
+            pygame.draw.rect(c, mm.DIM if lv[1] else col, (18, y + rh - 9, int(bw * min(1.0, lv[0] / 1.5)), 4),
+                             border_radius=2)
+            if lv[1]:
+                self.text(c, "M", self.f_small, REC, (gx0 - 22, y + 2))
+            base = engine.DRUM_GAIN.get(lane, 0.75)
+            for i in range(16):
+                s = s0 + i
+                if s >= pat.len:
+                    break
+                r = pygame.Rect(int(gx0 + i * cw) + 1, y + 2, int(cw) - 3, rh - 6)
+                g = hits.get((s, lane))
+                bg = self.mix(mm.BG, mm.PANEL, 0.55) if (i // 4) % 2 == 0 else mm.PANEL
+                if g is None:
+                    pygame.draw.rect(c, bg, r, border_radius=4)
+                else:
+                    amt = 1.0 if g > base * 1.1 else (0.35 if g < base * 0.9 else 0.7)
+                    fill = self.mix(bg, mm.DIM if lv[1] else col, amt)
+                    if play_step == s and e.lp_on:
+                        fill = self.mix(fill, mm.INK, 0.35)
+                    pygame.draw.rect(c, fill, r, border_radius=4)
+                    if amt == 1.0:
+                        pygame.draw.rect(c, mm.INK, (r.x + 3, r.y + 3, 4, 4), border_radius=2)
+                if sel and s == x:
+                    pygame.draw.rect(c, mm.INK, r.inflate(4, 4), 2, border_radius=5)
+        if play_step is not None and s0 <= play_step < s0 + 16:
+            px = int(gx0 + (pp - s0) * cw)
+            pygame.draw.line(c, mm.INK, (px, top), (px, top + rh * len(LANES) - 2), 2)
+        g = hits.get((x, LANES[self.drum_lane % len(LANES)]))
+        lane = LANES[self.drum_lane % len(LANES)]
+        base = engine.DRUM_GAIN.get(lane, 0.75)
+        st = "empty" if g is None else ("accent" if g > base * 1.1 else ("ghost" if g < base * 0.9 else "on"))
+        self.text(c, "step %d  %s: %s" % (x + 1, LANE_NAME[lane].lower(), st), self.f_small, mm.INK,
+                  (20, bottom + 4))
 
     def grid_new(self, e, x, drum=False):
         """A new trig: a copy of the nearest earlier step on this track, or a
@@ -520,6 +775,8 @@ class SongMixin:
 
     def tfx_value(self, m, row):
         if row == "Sound":
+            if "drum" in m:
+                return "Kit: " + m["drum"]["kit"]
             return m["name"] or synth.PATCHES[self.patch]["name"]
         return {"Level": m["vol"], "Pan": m["pan"], "Reverb": m["rs"], "Delay": m["ds"],
                 "Filter": m["flt"][0], "Resonance": m["flt"][1]}.get(row) if row not in FX_ORDER else m["rack"][row]
@@ -659,6 +916,8 @@ class SongMixin:
         pg = self.sg_page
         if pg == "fx":
             return "LEFT/RIGHT value  A on/off  L1/R1 rate  X random  B back"
+        if pg == "grid" and self.is_drum(self.lp_sel):
+            return "A step  B accent/ghost  X beat  Y+X kit  Y+^v lane level  Y+A mute  Y+B clear  Y+<> swing"
         if pg == "grid":
             return "A add  B del  UP/DOWN pitch  X quantize  Y+<> length  Y+A kick  L1/R1 page"
         if pg == "song":
@@ -770,12 +1029,16 @@ class SongMixin:
             self.text(c, str(k + 1), self.f_small, mm.BG if (rec or (tr.ev and not m["mute"])) else mm.DIM,
                       badge.center, center=True)
             nm = m["name"] or (synth.PATCHES[self.patch]["name"] if k == self.lp_sel else "empty")
+            if self.is_drum(k):
+                nm = "Drums  " + m["drum"]["kit"]
             self.text(c, nm[:14], self.f_small, mm.INK if (k == self.lp_sel or tr.ev) else mm.DIM, (50, y + rh // 2 - 15))
             if rec:
                 sub = {"rec": "REC", "count": "count-in"}.get(e.lp_state, "play to start")
             else:
                 nfx = sum(1 for n, v in m["rack"].items() if v[0] and n != "Glide")
-                sub = ("%d notes" % len(tr.ev) if tr.ev else "") + ("  fx %d" % nfx if nfx else "")
+                sub = ("%d %s" % (len(tr.ev), "hits" if self.is_drum(k) else "notes") if tr.ev else
+                       ("X on GRID: load a beat" if self.is_drum(k) and k == self.lp_sel else "")) + \
+                      ("  fx %d" % nfx if nfx else "")
                 if m["mute"]:
                     sub = "MUTED " + sub
             self.text(c, sub, self.f_small, REC if (rec or m["mute"]) else mm.DIM, (50, y + rh // 2 + 2))
@@ -797,6 +1060,8 @@ class SongMixin:
             pygame.draw.line(c, mm.INK, (px, top + 2), (px, top + rh * NT - 2), 2)
 
     def draw_grid_page(self, c, e):
+        if self.is_drum(self.lp_sel):
+            return self.draw_drum_grid(c, e)
         mm = M()
         p, k = e.cur, self.lp_sel
         pat = e.pats[p]

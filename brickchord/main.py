@@ -763,7 +763,7 @@ class App(modes.ModesMixin):
                 if steps[i][0] not in ("R3", "L3"):
                     self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320 + L["dy"]), center=True)
             if only == ("L3",):
-                self.text(c, "New: click the left stick for the mode wheel (Play, Lead, Drone, Drums...)",
+                self.text(c, "New: click the left stick for the mode wheel (Play, Lead, Drone...)",
                           self.f_small, ACCENT2, (BASE_W // 2, 385 + L["dy"]), center=True)
             elif only:
                 self.text(c, "New: right stick LEFT/RIGHT = filter / resonance, click = hold effects",
