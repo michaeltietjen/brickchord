@@ -36,6 +36,8 @@ Bricklab is Brickchord plus song mode: 16 patterns of 6 recorded tracks, each tr
 3. On the device: Start → Game Settings → Update Gamelists, then open **Ports → Brickchord**.
 4. On first launch, press each button once and push each stick once so Brickchord learns your controls.
 
+**Tested firmware:** `knulli-a133-trimui-brick-pro-beta-20260921`. KNULLI for the Brick Pro is still in beta. Get it from the [KNULLI project](https://knulli.org) (public builds are on [their GitHub releases](https://github.com/knulli-cfw/distribution/releases)); Brickchord doesn't host or support the firmware itself.
+
 ## Install (R36Max, R36S and other ArkOS-family handhelds)
 1. Download `brickchord-r36max-*.zip` from **[Releases](https://github.com/michaeltietjen/brickchord/releases)**.
 2. Copy `Brickchord.sh` and the `brickchord/` folder from its `ports/` folder into `ports/` on the SD card.
