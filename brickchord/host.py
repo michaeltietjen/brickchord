@@ -394,6 +394,10 @@ class LocalHost:
                     del self.lp_pending[(p, k)]
         return got
 
+    def rescan_kits(self):
+        """Reload the WAV kits in samples/ (new folders show up without a relaunch)."""
+        self.eng.post("kits", self.synth.all_kits(SAMPLES))
+
     def lp_sound(self, p, k, pj, replace=False):
         """Give track k of pattern p its notes in sound pj (stand-ins first if
         needed; the real notes are swapped in by poll() as they arrive)."""
@@ -642,6 +646,9 @@ class SplitHost:
 
     def lp_sound(self, p, k, pj, replace=False):
         self._send("lp_sound", p, k, pj, replace)
+
+    def rescan_kits(self):
+        self._send("rescan_kits")
 
     def poll(self):
         self.pump()

@@ -28,6 +28,8 @@ LOOP_TRACKS = 6
 NPATS = 16
 CAP_TAGS = ("held", "strum", "arp", "harp", "drone", "bass")    # live notes that get recorded
 LIVE_TAGS = ("held", "strum", "arp", "harp", "drone")           # live notes routed through the selected track
+ACCENT_G, GHOST_G = 1.35, 0.4      # the levels the grid writes for accent and ghost steps
+DRUM_ATTRS = ("drum", "kit", "swing", "swres", "acc", "ghost", "human", "choke")
 DRUM_ORDER = ["kick", "snare", "clap", "rim", "tom", "hat", "ohat", "shk"]
 MAX_VOICES = 56      # hard cap on sounding voices (keeps the mixer inside its time budget)
 
@@ -36,7 +38,7 @@ STRUM_PATTERNS = {"Strum Folk": "D.DU.UDU", "Strum Pop": "D.D.UDUd", "Strum Skan
 
 class _V:
     __slots__ = ("a", "l", "pos", "start", "gain", "lg", "rg", "rel_at", "rel_len", "tag", "midi",
-                 "srev", "sdly", "done", "trk", "rec")
+                 "srev", "sdly", "done", "trk", "rec", "part")
 
 
 class _Chain:
@@ -63,11 +65,16 @@ class _Track:
         self.vol, self.pan, self.rs, self.ds = 0.85, 0.0, 0.25, 0.0
         self.ch = chain
         self.idle = 99
-        # drum track (Bricklab track 1): kit name, per-lane [level, mute], swing 0..0.5 of a step
+        # drum track (Bricklab track 1): kit name, per-lane [level, mute, tune], swing 0..0.5 of
+        # a step (on odd 16ths, or on the off-beat 8ths), accent/ghost depth, humanize, hat choke
         self.drum = False
         self.kit = None
         self.lanes = {}
         self.swing = 0.0
+        self.swres = 16
+        self.acc, self.ghost = ACCENT_G, GHOST_G
+        self.human = 0.0
+        self.choke = True
 
 
 class _Pattern:
@@ -94,6 +101,7 @@ class Engine:
         self.drum_pat = None
         self.kit = {}
         self.kits = {}            # name -> kit (the Classic one is also self.kit)
+        self.tuned = {}           # (kit, lane, semitones) -> pitched drum sound
         # chord / pattern state
         self.mode = "Chord"
         self.chord = None         # dict: notes(list), snd(dict midi->(a,l)), ...
@@ -390,7 +398,7 @@ class Engine:
         v.rel_len = int(rel if rel is not None else self.rel_len)
         v.rel_at = int(start + gate) if gate else None
         v.tag, v.midi, v.srev, v.sdly, v.done = tag, midi, srev, sdly, False
-        v.trk = v.rec = None
+        v.trk = v.rec = v.part = None
         if self.route and tag in LIVE_TAGS and not self._nocap and not self._seltr().drum:
             v.trk = (self.cur, self.sel)
         self.voices.append(v)
@@ -536,13 +544,36 @@ class Engine:
             return
         g, pan = DRUM_GAIN.get(part, 0.75) * gain, DRUM_PAN.get(part, 0.0)
         v = self._voice(snd, g * lv, pan, self.t, "drum", srev=0, sdly=0, rel=int(0.02 * self.sr))
+        v.part = part
         if tr is not None and tr.drum:
             v.trk = (self.cur, self.sel)            # heard through the drum track's effects
+            if tr.choke and part == "hat":
+                self._choke(v.trk, self.t)
         if self.lp_state:
             self._cap(self.t, "d", part, g, pan, None, 0.02)
 
+    def c_dhit(self, p, part, gain=1.0):
+        """Audition one lane of pattern p's drum track (its kit, level, tune), from Settings."""
+        tr = next((t for t in self.pats[int(p)].tracks if t.drum), None)
+        if tr is None:
+            return
+        snd, lv = self._drum_snd(tr, part, audition=True)
+        if snd is None:
+            return
+        v = self._voice(snd, DRUM_GAIN.get(part, 0.75) * gain * lv, DRUM_PAN.get(part, 0.0), self.t, "drum",
+                        srev=0, sdly=0, rel=int(0.02 * self.sr))
+        v.part = part
+
+    def _choke(self, key, at):
+        """A closed hat cuts the open hat still ringing on the same track."""
+        fast = int(0.015 * self.sr)
+        for v in self.voices:
+            if v.part == "ohat" and v.trk == key and v.start < at and (v.rel_at is None or v.rel_at > at):
+                v.rel_at, v.rel_len = int(at), fast
+
     def c_kits(self, kits):
         self.kits = dict(kits)
+        self.tuned = {}
         if "Classic" in kits:
             self.kit = kits["Classic"]
 
@@ -696,13 +727,33 @@ class Engine:
     def _seltr(self):
         return self.pats[self.cur].tracks[self.sel]
 
-    def _drum_snd(self, tr, part):
-        """A drum lane's sound and level on a drum track (its kit, lane level, mute)."""
+    def _drum_snd(self, tr, part, audition=False):
+        """A drum lane's sound and level on a drum track (its kit, lane level, mute, tune)."""
         kit = self.kits.get(tr.kit) or self.kit
         lv = tr.lanes.get(part)
-        if lv is not None and lv[1]:
+        if lv is not None and lv[1] and not audition:
             return None, 0.0
-        return kit.get(part) or self.kit.get(part), (1.0 if lv is None else float(lv[0]))
+        snd = kit.get(part) or self.kit.get(part)
+        semis = int(lv[2]) if lv is not None and len(lv) > 2 else 0
+        if semis and snd is not None:
+            snd = self._tuned(tr.kit, part, snd, semis)
+        return snd, (1.0 if lv is None else float(lv[0]))
+
+    def _tuned(self, kit, part, snd, semis):
+        """A drum sound pitched by semitones (resampled once, then kept)."""
+        key = (kit, part, semis)
+        out = self.tuned.get(key)
+        if out is None:
+            a = snd[0]
+            r = 2.0 ** (semis / 12.0)
+            n = max(16, int(len(a) / r))
+            x = np.arange(n, dtype=np.float64) * r
+            i = np.arange(len(a), dtype=np.float64)
+            b = np.stack([np.interp(x, i, a[:, ch]) for ch in range(a.shape[1])], axis=1).astype(np.float32)
+            out = self.tuned[key] = (b, None)
+            if len(self.tuned) > 96:
+                self.tuned.pop(next(iter(self.tuned)))
+        return out
 
     def _apply_flt(self, ch, stick):
         f, r = ch.flt_base
@@ -884,7 +935,9 @@ class Engine:
                 td.ev = [list(e[:7]) + [False] for e in ts.ev]
                 td.snd = dict(ts.snd)
                 td.mute, td.vol, td.pan, td.rs, td.ds = ts.mute, ts.vol, ts.pan, ts.rs, ts.ds
-                td.drum, td.kit, td.lanes, td.swing = ts.drum, ts.kit, {n: list(v) for n, v in ts.lanes.items()}, ts.swing
+                for f in DRUM_ATTRS:
+                    setattr(td, f, getattr(ts, f))
+                td.lanes = {n: list(v) for n, v in ts.lanes.items()}
                 td.ch.rack = dict(ts.ch.rack)
                 td.ch.flt_base = ts.ch.flt_base
                 self._apply_flt(td.ch, False)
@@ -960,8 +1013,17 @@ class Engine:
             tr = self.pats[p].tracks[k]
             tr.drum = bool(d.get("on", True))
             tr.kit = d.get("kit")
-            tr.lanes = {n: [float(v[0]), bool(v[1])] for n, v in (d.get("lanes") or {}).items()}
+            tr.lanes = {n: [float(v[0]), bool(v[1]), int(v[2]) if len(v) > 2 else 0]
+                        for n, v in (d.get("lanes") or {}).items()}
             tr.swing = max(0.0, min(0.5, float(d.get("swing", 0.0))))
+            tr.swres = 8 if int(d.get("swres", 16)) == 8 else 16
+            tr.acc = max(1.0, min(2.5, float(d.get("acc", ACCENT_G))))
+            tr.ghost = max(0.05, min(1.0, float(d.get("ghost", GHOST_G))))
+            tr.human = max(0.0, min(1.0, float(d.get("human", 0.0))))
+            tr.choke = bool(d.get("choke", True))
+            for n, v in tr.lanes.items():
+                if v[2]:
+                    self._drum_snd(tr, n, audition=True)     # resample now, not on the first hit
 
     def _edit(self, what, p, k, *a):
         """Step-grid edits on one track. Every edit can be undone."""
@@ -1082,9 +1144,24 @@ class Engine:
             snd = self.bass_bank.get(ident)
         elif tr.drum:
             snd, lv = self._drum_snd(tr, ident)
+            base = DRUM_GAIN.get(ident, 0.75)
+            if gain > base * 1.1:
+                gain *= tr.acc / ACCENT_G
+            elif gain < base * 0.9:
+                gain *= tr.ghost / GHOST_G
             gain *= lv
-            if tr.swing and pos == int(pos) and int(pos) % 2:
-                start += tr.swing * step
+            if tr.swing and pos == int(pos):
+                if tr.swres == 8:
+                    if int(pos) % 4 == 2:
+                        start += tr.swing * 2 * step
+                elif int(pos) % 2:
+                    start += tr.swing * step
+            if tr.human:
+                start += random.uniform(-1.0, 1.0) * tr.human * 0.012 * self.sr
+                gain *= 1.0 + random.uniform(-1.0, 1.0) * 0.15 * tr.human
+                start = max(start, self.t)
+            if snd is not None and tr.choke and ident == "hat":
+                self._choke(key, int(start))
         else:
             snd = self.kit.get(ident)
         if snd is None:
@@ -1096,6 +1173,8 @@ class Engine:
         v = self._voice(snd, gain, max(-1.0, min(1.0, pan)), int(start), "loop", ident if kind != "d" else None,
                         gate, int(rel * self.sr), srev=0, sdly=0)
         v.trk = key
+        if kind == "d":
+            v.part = ident
 
     def c_params(self, bpm=None, rel=None, sustains=None, spread=None, mode=None, quantize=None):
         if quantize is not None:

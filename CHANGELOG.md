@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Settings has pages now: Global, Chords, Drums (Bricklab) and FX. L1/R1 flips between them, and Settings opens on the page for what you are doing (Drums from Drums mode or the track 1 grid, FX from Effects).
+- Settings > Drums, for the playing pattern's drum track: kit (this pattern or all patterns), rescan samples (new WAV kit folders show up without a relaunch), preset beat (A loads it, undoable), pattern length, swing amount and whether it swings 16ths or 8ths, accent and ghost depth, humanize (small timing and level drift), hat choke (closed hat cuts the open hat), drum level, and a mixer row per lane: LEFT/RIGHT level, Y+LEFT/RIGHT tune (+/-12 semitones), A mute, X to hear it.
 - Bricklab drum machine: track 1 of every pattern is now a drum track with an 8-lane step grid (kick, snare, clap, rim, tom, hat, open hat, shaker). On SONG > GRID with track 1 selected: A toggles a step, B cycles accent / ghost, X loads the next preset beat as a starting point, Y+X changes kit, Y+UP/DOWN sets a lane's level, Y+A mutes a lane, Y+B clears it, Y+LEFT/RIGHT sets swing. Every pattern keeps its own drums, so songs get real verses and fills. The Drums pads play and record into track 1, through its effects.
 - Drum kits: Classic, 808, 909, Lo-fi and Acoustic, plus your own WAV kits in `samples/<kit name>/` (kick.wav, snare.wav, hat.wav ...; levels matched automatically). See samples_README.txt.
 - The START beat steps aside while a pattern's drum track is playing, so the two never double up.

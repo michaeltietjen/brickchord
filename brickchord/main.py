@@ -62,6 +62,15 @@ PLAY_MODES = ["Chord", "Strum Folk", "Strum Pop", "Strum Skank", "Slop", "Harp U
 STRUM_PATTERNS = {"Strum Folk": "D.DU.UDU", "Strum Pop": "D.D.UDUd", "Strum Skank": ".D.D.D.D"}
 DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0), ("1/4 dotted", 1.5),
                ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
+# Settings pages (L1/R1 flips between them). Drums is Bricklab only.
+MENU_PAGES = {
+    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Volume", "Latency",
+               "Relearn buttons", "Learn sticks", "Quit"],
+    "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
+               "Bass", "Bass Level"],
+    "Drums": None,
+    "FX": ["Reverb", "Reverb Type", "Delay", "Delay Type", "Delay Time"],
+}
 DELAY_TYPES = ["Ping-Pong", "Straight", "Tape", "Dub", "Slapback", "Multi-Tap"]
 
 # colours
@@ -314,6 +323,8 @@ class App(modes.ModesMixin):
         self.drums_on = False
         self.menu = False
         self.menu_i = 0
+        self.menu_pg = "Chords"
+        self.menu_pos = {}              # page -> row it was left on
         self.msg = ""
         self.msg_t = 0
         self.running = True
@@ -837,7 +848,41 @@ class App(modes.ModesMixin):
     # ---------------- drums
 
     # ---------------- menu
+    def menu_pages(self):
+        return [n for n in MENU_PAGES if n != "Drums" or edition.LAB]
+
+    def menu_context_page(self):
+        """The page Settings opens on: the one for what you are doing."""
+        im = self.imode
+        if edition.LAB and (im == "Drums" or (im == "Song" and self.sg_page == "grid" and self.lp_sel == 0)):
+            return "Drums"
+        if im == "Effects":
+            return "FX"
+        if im == "Song":
+            return "Global"
+        return "Chords"
+
+    def open_menu(self):
+        self.menu = True
+        self.menu_set_page(self.menu_context_page())
+
+    def menu_set_page(self, pg):
+        self.menu_pos[self.menu_pg] = self.menu_i
+        self.menu_pg = pg if pg in self.menu_pages() else "Chords"
+        self.menu_i = self.menu_pos.get(self.menu_pg, 0)
+        if self.menu_pg == "Drums":
+            e = self.lp_e()
+            b = self.pm[e.cur if e else 0][0]["drum"].get("beat", 0)
+            self.beat_pick = b if b else self.beat_pick
+        self.menu_i %= max(1, len(self.menu_items()))
+
     def menu_items(self):
+        if self.menu_pg == "Drums" and edition.LAB:
+            return self.drum_menu_items()
+        rows = dict(self.all_menu_items())
+        return [(n, rows[n]) for n in MENU_PAGES.get(self.menu_pg) or MENU_PAGES["Chords"] if n in rows]
+
+    def all_menu_items(self):
         return [
             ("Key", NOTE_NAMES[self.key]),
             ("Scale", self.scale),
@@ -872,6 +917,9 @@ class App(modes.ModesMixin):
     def menu_change(self, d):
         self.nudge = (time.perf_counter(), d)
         name = self.menu_items()[self.menu_i][0]
+        if self.menu_pg == "Drums":
+            self.drum_menu_change(name, d)
+            return
         recache = False
         if name == "Key":
             self.key = (self.key + d) % 12
@@ -954,6 +1002,9 @@ class App(modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
+        if self.menu_pg == "Drums":
+            self.drum_menu_activate(name)
+            return
         if name == "Quit":
             self.running = False
         elif name == "Relearn buttons":
@@ -1095,6 +1146,12 @@ class App(modes.ModesMixin):
                 self.menu_change(1)
             elif name == "A":
                 self.menu_activate()
+            elif name in ("L1", "R1"):
+                pages = self.menu_pages()
+                i = pages.index(self.menu_pg) if self.menu_pg in pages else 0
+                self.menu_set_page(pages[(i + (1 if name == "R1" else -1)) % len(pages)])
+            elif name == "X" and self.menu_pg == "Drums":
+                self.drum_menu_hear(self.menu_items()[self.menu_i][0])
             elif name in ("B", "SELECT"):
                 self.menu = False
                 self.sel_combo = True          # this press closed the menu; don't reopen on release
@@ -1113,13 +1170,13 @@ class App(modes.ModesMixin):
         # SELECT: tap = settings, hold = looper controls from any mode
         if name == "SELECT" and not edition.LAB:
             if down:
-                self.menu = True
+                self.open_menu()
             return
         if name == "SELECT":
             if down:
                 self.sel_combo = False
             elif not getattr(self, "sel_combo", True):
-                self.menu = True
+                self.open_menu()
             return
         if edition.LAB and "SELECT" in held and self.looper_combo(name, down):
             self.sel_combo = True
@@ -1720,7 +1777,8 @@ class App(modes.ModesMixin):
         c.blit(self._ov, (0, 0))
         opening = self.menu or self.editor
         off = int((1 - a) ** 2 * 60) if opening else 0
-        self.text(c, title, self.f_med, self.mix(BG, ACCENT, a), (BASE_W // 2, 30 + off), center=True)
+        if title:
+            self.text(c, title, self.f_med, self.mix(BG, ACCENT, a), (BASE_W // 2, 30 + off), center=True)
         nr = L["list_rows"]
         top = max(0, min(sel_i - nr // 2, len(rows) - nr))
         ty = self.sm(key + "_sel", 58 + (sel_i - top) * 30, 24)
@@ -1752,9 +1810,32 @@ class App(modes.ModesMixin):
 
     def draw_menu(self, c, a=1.0):
         rows = [(name, val, INK) for name, val in self.menu_items()]
-        self.draw_list(c, a, "SETTINGS", rows, self.menu_i, "menu", 100)
-        self.text(c, "UP/DOWN pick   LEFT/RIGHT change   A select   B close", self.f_small, self.mix(BG, DIM, a),
-                  (BASE_W // 2, L["hint_y"]), center=True)
+        self.draw_list(c, a, "", rows, self.menu_i, "menu", 100)
+        self.draw_menu_tabs(c, a)
+        if self.menu_pg == "Drums":
+            hint = self.DRUM_MENU_HINT
+        else:
+            hint = "UP/DOWN pick   LEFT/RIGHT change   A select   L1/R1 page   B close"
+        self.text(c, hint, self.f_small, self.mix(BG, DIM, a), (BASE_W // 2, L["hint_y"]), center=True)
+
+    def draw_menu_tabs(self, c, a):
+        """SETTINGS tabs across the top; the open page is lit."""
+        pages = self.menu_pages()
+        off = int((1 - a) ** 2 * 60) if self.menu else 0
+        labels = [("DRUMS  P%02d" % ((self.lp_e().cur if self.lp_e() else 0) + 1)) if (pg == "Drums" and pg == self.menu_pg)
+                  else pg.upper() for pg in pages]
+        gap = 34
+        ws = [self.f_med.size(t)[0] for t in labels]
+        x = BASE_W // 2 - (sum(ws) + gap * (len(ws) - 1)) // 2
+        y = 30 + off
+        for pg, t, w in zip(pages, labels, ws):
+            on = pg == self.menu_pg
+            self.text(c, t, self.f_med, self.mix(BG, ACCENT if on else DIM, a), (x + w // 2, y), center=True)
+            if on:
+                pygame.draw.rect(c, self.mix(BG, ACCENT, a), (x, y + 16, w, 3), border_radius=2)
+            x += w + gap
+        self.text(c, "L1", self.f_small, self.mix(BG, DIM, a), (28, y), center=True)
+        self.text(c, "R1", self.f_small, self.mix(BG, DIM, a), (BASE_W - 28, y), center=True)
 
     # ---------------- main loop
 

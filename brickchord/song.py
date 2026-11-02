@@ -49,7 +49,8 @@ def M():
 
 
 def new_drum():
-    return {"kit": "Classic", "swing": 0.0, "beat": 0, "lanes": {n: [1.0, False] for n in LANES}}
+    return {"kit": "Classic", "swing": 0.0, "swres": 16, "beat": 0, "acc": ACCENT_G, "ghost": GHOST_G,
+            "human": 0.0, "choke": True, "lanes": {n: [1.0, False, 0] for n in LANES}}
 
 
 def new_track(k=1):
@@ -69,9 +70,15 @@ def fix_drum(d):
         out["kit"] = str(d.get("kit") or "Classic")
         out["swing"] = max(0.0, min(0.5, float(d.get("swing", 0.0) or 0.0)))
         out["beat"] = int(d.get("beat", 0) or 0)
+        out["swres"] = 8 if d.get("swres") == 8 else 16
+        out["acc"] = max(1.1, min(2.0, float(d.get("acc", ACCENT_G) or ACCENT_G)))
+        out["ghost"] = max(0.1, min(0.8, float(d.get("ghost", GHOST_G) or GHOST_G)))
+        out["human"] = max(0.0, min(1.0, float(d.get("human", 0.0) or 0.0)))
+        out["choke"] = bool(d.get("choke", True))
         for n, v in (d.get("lanes") or {}).items():
-            if n in out["lanes"] and isinstance(v, (list, tuple)) and len(v) == 2:
-                out["lanes"][n] = [max(0.0, min(1.5, float(v[0]))), bool(v[1])]
+            if n in out["lanes"] and isinstance(v, (list, tuple)) and len(v) in (2, 3):
+                out["lanes"][n] = [max(0.0, min(1.5, float(v[0]))), bool(v[1]),
+                                   max(-12, min(12, int(v[2]))) if len(v) == 3 else 0]
     return out
 
 
@@ -109,6 +116,8 @@ class SongMixin:
         self.pm = [[new_track(k) for k in range(NT)] for _ in range(NP)]
         self.drum_lane = 0
         self.kits = synth.kit_names(SAMPLES)
+        self.kit_all = False            # Settings > Drums > Kit for: this pattern / all patterns
+        self.beat_pick = 1              # Settings > Drums > Preset beat (A loads it)
         self.pbars = [2] * NP
         self.song_rows = [[0, 1]]
         self.song_on = False
@@ -165,6 +174,7 @@ class SongMixin:
             self.song_rows = [[int(r[0]) % NP, max(1, int(r[1]))] for r in rows] or [[0, 1]]
             self.song_on = bool(data.get("song_on", False))
             self.start_p = int(data.get("cur", 0)) % NP
+            self.kit_all = bool(data.get("kit_all", False))
 
     def lp_e(self):
         return getattr(self.eng, "eng", None)
@@ -180,7 +190,7 @@ class SongMixin:
                 tr.append(t)
             pats.append({"tracks": tr})
         return {"v": 1, "bars": self.pbars, "pats": pats, "song": self.song_rows, "song_on": self.song_on,
-                "cur": e.cur if e else 0}
+                "cur": e.cur if e else 0, "kit_all": self.kit_all}
 
     def song_save(self):
         if not self.lp_loaded or self.lp_e() is None:
@@ -278,7 +288,9 @@ class SongMixin:
 
     def drum_push(self, p):
         d = self.pm[p][DT]["drum"]
-        self.eng.post("lp", "drum", p, DT, {"on": True, "kit": d["kit"], "swing": d["swing"],
+        self.eng.post("lp", "drum", p, DT, {"on": True, "kit": d["kit"], "swing": d["swing"], "swres": d["swres"],
+                                           "acc": d["acc"], "ghost": d["ghost"], "human": d["human"],
+                                           "choke": d["choke"],
                                            "lanes": {n: tuple(v) for n, v in d["lanes"].items()}})
 
     def sync_sel(self, preload=True):
@@ -421,16 +433,24 @@ class SongMixin:
         i = self.kits.index(dr["kit"]) if dr["kit"] in self.kits else 0
         dr["kit"] = self.kits[(i + d) % len(self.kits)]
         self.drum_push(p)
+        if self.kit_all:
+            self.kit_everywhere(dr["kit"])
         self.lp_dirty = True
-        self.flash("KIT: " + dr["kit"].upper())
-        self.eng.post("hit", "kick", 0.9)
+        self.flash("KIT: " + dr["kit"].upper() + ("   ALL PATTERNS" if self.kit_all else ""))
+        self.eng.post("dhit", p, "kick", 0.9)
 
-    def load_beat(self, p, d):
-        """Next/previous preset beat into this pattern's drum track (undoable)."""
+    def kit_everywhere(self, kit):
+        for q in range(NP):
+            if self.pm[q][DT]["drum"]["kit"] != kit:
+                self.pm[q][DT]["drum"]["kit"] = kit
+                self.drum_push(q)
+
+    def load_beat(self, p, d, pick=None):
+        """Next/previous (or a picked) preset beat into this pattern's drum track (undoable)."""
         e = self.lp_e()
         dr = self.pm[p][DT]["drum"]
         n = len(synth.BEATS) - 1
-        dr["beat"] = (dr.get("beat", 0) + d - 1) % n + 1        # 1..n (0 is Off)
+        dr["beat"] = pick if pick else (dr.get("beat", 0) + d - 1) % n + 1        # 1..n (0 is Off)
         evs, sw = beat_events(dr["beat"], e.pats[p].len)
         dr["swing"] = sw
         self.eng.post("lp", "ed", "dset", p, DT, evs)
@@ -661,6 +681,139 @@ class SongMixin:
         else:
             return False
         return True
+
+    # ------------------------------------------------------------ Settings > Drums page
+    DRUM_MENU_HINT = "A select   X hear   lanes: A mute, Y+LEFT/RIGHT tune   L1/R1 page   B close"
+
+    def drum_menu_items(self):
+        e = self.lp_e()
+        p = e.cur if e else 0
+        dr = self.pm[p][DT]["drum"]
+        bars = self.pbars[p]
+        pct = lambda v: "%d%%" % round(v * 100)
+        rows = [
+            ("Kit", dr["kit"]),
+            ("Kit for", "all patterns" if self.kit_all else "this pattern"),
+            ("Rescan samples", "%d kit%s" % (len(self.kits), "" if len(self.kits) == 1 else "s")),
+            ("Preset beat", synth.BEATS[self.beat_pick][0] + "   A loads"),
+            ("Pattern length", "%d bar%s" % (bars, "" if bars == 1 else "s")),
+            ("Swing", "Off" if not dr["swing"] else pct(dr["swing"] * 2)),
+            ("Swing on", "16ths" if dr["swres"] == 16 else "8ths"),
+            ("Accent", pct(dr["acc"])),
+            ("Ghost", pct(dr["ghost"])),
+            ("Humanize", "Off" if not dr["human"] else pct(dr["human"])),
+            ("Hat choke", "On" if dr["choke"] else "Off"),
+            ("Drum level", pct(self.pm[p][DT]["vol"])),
+        ]
+        for n in LANES:
+            lv, mute, tune = dr["lanes"][n]
+            rows.append((LANE_NAME[n], "muted" if mute else "%s   %+d st" % (pct(lv), tune)))
+        return rows
+
+    def drum_menu_title(self):
+        e = self.lp_e()
+        return "DRUMS  P%02d" % ((e.cur if e else 0) + 1)
+
+    def _menu_lane(self, name):
+        for n in LANES:
+            if LANE_NAME[n] == name:
+                return n
+        return None
+
+    def drum_menu_change(self, name, d):
+        e = self.lp_e()
+        if e is None:
+            return
+        p = e.cur
+        dr = self.pm[p][DT]["drum"]
+        lane = self._menu_lane(name)
+        hear = None
+        if name == "Kit":
+            self.set_kit(p, d)
+        elif name == "Kit for":
+            self.kit_all = not self.kit_all
+            if self.kit_all:
+                self.kit_everywhere(dr["kit"])
+                self.flash("KIT %s ON EVERY PATTERN" % dr["kit"].upper())
+        elif name == "Rescan samples":
+            return
+        elif name == "Preset beat":
+            n = len(synth.BEATS) - 1
+            self.beat_pick = (self.beat_pick + d - 1) % n + 1
+        elif name == "Pattern length":
+            b = self.pbars[p]
+            self.pbars[p] = BARS[(BARS.index(b) + d) % len(BARS)] if b in BARS else 2
+            self.eng.post("lp", "len", p, self.pbars[p] * 16)
+        elif name == "Swing":
+            dr["swing"] = round(max(0.0, min(0.5, dr["swing"] + 0.025 * d)), 3)
+        elif name == "Swing on":
+            dr["swres"] = 8 if dr["swres"] == 16 else 16
+        elif name == "Accent":
+            dr["acc"] = round(max(1.1, min(2.0, dr["acc"] + 0.05 * d)), 2)
+            hear = ("snare", dr["acc"])
+        elif name == "Ghost":
+            dr["ghost"] = round(max(0.1, min(0.8, dr["ghost"] + 0.05 * d)), 2)
+            hear = ("snare", dr["ghost"])
+        elif name == "Humanize":
+            dr["human"] = round(max(0.0, min(1.0, dr["human"] + 0.1 * d)), 1)
+        elif name == "Hat choke":
+            dr["choke"] = not dr["choke"]
+        elif name == "Drum level":
+            m = self.pm[p][DT]
+            m["vol"] = round(max(0.0, min(1.0, m["vol"] + 0.05 * d)), 2)
+            self.lp_push_track(p, DT)
+            hear = ("kick", 1.0)
+        elif lane is not None:
+            v = dr["lanes"][lane]
+            if "Y" in self.inp.held:
+                v[2] = max(-12, min(12, v[2] + d))
+            else:
+                v[0] = round(max(0.0, min(1.5, v[0] + 0.1 * d)), 2)
+            hear = (lane, 1.0)
+        else:
+            return
+        self.drum_push(p)
+        self.lp_dirty = True
+        if hear:
+            self.eng.post("dhit", p, hear[0], hear[1])
+
+    def drum_menu_activate(self, name):
+        e = self.lp_e()
+        if e is None:
+            return
+        p = e.cur
+        dr = self.pm[p][DT]["drum"]
+        lane = self._menu_lane(name)
+        if name == "Rescan samples":
+            if hasattr(self.eng, "rescan_kits"):
+                self.eng.rescan_kits()
+            self.kits = synth.kit_names(SAMPLES)
+            self.flash("%d KITS (%d FROM SAMPLES)" % (len(self.kits), len(self.kits) - len(synth.BUILTIN_KITS)))
+        elif name == "Preset beat":
+            self.load_beat(p, 0, pick=self.beat_pick)
+            self.drum_push(p)
+        elif lane is not None:
+            v = dr["lanes"][lane]
+            v[1] = not v[1]
+            self.drum_push(p)
+            self.lp_dirty = True
+            self.flash("%s %s" % (LANE_NAME[lane].upper(), "MUTED" if v[1] else "ON"))
+        else:
+            self.drum_menu_change(name, 1)
+
+    def drum_menu_hear(self, name):
+        """X on a Drums row: hear it (a lane, or the snare for accent/ghost)."""
+        e = self.lp_e()
+        if e is None:
+            return
+        lane = self._menu_lane(name) or ("snare" if name in ("Accent", "Ghost") else "kick")
+        g = 1.0
+        dr = self.pm[e.cur][DT]["drum"]
+        if name == "Accent":
+            g = dr["acc"]
+        elif name == "Ghost":
+            g = dr["ghost"]
+        self.eng.post("dhit", e.cur, lane, g)
 
     def draw_drum_grid(self, c, e):
         mm = M()

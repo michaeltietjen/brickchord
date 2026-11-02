@@ -64,7 +64,7 @@ NumPy in `brickchord/_vendor/` (or have NumPy available to the system Python).
 | Right stick ← → | Filter / resonance |
 | Click right stick | Hold the current effect settings |
 | Start | Beat on/off |
-| Select | Settings |
+| Select | Settings (L1/R1 flips pages: Global, Chords, Drums, FX) |
 | Hold Select + A / B / X / Y | Song mode, from any mode: record, undo, play/stop, mute (Up/Down track, Left/Right pattern) |
 | Select + Start | Quit |
 

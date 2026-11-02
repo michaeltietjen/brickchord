@@ -85,6 +85,8 @@ def main():
                         conn.send(("preloaded",))
                     elif op == "lp_sound":
                         h.lp_sound(msg[1], msg[2], msg[3], msg[4])
+                    elif op == "rescan_kits":
+                        h.rescan_kits()
                 except Exception:
                     traceback.print_exc()
                     sys.stdout.flush()
