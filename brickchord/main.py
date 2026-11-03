@@ -486,10 +486,61 @@ class App(modes.ModesMixin):
         f = min(1.0, max(0.0, f))
         return tuple(int(a[j] + (b[j] - a[j]) * f) for j in range(3))
 
+    TEAL = (41, 174, 184)
+    LAB_HITS = {0: "kick", 2: "hat", 4: "snare", 6: "hat", 7: "kick", 9: "rim", 10: "kick",
+                12: "clap", 14: "ohat"}                      # the bar the intro plays
+    LAB_T0, LAB_STEP = 1.25, 0.125                           # playhead start, 120 BPM sixteenths
+
+    def draw_mark_lab(self, c, cx, cy, k, t=None):
+        """The Bricklab logo: a 4 x 4 step grid (one 16-step pattern). With t the
+        keys drop in, a playhead runs one bar (hit steps flash teal and pop), and
+        the downbeat lands: a ripple from step 1, which stays teal."""
+        gap = max(2, k // 7)
+        x0 = cx - (4 * k + 3 * gap) // 2
+        y0 = cy - (4 * k + 3 * gap) // 2
+        rad = max(2, k // 8)
+        down = self.LAB_T0 + 16 * self.LAB_STEP
+        hit_steps = set(self.LAB_HITS)
+        for i in range(16):
+            col_i, row = i % 4, i // 4
+            ccx = x0 + col_i * (k + gap) + k // 2
+            ccy = y0 + row * (k + gap) + k // 2
+            scale, dy, colr = 1.0, 0, self.KEY
+            if t is not None:
+                p = (t - (0.05 + 0.04 * i)) / 0.30
+                if p <= 0:
+                    continue
+                dy = int((1 - self._ease_back(p)) * -k * 0.9)
+                if self.LAB_T0 <= t < down + 0.4:
+                    age = t - (self.LAB_T0 + i * self.LAB_STEP)
+                    if 0 <= age < 0.45:
+                        if i in hit_steps:
+                            colr = self._mix(self.TEAL, self.KEY, min(1.0, age / 0.32))
+                            scale = 1.0 + 0.10 * (1 - min(1.0, age / 0.22))
+                        else:
+                            colr = self._mix((190, 228, 231), self.KEY, min(1.0, age / 0.22))
+                if t >= down:
+                    d = math.hypot(row, col_i)
+                    age = t - down - 0.035 * d
+                    if 0 < age < 1.2:
+                        scale *= 1.0 + 0.07 * math.sin(min(1.0, age / 0.32) * math.pi) * (1 - age / 1.2)
+                    if i == 0:
+                        colr = self._mix((190, 228, 231), self.TEAL, min(1.0, (t - down) / 0.12))
+                        b = 0.5 + 0.5 * math.sin((t - down) * 2.4)
+                        colr = self._mix(colr, (80, 210, 220), b * 0.35)
+            elif i == 0:
+                colr = self.TEAL
+            sz = max(2, int(k * scale))
+            r = pygame.Rect(0, 0, sz, sz)
+            r.center = (ccx, ccy + dy)
+            pygame.draw.rect(c, colr, r, border_radius=max(2, int(rad * scale)))
+
     def draw_mark(self, c, cx, cy, k, t=None):
         """The Brickchord logo: seven chord keys and one lit key (4 x 2 grid).
         With t (seconds since the intro started) the keys pop in like a strum,
         the chord gets struck, then a sequencer light walks the keys."""
+        if edition.LAB:
+            return self.draw_mark_lab(c, cx, cy, k, t)
         gap = max(3, k // 7)
         x0 = cx - (4 * k + 3 * gap) // 2
         y0 = cy - (2 * k + gap) // 2
@@ -540,17 +591,22 @@ class App(modes.ModesMixin):
                     c.blit(ring, ring.get_rect(center=(ccx, ccy)))
 
     def draw_title(self, c, y, t=None):
-        word = "brickchord"
-        n = len(word) if t is None else max(0, min(len(word), int((t - 0.55) / 0.04)))
+        word = edition.NAME.lower()
+        if edition.LAB:
+            n = len(word) if t is None else max(0, min(len(word), int((t - 0.78) / 0.06) + 1))
+            if t is not None and t < 0.78:
+                n = 0
+        else:
+            n = len(word) if t is None else max(0, min(len(word), int((t - 0.55) / 0.04)))
         if n <= 0:
             return
         full = self.f_big.render(word, True, INK)
         part = self.f_big.render(word[:n], True, INK)
         x = BASE_W // 2 - full.get_width() // 2
         c.blit(part, (x, y - full.get_height() // 2))
-        if t is not None and n < len(word):                 # blinking cursor while it types
+        if t is not None and (n < len(word) or (edition.LAB and t < 1.65 and int(t * 6) % 2 == 0)):
             cx = x + part.get_width() + 3
-            pygame.draw.rect(c, self.ORANGE, (cx, y - 14, 4, 28))
+            pygame.draw.rect(c, self.TEAL if edition.LAB else self.ORANGE, (cx, y - 14, 4, 28))
 
     def chime(self):
         """Startup chord in your key: the home chord with its 7th, openly voiced."""
@@ -568,13 +624,26 @@ class App(modes.ModesMixin):
             self.eng.post("chime")
 
     def intro(self, secs=1.5):
-        """Short logo animation at launch. Any button skips it."""
+        """Short logo animation at launch. Any button skips it. Bricklab's is the
+        logo film: the grid drops in, one bar of drums plays across it, and the
+        downbeat lands with the chord."""
         self.t0 = time.perf_counter()
         clock = pygame.time.Clock()
         struck = False
+        if edition.LAB:
+            secs = self.LAB_T0 + 16 * self.LAB_STEP + 1.0
+            hits = sorted((self.LAB_T0 + s * self.LAB_STEP, part) for s, part in self.LAB_HITS.items())
+            hits.append((self.LAB_T0 + 16 * self.LAB_STEP, "kick"))
         while True:
             t = time.perf_counter() - self.t0
-            if not struck and t >= 1.0:          # the chord lands when the keys are struck
+            if edition.LAB:
+                while hits and t >= hits[0][0]:
+                    _, part = hits.pop(0)
+                    self.eng.post("hit", part, 0.9 if part != "hat" else 0.6)
+                if not struck and t >= self.LAB_T0 + 16 * self.LAB_STEP:
+                    self.chime()
+                    struck = True
+            elif not struck and t >= 1.0:        # the chord lands when the keys are struck
                 self.chime()
                 struck = True
             if t >= secs:
@@ -591,8 +660,12 @@ class App(modes.ModesMixin):
                 self.ensure_bass(self.bass_range(), budget=0.008)   # a few notes per frame
             c = self.canvas
             c.fill(BG)
-            self.draw_mark(c, BASE_W // 2, 105 + L["dy"], 34, t)
-            self.draw_title(c, 180 + L["dy"], t)
+            if edition.LAB:
+                self.draw_mark(c, BASE_W // 2, 96 + L["dy"], 27, t)
+                self.draw_title(c, 196 + L["dy"], t)
+            else:
+                self.draw_mark(c, BASE_W // 2, 105 + L["dy"], 34, t)
+                self.draw_title(c, 180 + L["dy"], t)
             self.present()
             clock.tick(60)
 
@@ -601,8 +674,12 @@ class App(modes.ModesMixin):
         c.fill(BG)
         t = time.perf_counter() - getattr(self, "t0", time.perf_counter() - 9)
         d = L["dy"]
-        self.draw_mark(c, BASE_W // 2, 105 + d, 34, max(t, 1.5))
-        self.draw_title(c, 180 + d)
+        if edition.LAB:
+            self.draw_mark(c, BASE_W // 2, 96 + d, 27)
+            self.draw_title(c, 196 + d)
+        else:
+            self.draw_mark(c, BASE_W // 2, 105 + d, 34, max(t, 1.5))
+            self.draw_title(c, 180 + d)
         self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218 + d), center=True)
         w = 360
         pygame.draw.rect(c, PANEL, ((BASE_W - w) // 2, 250 + d, w, 14), border_radius=7)
@@ -1391,7 +1468,10 @@ class App(modes.ModesMixin):
                 ry = int(14 * (1 - min(1, x * 1.6)) ** 3)
                 self.text(c, roman_for(deg, iv), self.f_big, ACCENT, (BASE_W // 2, L["roman_y"] + ry), center=True)
             else:
-                self.draw_mark(c, BASE_W // 2, L["mark_y"], 22, 1.5 + now - getattr(self, "t0", now))
+                if edition.LAB:
+                    self.draw_mark(c, BASE_W // 2, L["mark_y"], 13)
+                else:
+                    self.draw_mark(c, BASE_W // 2, L["mark_y"], 22, 1.5 + now - getattr(self, "t0", now))
                 b = 0.5 + 0.5 * math.sin(now * 2.2)
                 self.text(c, "press a chord", self.f_med, self.mix(DIM, INK, b * 0.5), (BASE_W // 2, L["roman_y"]), center=True)
 
