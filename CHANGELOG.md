@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Two FX buses (Bricklab). Settings > FX now has bus A and bus B, each with its own reverb type, delay type and delay time. Every track picks its bus on the track page (SENDS > FX bus), so one group of tracks can sit in a Hall with a ping-pong delay while another gets a Plate and a tape delay. A bus that nothing feeds costs nothing. Reverb types now go to the audio process by name (it renders the impulse itself), which also removes the last big message on the pipe.
 - Record quantize (Bricklab): Settings > Global > Rec quantize: Off, 1/16, 1/8 or 1/4. Notes, bass and drum hits snap to that grid as they are recorded; X on the GRID page quantizes an existing track to the same grid.
 - Bricklab: the play-along beat is gone. START is play/stop for the song in every mode (drums are track 1), the beat row and the logo follow the transport, Settings > Global has no Beat row, and quantize locks live chords to the transport. Brickchord keeps its START beat.
 - Recording is explicit now (Bricklab). A on the Pattern page just takes you to the track to play it; nothing records unless you turn REC on with SELECT+A (and SELECT+A again turns it off). The REC chip in the header shows when a track is recording.

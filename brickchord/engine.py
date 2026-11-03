@@ -63,6 +63,7 @@ class _Track:
         self.snd = {}            # midi -> (attack, loop) for kind "n"
         self.mute = False
         self.vol, self.pan, self.rs, self.ds = 0.85, 0.0, 0.25, 0.0
+        self.bus = 0             # which send bus (A or B) this track's reverb and delay go to
         self.ch = chain
         self.idle = 99
         # drum track (Bricklab track 1): kit name, per-lane [level, mute, tune], swing 0..0.5 of
@@ -75,6 +76,21 @@ class _Track:
         self.acc, self.ghost = ACCENT_G, GHOST_G
         self.human = 0.0
         self.choke = True
+
+
+class _Bus:
+    """One send bus: a reverb (partitioned FFT convolution at half rate) and a
+    tempo-synced delay. Bricklab has two (A and B); each track sends to one."""
+    def __init__(self, sr, N):
+        self.sr, self.N = sr, N
+        self.dly_beats = 0.75
+        self.dbuf_len = int(sr * 4.0)
+        self.dbuf = np.zeros((self.dbuf_len, 2), np.float32)
+        self.dw = 0
+        self.dly_type = "Ping-Pong"
+        self.tape_hist = np.zeros((62, 2), np.float32)
+        self.rev_name = None
+        self.tail = 0               # blocks left to keep processing after the last send
 
 
 class _Pattern:
@@ -157,17 +173,12 @@ class Engine:
         self.rev_t = 0.25
         self.dly = 0.0
         self.dly_t = 0.0
-        self.dly_beats = 0.75
         self.master = 0.8
         self.master_t = 0.8
-        self.dbuf_len = int(sr * 4.0)
-        self.dbuf = np.zeros((self.dbuf_len, 2), np.float32)
-        self.dw = 0
-        self.dly_type = "Ping-Pong"
-        L = 63
-        self.tape_hist = np.zeros((L - 1, 2), np.float32)
         self.tape_S = {}
-        self._setup_reverb(ir)
+        self.buses = [_Bus(sr, block), _Bus(sr, block)]
+        self._setup_reverb(self.buses[0], ir)
+        self._setup_reverb(self.buses[1], ir)
         self._setup_filter()
         self.pats = [_Pattern(self._chain) for _ in range(NPATS)]
         self._tails = set()
@@ -179,7 +190,7 @@ class Engine:
         self.running = False
 
     # ------------------------------------------------------------ reverb
-    def _setup_reverb(self, ir):
+    def _setup_reverb(self, b, ir):
         """Partitioned FFT convolution run at half the sample rate: reverb tails
         have little above 5 kHz, and it costs about a quarter as much."""
         N2 = self.N // 2
@@ -191,12 +202,12 @@ class Engine:
         P = max(1, int(math.ceil(len(ir2) / N2)))
         pad = np.zeros((P * N2, 2), np.float32)
         pad[:len(ir2)] = ir2
-        self.H = np.fft.rfft(pad.reshape(P, N2, 2), 2 * N2, axis=1).astype(np.complex64)   # (P, N2+1, 2)
-        self.rv_P = P
-        self.FDL = np.zeros((2 * P,) + self.H.shape[1:], np.complex64)   # ring buffer, written twice
-        self.rv_i = 0
-        self.rprev = np.zeros((N2, 2), np.float32)
-        self.rv_last = np.zeros(2, np.float32)
+        b.H = np.fft.rfft(pad.reshape(P, N2, 2), 2 * N2, axis=1).astype(np.complex64)   # (P, N2+1, 2)
+        b.rv_P = P
+        b.FDL = np.zeros((2 * P,) + b.H.shape[1:], np.complex64)   # ring buffer, written twice
+        b.rv_i = 0
+        b.rprev = np.zeros((N2, 2), np.float32)
+        b.rv_last = np.zeros(2, np.float32)
 
     # ------------------------------------------------------------ live filter
     # Notes are pre-rendered, so a filter you can sweep while playing has to run on
@@ -362,26 +373,42 @@ class Engine:
             y = y * (1 - ramp) + y_new * ramp
         return y.astype(np.float32)
 
-    def c_reverb(self, ir):
-        """Switch reverb type. The old tail is dropped (a short fade avoids a click)."""
-        self._setup_reverb(ir)
+    def c_reverb(self, ir, bus=0):
+        """Switch a bus's reverb: an impulse response, or a reverb name (rendered
+        here, so nothing big crosses the pipe). The old tail is dropped."""
+        b = self.buses[int(bus)]
+        if isinstance(ir, str):
+            if ir == b.rev_name:
+                return
+            import synth
+            b.rev_name = ir
+            ir = synth.make_reverb(ir)
+        else:
+            b.rev_name = None
+        self._setup_reverb(b, ir)
 
-    def _reverb(self, x):
+    def c_busfx(self, bus, rev_name, dly_type, beats):
+        b = self.buses[int(bus)]
+        b.dly_type = dly_type
+        b.dly_beats = float(beats)
+        self.c_reverb(rev_name, bus)
+
+    def _reverb(self, b, x):
         N2 = self.N // 2
-        P = self.rv_P
+        P = b.rv_P
         xh = (x[0::2] + x[1::2]) * 0.5
-        buf = np.concatenate([self.rprev, xh])
-        self.rprev = xh
-        i = self.rv_i = (self.rv_i - 1) % P
+        buf = np.concatenate([b.rprev, xh])
+        b.rprev = xh
+        i = b.rv_i = (b.rv_i - 1) % P
         X = np.fft.rfft(buf, 2 * N2, axis=0)
-        self.FDL[i] = X
-        self.FDL[i + P] = X
-        Y = np.einsum("pkc,pkc->kc", self.FDL[i:i + P], self.H)       # newest block first
+        b.FDL[i] = X
+        b.FDL[i + P] = X
+        Y = np.einsum("pkc,pkc->kc", b.FDL[i:i + P], b.H)       # newest block first
         yh = np.fft.irfft(Y, 2 * N2, axis=0)[N2:].astype(np.float32)
         y = np.empty((self.N, 2), np.float32)
         y[1::2] = yh
-        y[0::2] = 0.5 * (yh + np.concatenate([self.rv_last[None, :], yh[:-1]]))
-        self.rv_last = yh[-1]
+        y[0::2] = 0.5 * (yh + np.concatenate([b.rv_last[None, :], yh[:-1]]))
+        b.rv_last = yh[-1]
         return y
 
     # ------------------------------------------------------------ commands (UI thread)
@@ -958,7 +985,7 @@ class Engine:
             for ts, td in zip(src.tracks, dst.tracks):
                 td.ev = [list(e[:7]) + [False] for e in ts.ev]
                 td.snd = dict(ts.snd)
-                td.mute, td.vol, td.pan, td.rs, td.ds = ts.mute, ts.vol, ts.pan, ts.rs, ts.ds
+                td.mute, td.vol, td.pan, td.rs, td.ds, td.bus = ts.mute, ts.vol, ts.pan, ts.rs, ts.ds, ts.bus
                 for f in DRUM_ATTRS:
                     setattr(td, f, getattr(ts, f))
                 td.lanes = {n: list(v) for n, v in ts.lanes.items()}
@@ -992,6 +1019,8 @@ class Engine:
             for name in ("vol", "pan", "rs", "ds", "mute"):
                 if name in d:
                     setattr(tr, name, d[name])
+            if "bus" in d:
+                tr.bus = 1 if int(d["bus"]) else 0
             if d.get("mute"):
                 self._release_track(p, k, 0.05)
         elif op == "fx":
@@ -1224,8 +1253,8 @@ class Engine:
                 self.c_clear()
             self.mode = mode
 
-    def c_delay_type(self, name):
-        self.dly_type = name
+    def c_delay_type(self, name, bus=0):
+        self.buses[int(bus)].dly_type = name
 
     def _lp_fir(self, key, lo, hi):
         """Short band-limiting FIR used on delay repeats (Tape / Dub)."""
@@ -1241,24 +1270,24 @@ class Engine:
             self.tape_S[key] = S
         return S
 
-    def _darken(self, y, key, lo, hi):
+    def _darken(self, b, y, key, lo, hi):
         L = 63
-        frame = np.concatenate([self.tape_hist, y])
-        self.tape_hist = frame[-(L - 1):]
+        frame = np.concatenate([b.tape_hist, y])
+        b.tape_hist = frame[-(L - 1):]
         Y = np.fft.rfft(frame, 2048, axis=0)
         return np.fft.irfft(Y * self._lp_fir(key, lo, hi)[:, None], 2048, axis=0)[L - 1:L - 1 + len(y)].astype(np.float32)
 
-    def _delay(self, x, N, sr):
+    def _delay(self, b, x, N, sr):
         """Read the delay line, write input + feedback. Returns the wet signal."""
-        typ = self.dly_type
-        size = self.dbuf_len
+        typ = b.dly_type
+        size = b.dbuf_len
         idx = np.arange(N)
-        widx = (self.dw + idx) % size
+        widx = (b.dw + idx) % size
         beat = 60.0 / self.bpm * sr
 
         def tap(samples):
             dd = int(max(N, min(samples, size - N)))
-            return self.dbuf[(self.dw - dd + idx) % size]
+            return b.dbuf[(b.dw - dd + idx) % size]
 
         amt = float(self.dly_t)
         if typ == "Slapback":
@@ -1266,28 +1295,29 @@ class Engine:
             fb_sig = y * 0.12
             wet = y * 1.1
         elif typ == "Multi-Tap":
-            d = beat * self.dly_beats
+            d = beat * b.dly_beats
             a, b, c = tap(d), tap(d * 1.5), tap(d * 2)
             wet = a * np.array([0.9, 0.35], np.float32) + b * np.array([0.35, 0.9], np.float32) + c * 0.55
             fb_sig = c * (0.15 + 0.35 * amt)
             y = wet
         else:
-            y = tap(beat * self.dly_beats)
+            y = tap(beat * b.dly_beats)
             if typ == "Straight":
                 fb_sig = y * (0.3 + 0.45 * amt)
             elif typ == "Tape":
-                fb_sig = np.tanh(self._darken(y, "tape", 90.0, 2600.0) * 1.6) / 1.6 * (0.35 + 0.47 * amt)
+                fb_sig = np.tanh(self._darken(b, y, "tape", 90.0, 2600.0) * 1.6) / 1.6 * (0.35 + 0.47 * amt)
             elif typ == "Dub":
-                fb_sig = np.tanh(self._darken(y, "dub", 220.0, 1500.0) * 2.0) / 2.0 * (0.55 + 0.33 * amt)
+                fb_sig = np.tanh(self._darken(b, y, "dub", 220.0, 1500.0) * 2.0) / 2.0 * (0.55 + 0.33 * amt)
             else:                                   # Ping-Pong
                 fb_sig = y[:, ::-1] * (0.3 + 0.45 * amt)
             wet = y
-        self.dbuf[widx] = x + fb_sig
-        self.dw = (self.dw + N) % size
+        b.dbuf[widx] = x + fb_sig
+        b.dw = (b.dw + N) % size
         return wet
 
     def c_fx(self, rev, dly, beats, master):
-        self.rev_t, self.dly_t, self.dly_beats, self.master_t = rev, dly, beats, master
+        self.rev_t, self.dly_t, self.master_t = rev, dly, master
+        self.buses[0].dly_beats = float(beats)
 
     def c_drums(self, on, pattern, kit=None):
         if kit:
@@ -1557,8 +1587,8 @@ class Engine:
         x = self._filter(self.live, self._rack(self.live, mix, N, sr))
         t3 = time.perf_counter()
         out = x.copy()
-        rsend = x * rv
-        dsend = x * dv
+        rsend = [x * rv, np.zeros((N, 2), np.float32)]
+        dsend = [x * dv, np.zeros((N, 2), np.float32)]
         # tracks: each through its own rack and filter, then level, pan, sends.
         # The selected track uses the live sends (Settings reverb/delay + right stick).
         selkey = (self.cur, self.sel) if self.route else None
@@ -1580,21 +1610,31 @@ class Engine:
             y[:, 0] *= g * min(1.0, 1.0 - p)
             y[:, 1] *= g * min(1.0, 1.0 + p)
             out += y
+            bi = tr.bus
             if key == selkey:
-                rsend += y * rv
-                dsend += y * dv
+                rsend[bi] += y * rv
+                dsend[bi] += y * dv
             else:
                 if tr.rs:
-                    rsend += y * tr.rs
+                    rsend[bi] += y * tr.rs
                 if tr.ds:
-                    dsend += y * tr.ds
+                    dsend[bi] += y * tr.ds
         self.rack_beat += N * self.bpm / 60.0 / sr
         t4 = time.perf_counter()
         # delay (type chosen in Settings), tempo synced except Slapback
-        y = self._delay(dsend, N, sr)
-        out += y
-        t5 = time.perf_counter()
-        out += self._reverb(rsend + y * 0.35) * 1.1
+        t5 = t4
+        for bi, b in enumerate(self.buses):
+            fed = bool(np.any(rsend[bi]) or np.any(dsend[bi]))
+            if fed:
+                b.tail = int(6.0 * sr / N)          # keep the tails ringing after the last send
+            elif b.tail <= 0:
+                continue                             # a silent bus costs nothing
+            else:
+                b.tail -= 1
+            y = self._delay(b, dsend[bi], N, sr)
+            out += y
+            t5 = time.perf_counter()
+            out += self._reverb(b, rsend[bi] + y * 0.35) * 1.1
         t6 = time.perf_counter()
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]

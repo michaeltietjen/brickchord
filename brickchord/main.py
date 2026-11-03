@@ -71,7 +71,8 @@ MENU_PAGES = {
     "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
                "Lead glide", "Bass", "Bass Level"],
     "Drums": None,
-    "FX": ["Reverb", "Reverb Type", "Delay", "Delay Type", "Delay Time"],
+    "FX": ["Reverb", "Delay", "Reverb Type", "Delay Type", "Delay Time",
+           "A Reverb Type", "A Delay Type", "A Delay Time", "B Reverb Type", "B Delay Type", "B Delay Time"],
 }
 REC_QUANT = {0: "Off", 1: "1/16", 2: "1/8", 4: "1/4"}      # record quantize, in 16ths
 METRO_MODES = {"off": "Off", "rec": "When recording", "on": "Always"}
@@ -287,6 +288,10 @@ class App(modes.ModesMixin):
         self.base_rev = s.get("reverb", 0.25)
         self.base_dly = s.get("delay", 0.0)
         self.dly_time = clamp(s.get("delay_time", 2), 0, len(DELAY_TIMES) - 1)
+        # Bricklab's second FX bus (B); the rows above are bus A
+        self.rev_type2 = s.get("reverb_type2", "Plate") if s.get("reverb_type2") in synth.REVERBS else "Plate"
+        self.dly_type2 = s.get("delay_type2", "Tape") if s.get("delay_type2") in DELAY_TYPES else "Tape"
+        self.dly_time2 = clamp(s.get("delay_time2", 3), 0, len(DELAY_TIMES) - 1)
         self.rev_type = s.get("reverb_type", "Hall") if s.get("reverb_type") in synth.REVERBS else "Hall"
         self.dly_type = s.get("delay_type", "Ping-Pong") if s.get("delay_type") in DELAY_TYPES else "Ping-Pong"
         self.quantize = s.get("quantize", True)
@@ -396,9 +401,10 @@ class App(modes.ModesMixin):
             self.eng.post("click")
 
     def push_types(self):
-        if self.rev_type != "Hall":
-            self.eng.post("reverb", synth.make_reverb(self.rev_type))
-        self.eng.post("delay_type", self.dly_type)
+        """Reverb and delay types go to the engine by name (it renders the IR itself)."""
+        self.eng.post("busfx", 0, self.rev_type, self.dly_type, DELAY_TIMES[self.dly_time][1])
+        if edition.LAB:
+            self.eng.post("busfx", 1, self.rev_type2, self.dly_type2, DELAY_TIMES[self.dly_time2][1])
 
     def push_bass(self):
         self.eng.post("bass", synth.BASS_MODES[self.bass], self.bass_lvl)
@@ -684,6 +690,7 @@ class App(modes.ModesMixin):
                                     octave=self.octave, bpm=self.bpm, beat=self.beat, play=self.play,
                                     latch=self.latch, spread=self.spread, volume=self.volume,
                                     reverb=self.base_rev, delay=self.base_dly, delay_time=self.dly_time,
+                                    reverb_type2=self.rev_type2, delay_type2=self.dly_type2, delay_time2=self.dly_time2,
                                     reverb_type=self.rev_type, delay_type=self.dly_type,
                                     latency=self.block, quantize=self.quantize, rec_quant=self.rec_quant,
                                     bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
@@ -926,10 +933,15 @@ class App(modes.ModesMixin):
             ("Bass", synth.BASS_MODES[self.bass]),
             ("Bass Level", "%d%%" % round(self.bass_lvl * 100)),
             ("Reverb", "%d%%" % round(self.base_rev * 100)),
-            ("Reverb Type", self.rev_type),
+            (("A " if edition.LAB else "") + "Reverb Type", self.rev_type),
             ("Delay", "%d%%" % round(self.base_dly * 100)),
-            ("Delay Type", self.dly_type),
-            ("Delay Time", DELAY_TIMES[self.dly_time][0] if self.dly_type != "Slapback" else "fixed"),
+            (("A " if edition.LAB else "") + "Delay Type", self.dly_type),
+            (("A " if edition.LAB else "") + "Delay Time",
+             DELAY_TIMES[self.dly_time][0] if self.dly_type != "Slapback" else "fixed"),
+        ] + ([("B Reverb Type", self.rev_type2),
+              ("B Delay Type", self.dly_type2),
+              ("B Delay Time", DELAY_TIMES[self.dly_time2][0] if self.dly_type2 != "Slapback" else "fixed")]
+             if edition.LAB else []) + [
             ("Beat", synth.BEATS[self.beat][0]),
             ("Tempo", "%d BPM" % self.bpm),
             ("Spread", "%d ms" % self.spread),
@@ -953,6 +965,8 @@ class App(modes.ModesMixin):
     def menu_change(self, d):
         self.nudge = (time.perf_counter(), d)
         name = self.menu_items()[self.menu_i][0]
+        if name.startswith("A "):
+            name = name[2:]                 # bus A rows share the Brickchord handlers
         if self.menu_pg == "Drums":
             self.drum_menu_change(name, d)
             return
@@ -999,10 +1013,19 @@ class App(modes.ModesMixin):
             self.dly_time = (self.dly_time + d) % len(DELAY_TIMES)
         elif name == "Reverb Type":
             self.rev_type = synth.REVERBS[(synth.REVERBS.index(self.rev_type) + d) % len(synth.REVERBS)]
-            self.eng.post("reverb", synth.make_reverb(self.rev_type))
+            self.push_types()
         elif name == "Delay Type":
             self.dly_type = DELAY_TYPES[(DELAY_TYPES.index(self.dly_type) + d) % len(DELAY_TYPES)]
-            self.eng.post("delay_type", self.dly_type)
+            self.push_types()
+        elif name == "B Reverb Type":
+            self.rev_type2 = synth.REVERBS[(synth.REVERBS.index(self.rev_type2) + d) % len(synth.REVERBS)]
+            self.push_types()
+        elif name == "B Delay Type":
+            self.dly_type2 = DELAY_TYPES[(DELAY_TYPES.index(self.dly_type2) + d) % len(DELAY_TYPES)]
+            self.push_types()
+        elif name == "B Delay Time":
+            self.dly_time2 = (self.dly_time2 + d) % len(DELAY_TIMES)
+            self.push_types()
         elif name == "Beat":
             self.beat = (self.beat + d) % len(synth.BEATS)
         elif name == "Tempo":

@@ -28,7 +28,7 @@ RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
                "Vibrato": (0.3, 0), "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4),
                "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Glide": (0.3, 0)}
-TFX_ROWS = ["Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "Cutoff", "Resonance"] + FX_ORDER
+TFX_ROWS = ["Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "FX bus", "Cutoff", "Resonance"] + FX_ORDER
 TFX_SECTION = {"Sound": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "LIVE FILTER", "Drive": "EFFECTS"}
 NO_RATE = ("Drive", "Lo-fi", "Wide")
 TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), (120, 200, 110), (255, 120, 160)]
@@ -57,7 +57,7 @@ def new_drum():
 
 def new_track(k=1):
     t = {"name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
-         "rs": 0.25, "ds": 0.0, "mute": False,
+         "rs": 0.25, "ds": 0.0, "bus": 0, "mute": False,
          "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER},
          "flt": [0.0, 0.0]}
     if k == DT:
@@ -217,7 +217,7 @@ class SongMixin:
         if self.is_drum(k):
             self.drum_push(p)
         self.eng.post("lp", "mix", p, k, {"vol": m["vol"], "pan": m["pan"], "rs": m["rs"], "ds": m["ds"],
-                                          "mute": m["mute"]})
+                                          "bus": m.get("bus", 0), "mute": m["mute"]})
         self.eng.post("lp", "fx", p, k, {n: tuple(v) for n, v in m["rack"].items() if n != "Glide"},
                       tuple(m["flt"]))
 
@@ -952,6 +952,8 @@ class SongMixin:
             return m["name"] or synth.PATCHES[self.patch]["name"]
         if row in FX_ORDER:
             return m["rack"][row]
+        if row == "FX bus":
+            return "B" if m.get("bus") else "A"
         return {"Level": m["vol"], "Pan": m["pan"], "Mute": m["mute"], "Reverb": m["rs"], "Delay": m["ds"],
                 "Cutoff": m["flt"][0], "Resonance": m["flt"][1]}[row]
 
@@ -996,6 +998,8 @@ class SongMixin:
             elif row == "Mute":
                 self.lp_mute(p, k)
                 return True
+            elif row == "FX bus":
+                m["bus"] = 0 if m.get("bus") else 1
             elif row in ("Reverb", "Delay"):
                 f = "rs" if row == "Reverb" else "ds"
                 m[f] = round(max(0.0, min(1.0, m[f] + 0.05 * d)), 2)
@@ -1012,6 +1016,8 @@ class SongMixin:
             elif row == "Mute":
                 self.lp_mute(p, k)
                 return True
+            elif row == "FX bus":
+                m["bus"] = 0 if m.get("bus") else 1
             elif row == "Pan":
                 m["pan"] = 0.0
             elif row in ("Cutoff", "Resonance"):
@@ -1422,6 +1428,12 @@ class SongMixin:
                 pill = pygame.Rect(230, y + 3, 54, rh - 7)
                 pygame.draw.rect(c, REC if val else mm.BG, pill, border_radius=8)
                 self.text(c, "MUTED" if val else "on", self.f_small, mm.INK if val else mm.DIM, pill.center, center=True)
+                continue
+            if row == "FX bus":
+                b = 1 if val == "B" else 0
+                desc = (self.rev_type2 if b else self.rev_type) + " + " + (self.dly_type2 if b else self.dly_type)
+                self.text(c, "< %s >" % val, self.f_med, mm.INK, (230 + kick, y + 1))
+                self.text(c, desc, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28, y + 5), right=True)
                 continue
             if fx:
                 pill = pygame.Rect(170, y + 3, 42, rh - 7)
