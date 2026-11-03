@@ -499,7 +499,7 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
         out[:, 0] += sig * gl
         out[:, 1] += sig * gr
 
-    if p.get("noise"):
+    if isinstance(p.get("noise"), (int, float)) and p["noise"] > 0:      # (the noise engine keeps a dict here)
         nz = np.random.RandomState(7).randn(n).astype(np.float32) * p["noise"]
         nz = np.cumsum(nz) * 0.02 if p.get("noise_dark") else nz
         nz -= np.convolve(nz, np.ones(64) / 64, "same")

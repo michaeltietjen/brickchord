@@ -1423,9 +1423,9 @@ class Engine:
             wet = y * 1.1
         elif typ == "Multi-Tap":
             d = beat * b.dly_beats
-            a, b, c = tap(d), tap(d * 1.5), tap(d * 2)
-            wet = a * np.array([0.9, 0.35], np.float32) + b * np.array([0.35, 0.9], np.float32) + c * 0.55
-            fb_sig = c * (0.15 + 0.35 * amt)
+            t1, t2, t3 = tap(d), tap(d * 1.5), tap(d * 2)
+            wet = t1 * np.array([0.9, 0.35], np.float32) + t2 * np.array([0.35, 0.9], np.float32) + t3 * 0.55
+            fb_sig = t3 * (0.15 + 0.35 * amt)
             y = wet
         else:
             y = tap(beat * b.dly_beats)
