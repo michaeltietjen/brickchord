@@ -48,7 +48,7 @@ SCALES = {"Major": [0, 2, 4, 5, 7, 9, 11], "Minor": [0, 2, 3, 5, 7, 8, 10],
 SCALE_NAMES = list(SCALES)
 ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"]
 
-LOGICAL = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "X", "Y", "L1", "R1", "SELECT", "START"]
+LOGICAL = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "X", "Y", "L1", "R1", "SELECT", "START", "R2", "L2"]
 CHORD_BUTTONS = ["LEFT", "UP", "RIGHT", "DOWN", "X", "A", "B"]   # degrees I..vii
 BUTTON_GLYPH = {"LEFT": "<", "UP": "^", "RIGHT": ">", "DOWN": "v", "X": "X", "A": "A", "B": "B"}
 KEYMAP = {pygame.K_LEFT: "LEFT", pygame.K_RIGHT: "RIGHT", pygame.K_UP: "UP", pygame.K_DOWN: "DOWN",
@@ -381,6 +381,8 @@ class App(modes.ModesMixin):
 
         if self.inp.joys and not self.cfg.get("buttons"):
             self.learn()
+        elif self.inp.joys and "R2" not in (self.cfg.get("buttons") or {}).values():
+            self.learn(only=("R2", "L2"))                 # new: R2 is REC in Bricklab
         if self.inp.joys and self.inp.joys[0].get_numaxes() >= 2:
             if "sticks" not in self.cfg:
                 self.learn_sticks()
@@ -789,9 +791,12 @@ class App(modes.ModesMixin):
             print("config save failed", e)
 
     # ---------------- button learning
-    def learn(self):
-        mapping = {}
-        order = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "X", "Y", "L1", "R1", "SELECT", "START"]
+    def learn(self, only=None):
+        """Learn the buttons. With only=(...), just those (the rest keep their map)."""
+        mapping = {} if not only else {s: n for s, n in (self.cfg.get("buttons") or {}).items() if n not in only}
+        order = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "X", "Y", "L1", "R1", "SELECT", "START", "R2", "L2"]
+        if only:
+            order = [n for n in order if n in only]
         tmp = Input({})
         i = 0
         clock = pygame.time.Clock()
@@ -818,7 +823,8 @@ class App(modes.ModesMixin):
             self.text(c, "BUTTON SETUP", self.f_med, ACCENT, (BASE_W // 2, 70 + L["dy"]), center=True)
             self.text(c, "Press", self.f_med, DIM, (BASE_W // 2, 170 + L["dy"]), center=True)
             if i < len(order):
-                self.text(c, order[i], self.f_huge, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
+                lab = {"R2": "R2 (right trigger)", "L2": "L2 (left trigger)"}.get(order[i], order[i])
+                self.text(c, lab, self.f_huge if len(lab) < 8 else self.f_big, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
             self.text(c, "%d / %d" % (min(i + 1, len(order)), len(order)), self.f_small, DIM, (BASE_W // 2, 340 + L["dy"]), center=True)
             self.text(c, "This happens once. Relearn any time from the menu.", self.f_small, DIM, (BASE_W // 2, 420 + L["dy"]), center=True)
             self.present()
@@ -1339,10 +1345,12 @@ class App(modes.ModesMixin):
             return
         if self.imode != "Play" and self.mode_input(name, down):
             return
-        if name == "R3" and edition.LAB:
+        if name == "R2" and edition.LAB:
             if down:
                 self.looper_rec()                           # REC: the next layer, HiChord style
             return
+        if name in ("R2", "L2"):
+            return                                          # spare triggers (R2 records in Bricklab)
         if name == "R3":
             if down:
                 if self.fx_hold:
@@ -1600,7 +1608,7 @@ class App(modes.ModesMixin):
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
-        hint = self.mode_hint() or ("R3 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
+        hint = self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)

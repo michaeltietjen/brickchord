@@ -380,7 +380,7 @@ class SongMixin:
                                                                  "PLAY TO START" if not self.countin else "COUNT-IN"))
 
     def looper_rec(self):
-        """REC (R3, or SELECT+A outside Song mode), HiChord style: records a layer
+        """REC (R2, or SELECT+A outside Song mode), HiChord style: records a layer
         on the next empty track with the sound you are playing, in whatever mode
         you are in. Tap it while a layer records to close that layer and arm the
         next one. The layer closes itself at the end of the pattern and loops."""
