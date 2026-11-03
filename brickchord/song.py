@@ -376,7 +376,24 @@ class SongMixin:
             elif back == "Drums":
                 back = "Play"
             self.set_mode(back)
-        self.flash("P%02d TRACK %d %s: PLAY TO RECORD" % (e.cur + 1, k + 1, "ARMED" if self.lp_was_empty else "OVERDUB"))
+        self.flash("REC P%02d TRACK %d: %s   SELECT+A STOPS" % (e.cur + 1, k + 1,
+                                                                 "PLAY TO START" if not self.countin else "COUNT-IN"))
+
+    def lp_play_track(self, k):
+        """A on the Pattern page: go play this track (audition, no recording).
+        Recording is only ever SELECT+A, so nothing records unless REC is on."""
+        e = self.lp_e()
+        if e is None:
+            return
+        if k != self.lp_sel:
+            self.lp_select(k)
+        back = self.lp_return if self.lp_return in ("Play", "Lead", "Drone", "Drums") else "Play"
+        if self.is_drum(k):
+            back = "Drums"
+        elif back == "Drums":
+            back = "Play"
+        self.set_mode(back)
+        self.flash("TRACK %d: PLAY   SELECT+A TO RECORD" % (k + 1))
 
     def lp_toggle_play(self, row=None):
         e = self.lp_e()
@@ -558,7 +575,7 @@ class SongMixin:
             if y:
                 self.pattern_copy(p)
             else:
-                self.lp_arm(k)
+                self.lp_play_track(k)
         elif name == "B":
             if y:
                 self.eng.post("lp", "clearpat", p)
@@ -1115,7 +1132,7 @@ class SongMixin:
             return "A add  B del  UP/DOWN pitch  X quantize  Y+<> length  Y+A kick  L1/R1 page"
         if pg == "song":
             return "<> pattern  X repeats  A add  B del  Y song on/off  START play  L1/R1 page"
-        return "A rec  B clear  Y mute  X fx  <> pattern  Y+<> length  Y+A copy  L1/R1 page"
+        return "A play  SELECT+A rec  B clear  Y mute  X track  <> pattern  Y+<> length  Y+A copy"
 
     def playpos(self, e):
         if not e.lp_on or e.lp_pos < 0:

@@ -573,11 +573,16 @@ class Engine:
             if v.part == "ohat" and v.trk == key and v.start < at and (v.rel_at is None or v.rel_at > at):
                 v.rel_at, v.rel_len = int(at), fast
 
-    def c_metro(self, mode, level, snd=None):
+    def c_metro(self, mode, level, sound=None):
+        """Metronome mode, level and sound. The sound is named, not sent: a pipe
+        message that big (70 KB of arrays) could wedge the UI against the audio
+        process, so the audio side renders the two clicks itself."""
         self.metro = mode if mode in ("off", "rec", "on") else "off"
         self.metro_lvl = max(0.0, min(1.0, float(level)))
-        if snd:
-            self.metro_snd = snd
+        if sound and sound != getattr(self, "metro_name", None):
+            import synth
+            self.metro_name = sound
+            self.metro_snd = synth.metro_arrays(sound)
 
     def _click(self, at, bar):
         snd = self.metro_snd[0 if bar else 1] if self.metro_snd else self.kit.get("click")

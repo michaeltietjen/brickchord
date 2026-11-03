@@ -387,7 +387,7 @@ class App(modes.ModesMixin):
         self.eng.post("params", self.bpm, p["r"], p["s"] > 0.001, self.spread, self.mode(), self.quantize)
 
     def push_metro(self, sound=True, hear=False):
-        self.eng.post("metro", self.metro, self.metro_lvl, synth.metro_arrays(self.metro_snd) if sound else None)
+        self.eng.post("metro", self.metro, self.metro_lvl, self.metro_snd if sound else None)
         if hear:
             self.eng.post("click")
 
@@ -1894,11 +1894,32 @@ class App(modes.ModesMixin):
             return 1 / 20.0
         return 1 / 30.0 if busy else 1 / 15.0
 
+    def watchdog(self):
+        """If the UI loop stalls for 2 s, write where it is stuck to the log (once
+        per stall), so a hang leaves a trace instead of going quiet."""
+        import traceback
+        main_id = threading.main_thread().ident
+        reported = False
+        while self.running:
+            time.sleep(0.5)
+            stale = time.perf_counter() - self.ui_beat
+            if stale > 2.0 and not reported:
+                reported = True
+                frame = sys._current_frames().get(main_id)
+                print("WATCHDOG: UI loop stalled %.1f s at:" % stale, flush=True)
+                if frame is not None:
+                    print("".join(traceback.format_stack(frame)), flush=True)
+            elif stale < 0.5:
+                reported = False
+
     def run(self):
         clock = pygame.time.Clock()
         last_draw = 0
         last_hb = last_poll = time.perf_counter()
+        self.ui_beat = time.perf_counter()
+        threading.Thread(target=self.watchdog, daemon=True).start()
         while self.running:
+            self.ui_beat = time.perf_counter()
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     self.running = False
