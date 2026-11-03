@@ -137,6 +137,8 @@ class Engine:
         self.lead_vib = 0.0
         self.vib_ph = 0.0
         self.drone = None          # {"notes": [...], "snd": {...}, "restrike": bool}
+        self.drone_xy = (0.0, 0.0) # left stick in Drone mode: x = thin/shimmer, y = pulse/swell
+        self.drone_ph = 0.0
         # patterns and songs (see the section below)
         self.pats = []
         self.cur = 0               # playing (and edited) pattern
@@ -635,6 +637,41 @@ class Engine:
         restrike = any(snd.get(m) is not None and snd[m][1] is None for m in notes)
         self.drone = {"notes": list(notes), "snd": snd, "restrike": restrike}
         self._drone_strike(self.t)
+
+    def c_drone_mod(self, x, y):
+        self.drone_xy = (max(-1.0, min(1.0, float(x))), max(-1.0, min(1.0, float(y))))
+
+    def _drone_env(self, v, T, N):
+        """The left stick shaping the drone, per block. Down: tempo-synced pulses
+        that get faster and harder the further you push. Up: a swell with a slow
+        rotating pan. Left: thins to the root. Right: the upper voices bloom and
+        breathe. Returns (gain array, left gain, right gain)."""
+        x, y = self.drone_xy
+        if abs(x) < 0.1 and abs(y) < 0.1:
+            return None
+        sr = self.sr
+        i = v.midi - min(self.drone["notes"]) if self.drone else 0     # 0 at the root, higher = upper voice
+        g = np.ones(N, np.float32)
+        lg = rg = 1.0
+        if y < -0.1:                                        # pulse
+            beat = 60.0 / self.bpm
+            div = 2 if y > -0.45 else (4 if y > -0.8 else 8)       # 1/8, 1/16, 1/32
+            ph = (T / sr) % (beat / div) / (beat / div)
+            depth = min(1.0, -y * 1.2)
+            duty = 0.55 - 0.3 * depth
+            pulse = np.where(ph < duty, 1.0, 0.0) * (1 - np.clip((ph - (duty - 0.08)) / 0.08, 0, 1) * 0.6)
+            g *= (1 - depth) + depth * pulse.astype(np.float32)
+        elif y > 0.1:                                       # swell + rotation
+            sw = y
+            g *= 1.0 + 0.6 * sw
+            rot = 2 * np.pi * (T[-1] / sr) * (0.15 + 0.6 * sw) + i * 1.3
+            lg, rg = 1.0 - 0.6 * sw * (0.5 + 0.5 * np.sin(rot)), 1.0 - 0.6 * sw * (0.5 - 0.5 * np.sin(rot))
+        if x < -0.1 and i > 0:                              # thin: upper voices fade
+            g *= max(0.0, 1.0 + x * 1.1)
+        elif x > 0.1 and i > 0:                             # bloom: upper voices breathe up
+            br = 0.5 + 0.5 * np.sin(2 * np.pi * (T / sr) * (0.25 + 0.5 * x) + i * 0.9)
+            g *= 1.0 + x * (0.3 + 0.9 * br.astype(np.float32))
+        return g, lg, rg
 
     def _drone_strike(self, at):
         d = self.drone
@@ -1548,9 +1585,21 @@ class Engine:
                 g *= np.where(x < 0, 1.0, env * env)
                 if v.rel_at + v.rel_len <= t + N:
                     v.done = True
-            seg *= g[:, None]
-            seg[:, 0] *= v.lg
-            seg[:, 1] *= v.rg
+            if v.tag == "drone":
+                de = self._drone_env(v, T[o:], n)
+                if de is not None:
+                    g = g * de[0]
+                    seg *= g[:, None]
+                    seg[:, 0] *= v.lg * de[1]
+                    seg[:, 1] *= v.rg * de[2]
+                else:
+                    seg *= g[:, None]
+                    seg[:, 0] *= v.lg
+                    seg[:, 1] *= v.rg
+            else:
+                seg *= g[:, None]
+                seg[:, 0] *= v.lg
+                seg[:, 1] *= v.rg
             if v.done and v.rec is not None:
                 v.rec = None
             if v.trk is not None:

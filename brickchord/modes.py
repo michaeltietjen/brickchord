@@ -158,6 +158,12 @@ class ModesMixin(song.SongMixin):
         return self.tfx_input(name)
 
     def mode_stick(self, x, y):
+        if self.imode == "Drone":
+            xy = (round(x, 2), round(y, 2))
+            if xy != getattr(self, "drone_xy_last", None):
+                self.drone_xy_last = xy
+                self.eng.post("drone_mod", x, y)
+            return
         if self.imode != "Lead":
             return
         bend = x * 2.0 if abs(x) > 0.15 else 0.0
@@ -330,7 +336,7 @@ class ModesMixin(song.SongMixin):
 
     def mode_hint(self):
         return {"Lead": "Y oct+  L1 oct-  R1 sharp  L-stick bend/vibrato  L3 modes",
-                "Drone": "tap a degree to drone, again to stop  Y adds 3rd  L3 modes",
+                "Drone": "tap a degree to drone, again to stop  Y adds 3rd  L stick: down pulse  up swell  left thin  right bloom",
                 "Drums": ("8 pads  L1 soft  R1 accent  SELECT+A record track 1  L3 modes" if edition.LAB
                           else "8 pads  L1 soft  R1 accent  L3 modes"),
                 "Song": self.song_hint(),
