@@ -646,10 +646,24 @@ class App(modes.ModesMixin):
         self.sounding = []
 
     def toggle_drums(self):
+        """START. Brickchord: the play-along beat. Bricklab: the song transport
+        (its drums are track 1, so there is no separate beat)."""
+        if edition.LAB:
+            if self.lp_e() is not None:
+                self.lp_toggle_play()
+            return
         if self.beat == 0:
             self.beat = 1
         self.drums_on = not self.drums_on
         self.eng.post("drums", self.drums_on, synth.BEATS[self.beat][1])
+
+    def clock_on(self):
+        """Is a beat running for the screen to follow? Brickchord: the START beat;
+        Bricklab: the transport."""
+        if edition.LAB:
+            e = self.lp_e()
+            return bool(e is not None and e.lp_on)
+        return self.drums_on
 
     # ---------------- config
     def load_cfg(self):
@@ -891,7 +905,8 @@ class App(modes.ModesMixin):
         if self.menu_pg == "Drums" and edition.LAB:
             return self.drum_menu_items()
         rows = dict(self.all_menu_items())
-        return [(n, rows[n]) for n in MENU_PAGES.get(self.menu_pg) or MENU_PAGES["Chords"] if n in rows]
+        return [(n, rows[n]) for n in MENU_PAGES.get(self.menu_pg) or MENU_PAGES["Chords"]
+                if n in rows and not (n == "Beat" and edition.LAB)]
 
     def all_menu_items(self):
         return [
@@ -1290,10 +1305,11 @@ class App(modes.ModesMixin):
         c.fill(BG)
 
         # beat clock: remember when each 16th arrives
-        st = self.eng.step16 if self.drums_on else -1
+        clk = self.clock_on()
+        st = self.eng.step16 if clk else -1
         if st != self.step_t[0]:
             self.step_t = (st, now)
-        quarter = self.drums_on and (st - 1) % 4 == 0
+        quarter = clk and (st - 1) % 4 == 0
         beat_pop = (1 - self.since(self.step_t[1], 0.18)) if quarter else 0.0
 
         # ---- header: mini logo that steps with the beat, info slides when it changes
@@ -1466,16 +1482,16 @@ class App(modes.ModesMixin):
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
-        hint = self.mode_hint() or ("SELECT menu (hold: song)   START beat   L3 modes" if edition.LAB
+        hint = self.mode_hint() or ("SELECT menu (hold: song)   START play/stop   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
-        on = self.sm("beatrow", 1.0 if self.drums_on else 0.0, 10)
+        on = self.sm("beatrow", 1.0 if clk else 0.0, 10)
         if on > 0.02:
             cur = (st - 1) % 16
             pop = 1 - self.since(self.step_t[1], 0.12)
             for i in range(int(16 * on + 0.999)):
-                lit = self.drums_on and i == cur
+                lit = clk and i == cur
                 hgt = 6 + (int(5 * pop) if lit else 0)
                 col = ACCENT if lit else (PANEL if i % 4 else DIM)
                 pygame.draw.rect(c, col, (20 + i * 12, L["steps_y"] - hgt, 9, hgt))
@@ -1645,7 +1661,7 @@ class App(modes.ModesMixin):
     def draw_well(self, c, quarter_hit):
         # gravity: one row per beat with drums on, a gentle drift without
         now = self.now
-        if quarter_hit or (not self.drums_on and now - self.grav_t > 0.45):
+        if quarter_hit or (not self.clock_on() and now - self.grav_t > 0.45):
             self.grav_t = now
             self.well_step()
         fade = 0.26 if self.cur else 0.34
@@ -1708,7 +1724,7 @@ class App(modes.ModesMixin):
     def draw_mini_mark(self, c, x, y, step):
         """Tiny logo in the header; with the beat running, its keys follow the 16ths."""
         k, g = 6, 2
-        lit = (step - 1) % 8 if self.drums_on else -1
+        lit = (step - 1) % 8 if self.clock_on() else -1
         for i in range(8):
             col = self.ORANGE if (i == 6 and lit < 0) or i == lit else (120, 116, 128)
             if i == lit:

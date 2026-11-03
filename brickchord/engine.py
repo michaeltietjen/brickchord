@@ -503,7 +503,7 @@ class Engine:
             if not revoice or changed:
                 self._release(("bass",), t, int(0.02 * self.sr))
                 self.bass_i = 0
-                if not (self.quantize and self.drums_on):
+                if not (self.quantize and (self.drums_on or self.lp_on)):
                     self._bass_step(t, first=True)
                     self.bass_t0 = t
 
@@ -1317,7 +1317,7 @@ class Engine:
 
     def c_chord(self, notes, snd, revoice=False):
         mode = self.mode
-        q = self.quantize and self.drums_on and not revoice
+        q = self.quantize and (self.drums_on or self.lp_on) and not revoice
         t = int(self.next16) if (q and self.next16 >= self.t) else self.t
         prev = self.chord
         self.chord = {"notes": list(notes), "snd": snd, "pat": notes[1:] + [notes[1] + 12]}
