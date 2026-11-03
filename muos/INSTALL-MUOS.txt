@@ -1,0 +1,14 @@
+Brickchord and Bricklab for muOS (and other PortMaster-family firmware): experimental build.
+
+Install
+1. Copy Brickchord.sh, Bricklab.sh and the brickchord folder into your ports folder.
+   muOS: the .sh files go in ROMS/Ports on the SD card, the brickchord folder in the ports folder PortMaster uses
+   (mmc/ports on recent muOS). ArkOS/ROCKNIX: everything into roms/ports.
+2. If your firmware has no Python 3.9+, install the Python runtime: PortMaster > Options > Runtime Manager > Python.
+3. Refresh the Ports list and launch Brickchord or Bricklab. First launch unpacks NumPy and pygame (one minute).
+
+Reporting
+Each launch writes brickchord.log or bricklab.log next to launch.py in the brickchord folder. If it does not start,
+post that log (and your device and firmware) at https://github.com/michaeltietjen/brickchord/issues
+
+What works on KNULLI (TrimUI Brick Pro) is the reference. Other devices need a 4:3 or square screen and a gamepad.
