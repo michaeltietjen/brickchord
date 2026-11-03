@@ -278,7 +278,7 @@ class App(modes.ModesMixin):
         self.key = s.get("key", 0)
         self.scale = s.get("scale", "Major") if s.get("scale") in SCALES else "Major"
         self.machine = "chord"                      # the selected track's machine (Bricklab); bank follows it
-        self.bank = synth.PATCHES
+        self.bank = synth.PATCHES if edition.LAB else synth.PATCHES + synth.LEAD_PATCHES + synth.DRONE_PATCHES
         self.patch = clamp(s.get("patch", 0), 0, len(self.bank) - 1)
         self.tone = s.get("tone", 0.0)
         self.res = s.get("res", 0.0)

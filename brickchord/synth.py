@@ -488,7 +488,7 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
     q = max(0.5, p["res"] + res_add)
 
     tb = np.arange(nb) / brate
-    duty = 0.5 + 0.4 * p["pwm"] * np.sin(2 * np.pi * tb * (2.0 / loop_len))  # LFO fits loop
+    duty = 0.5 + 0.4 * p.get("pwm", 0.0) * np.sin(2 * np.pi * tb * (2.0 / loop_len))  # LFO fits loop
     duty = np.clip(duty, 0.05, 0.95)
 
     out = np.zeros((n, 2), np.float32)

@@ -28,7 +28,14 @@ and everything plays on a single sample-accurate clock with a built-in drum mach
 - **Instant sound loading** from a disk cache, with an optional pre-rendered factory pack
 
 ## Bricklab
-Bricklab is Brickchord plus song mode: 16 patterns of 6 recorded tracks, each track with its own sound and effects, a step grid, a song page that chains patterns, and a count-in. It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`, add a file `edition.txt` containing `lab`, and copy `Bricklab.sh` into `ports`. It shares Brickchord's sound cache when both are installed.
+Bricklab is the groovebox built on the same engine. It adds:
+- **A looper you can layer from any mode.** R2 records a layer with the sound you are playing; it closes at the bar and loops. R2 again arms the next layer. Six lamps in the header show the layers; SELECT+B undoes the last one.
+- **16 patterns of 6 tracks**, each track a **machine**: Chord, Lead, Bass, Drone or Sample (track 1 is Drums). Lead, Bass and Drone have their own sound banks with a Moog-style 4-pole ladder filter. Sample plays WAVs from `samples/` pitched across the buttons, with start, end, reverse, loop, tune and a granular mode (Settings > Sample).
+- **A drum machine** on track 1: 16-step grid, five built-in kits plus your own WAV kits, swing, accents, ghosts, humanize, per-lane level and tune (Settings > Drums).
+- **Per-track effects**: every track has its own rack, live filter, level, pan, sends and one of two FX buses, each bus with its own reverb and delay type (Settings > FX). The track page is Effects on the mode wheel or SONG > X.
+- **Sequencing**: step grid, song page that chains patterns, count-in, record and length quantize, a metronome, and Drone slide.
+
+It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`, add a file `edition.txt` containing `lab`, and copy `Bricklab.sh` into `ports`. It shares Brickchord's sound cache when both are installed.
 
 ## Install (KNULLI)
 1. Download the latest zip from **[Releases](https://github.com/michaeltietjen/brickchord/releases)** (it bundles the ARM64 NumPy that Brickchord needs).

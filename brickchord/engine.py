@@ -1009,6 +1009,9 @@ class Engine:
         ev, v.rec = v.rec, None
         L = self.pats[self.lp_rec_p].len
         d = max(0.05, (at - v.start) / self._step_len())
+        if self.rec_quant:                                    # length quantize: end on a step too
+            q = float(self.rec_quant)
+            d = max(q, round(d / q) * q)
         if ev[5] is None or d < ev[5]:
             ev[5] = round(min(float(L), d), 3)
 
@@ -1016,7 +1019,11 @@ class Engine:
         ev, self.lp_lead = self.lp_lead, None
         if ev is not None and ev[5] is None and self.cur == self.lp_rec_p:
             L = self.pats[self.cur].len
-            ev[5] = round(max(0.1, (self._ppos(at) - ev[0]) % L), 3)
+            d = max(0.1, (self._ppos(at) - ev[0]) % L)
+            if self.rec_quant:
+                q = float(self.rec_quant)
+                d = max(q, round(d / q) * q)
+            ev[5] = round(min(float(L), d), 3)
 
     def _lp_rec_stop(self, at):
         for v in self.lp_open:
@@ -1741,6 +1748,7 @@ class Engine:
         # The selected track uses the live sends (Settings reverb/delay + right stick).
         selkey = (self.cur, self.sel) if self.route else None
         self._tails |= set(tb)
+        self._ntracks = sum(1 for key in self._tails if tb.get(key) is not None)   # chains actually running
         for key in list(self._tails):
             tr = self.pats[key[0]].tracks[key[1]]
             b = tb.get(key)
@@ -1791,8 +1799,9 @@ class Engine:
         self.t += N
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)
         el = time.perf_counter() - t0
+        nt = max(1, getattr(self, "_ntracks", 0))
         st = (("cmds+clock", t1 - t0), ("voices", t2 - t1), ("live fx", t3 - t2), ("tracks", t4 - t3),
-              ("delay", t5 - t4), ("reverb", t6 - t5), ("total", el))
+              ("per_track", (t4 - t3) / nt), ("delay", t5 - t4), ("reverb", t6 - t5), ("total", el))
         pa = getattr(self, "_pacc", None)
         self._pacc = [(k, v * 1000 if pa is None else pa[i][1] * 0.97 + v * 1000 * 0.03) for i, (k, v) in enumerate(st)]
         self.prof = [(k, round(v, 2)) for k, v in self._pacc]
