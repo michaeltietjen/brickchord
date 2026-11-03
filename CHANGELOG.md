@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Drone slide (both editions): Settings > Chords > Drone slide (Off, 0.5 s, 1 s, 2 s, 4 s; default 1 s). With it on, tapping a new degree slides every drone voice to the new pitch instead of restriking, the upper voices arriving a little after the root. Adding or removing the 3rd fades voices in and out. Off gives the old restrike.
 - Machines (Bricklab). Every track is a machine: Chord, Lead, Bass, Drone or Sample (track 1 is Drums). Pick it on the track page under SOUND > Machine; the Sound row then cycles that machine's own bank, and playing the track opens the right mode (Lead for Lead, Bass and Sample, Drone for Drone). A fresh looper layer takes whatever machine you are playing.
 - New sound banks with a Moog-style 4-pole ladder filter: Lead (Fat Saw, Hollow Square, Sync Lead, Sub Lead, Brass Lead, Acid, Flute, Whistle, Glass Lead, Wire), Bass (Moog Bass, Sub, Pulse Bass, Acid Bass, Reese, Pluck Bass, Hollow Bass, Fuzz Bass) and Drone (Deep Space, Tape Choir, Organ Swell, Cathedral, Dark Pad, Shimmer, Breath, Sub Drone). Chord keeps the 23 Brickchord sounds. The Sound Editor works on all of them.
 - Sample machine: drop WAV files in bricklab/samples/ (kits stay in sub-folders) and a Sample track plays them pitched across the buttons from a root of C4, through the track's filter, rack and FX bus. Start, end, reverse, loop and tune are in the engine and get a settings page next.

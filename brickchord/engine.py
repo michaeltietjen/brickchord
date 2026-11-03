@@ -138,6 +138,8 @@ class Engine:
         self.vib_ph = 0.0
         self.drone = None          # {"notes": [...], "snd": {...}, "restrike": bool}
         self.drone_xy = (0.0, 0.0) # left stick in Drone mode: x = thin/shimmer, y = pulse/swell
+        self.drone_slide = 0.0     # seconds; > 0 and the drone glides to a new degree instead of restriking
+        self.dvoices = []          # sliding drone voices (lead-style, pitch-shifted on the fly)
         self.drone_ph = 0.0
         # patterns and songs (see the section below)
         self.pats = []
@@ -627,9 +629,43 @@ class Engine:
             self.kit = kits["Classic"]
 
     # ------------------------------------------------------------ drone layer
+    def c_drone_slide(self, secs):
+        self.drone_slide = max(0.0, float(secs))
+
     def c_drone(self, notes, snd):
         """Sustained notes on their own layer: they keep going while you play
-        chords or lead on top. Sounds that don't sustain are re-struck."""
+        chords or lead on top. Sounds that don't sustain are re-struck. With
+        drone_slide set, a new degree is reached by sliding every voice there."""
+        if self.drone_slide > 0 and notes and all(snd.get(m) is not None and snd[m][1] is not None for m in notes):
+            self._release(("drone",), self.t, int(0.8 * self.sr))      # any old struck drone fades
+            self.drone = {"notes": list(notes), "snd": snd, "restrike": False}
+            live = [v for v in self.dvoices if not v.rel]
+            notes = sorted(notes)
+            # voices that stay slide, extras fade, new ones fade in
+            for idx, m in enumerate(notes):
+                if idx < len(live):
+                    v = live[idx]
+                    v.target = m
+                    v.glide = self.drone_slide * (1.0 + 0.25 * idx)     # upper voices arrive a little later
+                    v.midi = m
+                else:
+                    v = self._Lead()
+                    v.a, v.l = snd[m]
+                    v.base = v.target = m
+                    v.ratio = 1.0
+                    v.glide = 0.0
+                    v.pos = 0.0
+                    v.env = 0.0
+                    v.rel, v.rel_n = False, 0
+                    v.fade_in = int(0.6 * self.sr)
+                    v.midi = m
+                    self.dvoices.append(v)
+            for v in live[len(notes):]:
+                v.rel, v.rel_n = True, int(0.8 * self.sr)
+            return
+        for v in self.dvoices:
+            if not v.rel:
+                v.rel, v.rel_n = True, int(0.8 * self.sr)
         self._release(("drone",), self.t, int(0.8 * self.sr))
         if not notes:
             self.drone = None
@@ -736,6 +772,55 @@ class Engine:
             mm = ~m
             out[mm] = l[(idx[mm] - na) % len(l)]
         return out
+
+    def _drone_render(self, mix, N, sr):
+        """The sliding drone voices: lead-style resampling with glide, each with
+        its own pan and the left-stick shaping, into the drone's bus."""
+        i = np.arange(N, dtype=np.float64)
+        T = np.arange(self.t, self.t + N)
+        keep = []
+        n = max(1, len(self.drone["notes"]) if self.drone else 1)
+        for idx, v in enumerate(self.dvoices):
+            rt = 2.0 ** ((v.target - v.base) / 12.0)
+            if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
+                c = math.exp(-1.0 / (v.glide * 0.35 * sr))
+                r = rt + (v.ratio - rt) * c ** (i + 1)
+            else:
+                r = np.full(N, rt)
+            v.ratio = float(r[-1])
+            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
+            v.pos = float(pos[-1] + r[-1])
+            i0 = pos.astype(np.int64)
+            fr = (pos - i0).astype(np.float32)[:, None]
+            seg = self._lead_fetch(v, i0) * (1 - fr) + self._lead_fetch(v, i0 + 1) * fr
+            if v.fade_in > 0:
+                env = v.env + np.arange(1, N + 1, dtype=np.float32) / v.fade_in
+                env = np.clip(env, 0, 1)
+                v.env = float(env[-1])
+                if v.env >= 1.0:
+                    v.fade_in = 0
+                seg *= env[:, None]
+            if v.rel:
+                env = v.env - np.arange(1, N + 1, dtype=np.float32) / max(1, v.rel_n)
+                env = np.clip(env, 0, 1)
+                v.env = float(env[-1])
+                seg *= (env * env)[:, None]
+            pan = (idx / max(1, n - 1) - 0.5) * 0.8 if n > 1 else 0.0
+            g = 0.7 * 0.95
+            lg, rg = min(1.0, 1.0 - pan), min(1.0, 1.0 + pan)
+            de = self._drone_env(v, T, N) if self.drone else None
+            if de is not None:
+                seg *= (g * de[0])[:, None]
+                lg, rg = lg * de[1], rg * de[2]
+            else:
+                seg *= g
+            seg[:, 0] *= lg
+            seg[:, 1] *= rg
+            mix += seg
+            if v.rel and v.env <= 0.0:
+                continue
+            keep.append(v)
+        self.dvoices = keep
 
     def _lead_render(self, mix, N, sr):
         i = np.arange(N, dtype=np.float64)
@@ -1628,6 +1713,15 @@ class Engine:
                 self._lead_render(b, N, sr)
             else:
                 self._lead_render(mix, N, sr)
+        if self.dvoices:
+            if self.route and not self._seltr().drum:
+                key = (self.cur, self.sel)
+                b = tb.get(key)
+                if b is None:
+                    b = tb[key] = np.zeros((N, 2), np.float32)
+                self._drone_render(b, N, sr)
+            else:
+                self._drone_render(mix, N, sr)
 
         # smoothed fx amounts (linear ramp across the block = no zipper noise)
         ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]

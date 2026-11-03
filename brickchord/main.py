@@ -69,12 +69,13 @@ MENU_PAGES = {
                "Volume", "Latency",
                "Relearn buttons", "Learn sticks", "Quit"],
     "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
-               "Lead glide", "Bass", "Bass Level"],
+               "Lead glide", "Drone slide", "Bass", "Bass Level"],
     "Drums": None,
     "FX": ["Reverb", "Delay", "Reverb Type", "Delay Type", "Delay Time",
            "A Reverb Type", "A Delay Type", "A Delay Time", "B Reverb Type", "B Delay Type", "B Delay Time"],
 }
 REC_QUANT = {0: "Off", 1: "1/16", 2: "1/8", 4: "1/4"}      # record quantize, in 16ths
+DRONE_SLIDES = {0.0: "Off (restrike)", 0.5: "0.5 s", 1.0: "1 s", 2.0: "2 s", 4.0: "4 s"}
 METRO_MODES = {"off": "Off", "rec": "When recording", "on": "Always"}
 DELAY_TYPES = ["Ping-Pong", "Straight", "Tape", "Dub", "Slapback", "Multi-Tap"]
 
@@ -302,6 +303,7 @@ class App(modes.ModesMixin):
         self.metro = s.get("metro", "rec") if s.get("metro") in METRO_MODES else "rec"
         self.metro_snd = s.get("metro_snd") if s.get("metro_snd") in synth.METRO_SOUNDS else "Click"
         self.metro_lvl = clamp(float(s.get("metro_lvl", 0.7)), 0.0, 1.0)
+        self.drone_slide = s.get("drone_slide", 1.0) if s.get("drone_slide", 1.0) in DRONE_SLIDES else 1.0
         self.bass = s.get("bass", 0) if 0 <= s.get("bass", 0) < len(synth.BASS_MODES) else 0
         self.bass_lvl = s.get("bass_lvl", 1.0)
         self.arp_oct = s.get("arp_oct", 2)
@@ -371,6 +373,7 @@ class App(modes.ModesMixin):
 
         self.eng = eng
         self.eng.post("drums", False, synth.BEATS[self.beat][1])
+        self.eng.post("drone_slide", self.drone_slide)
         self.push_params()
         self.push_fx()
         self.push_types()
@@ -795,7 +798,8 @@ class App(modes.ModesMixin):
                                     latency=self.block, quantize=self.quantize, rec_quant=self.rec_quant,
                                     bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
                                     imode=getattr(self, "imode", "Play"), countin=getattr(self, "countin", 1),
-                                    metro=self.metro, metro_snd=self.metro_snd, metro_lvl=self.metro_lvl)
+                                    metro=self.metro, metro_snd=self.metro_snd, metro_lvl=self.metro_lvl,
+                                    drone_slide=self.drone_slide)
         if hasattr(self, "rack"):
             self.cfg["rack"] = self.rack
             self.cfg.pop("seq", None)
@@ -1051,7 +1055,7 @@ class App(modes.ModesMixin):
             ("Spread", "%d ms" % self.spread),
             ("Latch", "On" if self.latch else "Off"),
         ] + ([("Lead glide", ("%d ms" % round(self.rack["Glide"][1] * 400)) if self.rack["Glide"][0] else "Off")]
-             if edition.LAB else []) + [
+             if edition.LAB else []) + [("Drone slide", DRONE_SLIDES[self.drone_slide])] + [
             ("Quantize", "On" if self.quantize else "Off"),
         ] + ([("Count-in", ("%d bar%s" % (self.countin, "" if self.countin == 1 else "s")) if self.countin
                             else "Off, starts on first note"),
@@ -1136,6 +1140,10 @@ class App(modes.ModesMixin):
             self.bpm = clamp(self.bpm + 2 * d, 50, 200)
         elif name == "Spread":
             self.spread = clamp(self.spread + 10 * d, 0, 120)
+        elif name == "Drone slide":
+            ks = list(DRONE_SLIDES)
+            self.drone_slide = ks[(ks.index(self.drone_slide) + d) % len(ks)]
+            self.eng.post("drone_slide", self.drone_slide)
         elif name == "Lead glide":
             g = self.rack["Glide"]
             g[1] = round(max(0.0, min(1.0, g[1] + 0.1 * d)), 2)
