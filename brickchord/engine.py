@@ -647,28 +647,33 @@ class Engine:
         rotating pan. Left: thins to the root. Right: the upper voices bloom and
         breathe. Returns (gain array, left gain, right gain)."""
         x, y = self.drone_xy
-        if abs(x) < 0.1 and abs(y) < 0.1:
+        dz = 0.25                                           # a resting stick does nothing
+        if abs(x) < dz and abs(y) < dz:
             return None
+        x = 0.0 if abs(x) < dz else (abs(x) - dz) / (1 - dz) * (1 if x > 0 else -1)
+        y = 0.0 if abs(y) < dz else (abs(y) - dz) / (1 - dz) * (1 if y > 0 else -1)
         sr = self.sr
         i = v.midi - min(self.drone["notes"]) if self.drone else 0     # 0 at the root, higher = upper voice
         g = np.ones(N, np.float32)
         lg = rg = 1.0
-        if y < -0.1:                                        # pulse
+        if y < 0:                                           # pulse: a smooth gate, no clicks
             beat = 60.0 / self.bpm
-            div = 2 if y > -0.45 else (4 if y > -0.8 else 8)       # 1/8, 1/16, 1/32
+            div = 2 if y > -0.4 else (4 if y > -0.75 else 8)         # 1/8, 1/16, 1/32
             ph = (T / sr) % (beat / div) / (beat / div)
-            depth = min(1.0, -y * 1.2)
-            duty = 0.55 - 0.3 * depth
-            pulse = np.where(ph < duty, 1.0, 0.0) * (1 - np.clip((ph - (duty - 0.08)) / 0.08, 0, 1) * 0.6)
+            depth = min(1.0, -y * 1.1)
+            duty = 0.6 - 0.3 * depth
+            edge = 0.12
+            on = np.clip(ph / edge, 0, 1) * np.clip((duty - ph) / edge, 0, 1)
+            pulse = 0.5 - 0.5 * np.cos(np.pi * on)                   # raised cosine in and out
             g *= (1 - depth) + depth * pulse.astype(np.float32)
-        elif y > 0.1:                                       # swell + rotation
+        elif y > 0:                                         # swell + rotation
             sw = y
             g *= 1.0 + 0.6 * sw
             rot = 2 * np.pi * (T[-1] / sr) * (0.15 + 0.6 * sw) + i * 1.3
             lg, rg = 1.0 - 0.6 * sw * (0.5 + 0.5 * np.sin(rot)), 1.0 - 0.6 * sw * (0.5 - 0.5 * np.sin(rot))
-        if x < -0.1 and i > 0:                              # thin: upper voices fade
+        if x < 0 and i > 0:                                 # thin: upper voices fade
             g *= max(0.0, 1.0 + x * 1.1)
-        elif x > 0.1 and i > 0:                             # bloom: upper voices breathe up
+        elif x > 0 and i > 0:                               # bloom: upper voices breathe up
             br = 0.5 + 0.5 * np.sin(2 * np.pi * (T / sr) * (0.25 + 0.5 * x) + i * 0.9)
             g *= 1.0 + x * (0.3 + 0.9 * br.astype(np.float32))
         return g, lg, rg

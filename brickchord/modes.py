@@ -159,10 +159,10 @@ class ModesMixin(song.SongMixin):
 
     def mode_stick(self, x, y):
         if self.imode == "Drone":
-            xy = (round(x, 2), round(y, 2))
+            xy = (round(x * 20) / 20, round(y * 20) / 20)   # 5% steps, so a jittery stick is quiet
             if xy != getattr(self, "drone_xy_last", None):
                 self.drone_xy_last = xy
-                self.eng.post("drone_mod", x, y)
+                self.eng.post("drone_mod", xy[0], xy[1])
             return
         if self.imode != "Lead":
             return
