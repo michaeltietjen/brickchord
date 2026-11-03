@@ -134,6 +134,88 @@ EDIT_PARAMS = [
 ]
 
 
+# ---------------------------------------------------------------- machine banks
+# Bricklab's Lead, Bass and Drone machines have their own sounds. The ladder
+# patches use the 4-pole response above, which is what makes them Moog-ish.
+def _ld(name, oscs, **kw):
+    p = dict(name=name, oscs=oscs, ladder=True, cutoff=1200, res=1.5, fenv=2.0, fa=.005, fd=.4, fs=.3,
+             a=.004, d=.3, s=.7, r=.25, pwm=0)
+    p.update(kw)
+    return p
+
+
+LEAD_PATCHES = [
+    _ld("Fat Saw", [("saw", -7, .6, -.3, 0), ("saw", 7, .6, .3, 0), ("square", 0, .35, 0, -1)],
+        cutoff=1500, res=1.8, fenv=2.2, fd=.5, drive=.3),
+    _ld("Hollow Square", [("square", 0, .7, 0, 0), ("pulse", 4, .3, 0, 0)], cutoff=1100, res=2.4, fenv=1.4,
+        pwm=.5, fd=.6, s=.6, gain=1.8),
+    _ld("Sync Lead", [("saw", 0, .7, 0, 0), ("saw", 1203, .5, 0, 0)], cutoff=2600, res=2.8, fenv=3.2, fa=.0, fd=.22,
+        fs=.15, d=.25, s=.55, drive=.5),
+    _ld("Sub Lead", [("tri", 0, .7, 0, 0), ("sine", 0, .5, 0, -1)], cutoff=700, res=1.0, fenv=1.2, fd=.5, s=.8),
+    _ld("Brass Lead", [("saw", -4, .6, -.2, 0), ("saw", 4, .6, .2, 0)], cutoff=600, res=1.3, fenv=3.0, fa=.08, fd=.35,
+        fs=.5, a=.04, d=.3, s=.8, r=.3),
+    _ld("Acid", [("saw", 0, .8, 0, 0)], cutoff=500, res=3.4, fenv=3.4, fa=.0, fd=.18, fs=.1, d=.2, s=.4, drive=.6, gain=1.2),
+    _ld("Flute", [("sine", 0, .6, 0, 0), ("tri", 3, .35, 0, 1)], cutoff=1800, res=0.8, fenv=.6, fa=.06, fd=.4, fs=.6,
+        a=.05, d=.3, s=.85, r=.3, noise=.25),
+    _ld("Whistle", [("sine", 0, .7, 0, 1), ("sine", 5, .3, 0, 2)], cutoff=4000, res=0.7, fenv=.3, a=.04, d=.2, s=.9, r=.2,
+        noise=.12),
+    _ld("Glass Lead", [("pulse", -3, .5, -.4, 1), ("pulse", 3, .5, .4, 1)], cutoff=3200, res=1.6, fenv=1.0, pwm=.6,
+        fd=.8, s=.7, gain=1.6),
+    _ld("Wire", [("saw", 0, .5, 0, 1), ("square", 2, .4, 0, 0)], cutoff=2200, res=3.2, fenv=2.6, fd=.3, fs=.2, s=.5,
+        drive=.4, gain=1.3),
+]
+
+BASS_PATCHES = [
+    _ld("Moog Bass", [("saw", 0, .7, 0, 0), ("square", 0, .5, 0, -1)], cutoff=520, res=1.9, fenv=2.6, fd=.28, fs=.2,
+        d=.5, s=.6, r=.2, drive=.3),
+    _ld("Sub", [("sine", 0, .9, 0, 0), ("tri", 0, .3, 0, 1)], cutoff=400, res=0.8, fenv=.8, fd=.4, s=.9, r=.15),
+    _ld("Pulse Bass", [("pulse", 0, .75, 0, 0), ("sine", 0, .4, 0, -1)], cutoff=700, res=2.0, fenv=2.0, pwm=.4, fd=.3,
+        fs=.25, s=.6, r=.2, gain=1.4),
+    _ld("Acid Bass", [("saw", 0, .8, 0, 0)], cutoff=380, res=3.5, fenv=3.6, fd=.2, fs=.08, d=.25, s=.45, r=.15, drive=.7, gain=1.2),
+    _ld("Reese", [("saw", -14, .55, -.5, 0), ("saw", 14, .55, .5, 0), ("sine", 0, .4, 0, -1)], cutoff=900, res=1.2,
+        fenv=.6, fa=.2, fd=1.0, fs=.7, a=.02, d=.6, s=.85, r=.3),
+    _ld("Pluck Bass", [("saw", 0, .6, 0, 0), ("square", 0, .4, 0, -1)], cutoff=600, res=2.2, fenv=3.0, fd=.14, fs=.0,
+        d=.18, s=.0, r=.2, gain=1.4),
+    _ld("Hollow Bass", [("square", 0, .8, 0, 0)], cutoff=450, res=1.6, fenv=1.6, fd=.4, s=.7, r=.2, gain=1.8),
+    _ld("Fuzz Bass", [("saw", -5, .6, 0, 0), ("saw", 5, .6, 0, 0)], cutoff=800, res=1.4, fenv=1.8, fd=.4, s=.7, r=.2,
+        drive=.9),
+]
+
+
+def _dr(name, oscs, **kw):
+    p = dict(name=name, oscs=oscs, cutoff=900, res=1.0, fenv=1.2, fa=2.5, fd=3.0, fs=.6, a=1.2, d=2.0, s=.9, r=2.5,
+             pwm=.3, gain=1.2)
+    p.update(kw)
+    return p
+
+
+DRONE_PATCHES = [
+    _dr("Deep Space", [("saw", -14, .5, -.8, -1), ("saw", 14, .5, .8, -1), ("sine", 0, .5, 0, 0)], cutoff=500, fenv=1.6,
+        fa=3.0, a=2.0, noise=.08, noise_dark=True),
+    _dr("Tape Choir", [("vox", -8, .6, -.6, 0), ("vox", 8, .6, .6, 0), ("sine", 0, .3, 0, -1)], cutoff=1400, fenv=.8,
+        a=1.5, pwm=.5),
+    _dr("Organ Swell", [("square", 0, .5, 0, 0), ("sine", 0, .5, 0, 1), ("sine", 2, .35, 0, 2)], cutoff=2000, res=.8,
+        fenv=1.0, fa=1.8, a=1.4, pwm=0),
+    _dr("Cathedral", [("saw", -5, .4, -.7, 0), ("saw", 5, .4, .7, 0), ("sine", 0, .6, 0, -1), ("sine", 1, .3, 0, 1)],
+        cutoff=700, fenv=1.4, fa=3.5, fd=4.0, a=2.5),
+    _dr("Dark Pad", [("pulse", -11, .5, -.8, 0), ("pulse", 11, .5, .8, 0), ("tri", 0, .4, 0, -1)], cutoff=380, res=1.3,
+        fenv=1.2, fa=4.0, a=1.8, pwm=.7),
+    _dr("Shimmer", [("saw", -3, .35, -.5, 1), ("saw", 3, .35, .5, 1), ("sine", 0, .5, 0, 0), ("sine", 7, .3, 0, 2)],
+        cutoff=2400, res=.9, fenv=1.0, fa=2.0, a=1.2, pwm=.4),
+    _dr("Breath", [("tri", -6, .5, -.6, 0), ("tri", 6, .5, .6, 0)], cutoff=1100, fenv=.9, fa=2.2, a=1.6, noise=.35),
+    _dr("Sub Drone", [("sine", 0, .8, 0, -1), ("sine", 0, .5, 0, 0), ("saw", 0, .15, 0, 0)], cutoff=300, res=.9,
+        fenv=.6, fa=3.0, a=2.0),
+]
+
+MACHINES = ["chord", "lead", "bass", "drone", "drums", "sample"]
+MACHINE_NAME = {"chord": "Chord", "lead": "Lead", "bass": "Bass", "drone": "Drone", "drums": "Drums", "sample": "Sample"}
+
+
+def machine_bank(machine):
+    """The sound list a machine chooses from (Chord keeps the 23 Brickchord sounds)."""
+    return {"lead": LEAD_PATCHES, "bass": BASS_PATCHES, "drone": DRONE_PATCHES}.get(machine, PATCHES)
+
+
 def edited_patch(base, edits):
     """Apply Sound Editor edits to a base patch (returns a new dict)."""
     p = dict(base)
@@ -392,7 +474,14 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
         k = np.arange(1, hmax + 1, dtype=np.float32)
         base = _vox_amps(k, f, duty) if wave == "vox" else _harm_amps(wave, k, duty)
         w = (k[None, :] * f) / fc[:, None]
-        filt = 1.0 / np.sqrt((1 - w * w) ** 2 + (w / q) ** 2)
+        if p.get("ladder"):
+            # Moog-style 4-pole ladder: 1 / ((1 + jw)^4 + k), k = feedback 0..4
+            kk = min(3.9, max(0.0, (q - 0.5) * 1.0))
+            jw = 1.0 + 1j * w
+            filt = 1.0 / np.abs(jw ** 4 + kk)
+            filt = np.minimum(filt, 6.0).astype(np.float32)
+        else:
+            filt = 1.0 / np.sqrt((1 - w * w) ** 2 + (w / q) ** 2)
         amps = base * filt                                   # (nb, H)
         spec = np.zeros((nb, NH + 1), np.complex64)
         spec[:, 1:hmax + 1] = -1j * amps * (TABLE / 2)       # sine phase
@@ -410,6 +499,14 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
         out[:, 0] += sig * gl
         out[:, 1] += sig * gr
 
+    if p.get("noise"):
+        nz = np.random.RandomState(7).randn(n).astype(np.float32) * p["noise"]
+        nz = np.cumsum(nz) * 0.02 if p.get("noise_dark") else nz
+        nz -= np.convolve(nz, np.ones(64) / 64, "same")
+        out += nz[:, None] * 0.3
+    if p.get("drive"):
+        d = p["drive"]
+        out = np.tanh(out * (1 + 4 * d)) / (1 + 1.5 * d)
     # amplitude envelope (sample rate), frozen after attack
     aenv = _adsr(n, p["a"], p["d"], p["s"], SR)
     fs_ = int(attack_len * SR)

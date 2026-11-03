@@ -275,7 +275,9 @@ class App(modes.ModesMixin):
         s = self.cfg["settings"]
         self.key = s.get("key", 0)
         self.scale = s.get("scale", "Major") if s.get("scale") in SCALES else "Major"
-        self.patch = clamp(s.get("patch", 0), 0, len(synth.PATCHES) - 1)
+        self.machine = "chord"                      # the selected track's machine (Bricklab); bank follows it
+        self.bank = synth.PATCHES
+        self.patch = clamp(s.get("patch", 0), 0, len(self.bank) - 1)
         self.tone = s.get("tone", 0.0)
         self.res = s.get("res", 0.0)
         self.octave = s.get("octave", 0)
@@ -435,9 +437,26 @@ class App(modes.ModesMixin):
         self.eng.post("fx", self.rev, self.dly, DELAY_TIMES[self.dly_time][1], self.volume)
 
     # ---------------- sounds are rendered in the renderer process
+    def edit_key(self, i=None, machine=None):
+        """Sound Editor edits are kept per sound; machine banks get their own keys."""
+        i = self.patch if i is None else i
+        mc = machine or self.machine
+        return str(i) if mc in ("chord", "drums") else "%s:%d" % (mc, i)
+
+    def set_bank(self, machine):
+        """Switch the live sound list to a machine's bank (Bricklab)."""
+        if machine == "sample":
+            files = synth.sample_files()
+            self.bank = [synth.sample_patch(f) for f in files] or [dict(synth.SAMPLE_PATCH, name="no samples")]
+        else:
+            self.bank = synth.machine_bank(machine)
+        self.machine = machine
+        self.patch = min(self.patch, len(self.bank) - 1)
+        self.patch_changed()
+
     def cur_patch(self):
         """Current sound with Sound Editor edits and the quick Filter/Resonance macros applied."""
-        p = synth.edited_patch(synth.PATCHES[self.patch], self.edits.get(str(self.patch)))
+        p = synth.edited_patch(self.bank[self.patch], self.edits.get(self.edit_key()))
         p["cutoff"] = p["cutoff"] * (2 ** self.tone)
         p["res"] = max(0.5, p["res"] + self.res)
         return p
@@ -684,7 +703,7 @@ class App(modes.ModesMixin):
         else:
             self.draw_mark(c, BASE_W // 2, 105 + d, 34, max(t, 1.5))
             self.draw_title(c, 180 + d)
-        self.text(c, "preparing %s" % synth.PATCHES[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218 + d), center=True)
+        self.text(c, "preparing %s" % self.bank[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218 + d), center=True)
         w = 360
         pygame.draw.rect(c, PANEL, ((BASE_W - w) // 2, 250 + d, w, 14), border_radius=7)
         pygame.draw.rect(c, ACCENT, ((BASE_W - w) // 2, 250 + d, int(w * done / max(1, total)), 14), border_radius=7)
@@ -1008,7 +1027,7 @@ class App(modes.ModesMixin):
         return [
             ("Key", NOTE_NAMES[self.key]),
             ("Scale", self.scale),
-            ("Sound", synth.PATCHES[self.patch]["name"] + (" *" if self.edits.get(str(self.patch)) else "")),
+            ("Sound", self.bank[self.patch]["name"] + (" *" if self.edits.get(self.edit_key()) else "")),
             ("Edit Sound", ">"),
             ("Filter", "%+.1f oct" % self.tone),
             ("Resonance", "%+.1f" % self.res),
@@ -1063,7 +1082,7 @@ class App(modes.ModesMixin):
             self.scale = SCALE_NAMES[(SCALE_NAMES.index(self.scale) + d) % len(SCALE_NAMES)]
             recache = True
         elif name == "Sound":
-            self.patch = (self.patch + d) % len(synth.PATCHES)
+            self.patch = (self.patch + d) % len(self.bank)
             recache = True
         elif name == "Filter":
             self.tone = clamp(round(self.tone + 0.5 * d, 1), -3, 3)
@@ -1160,7 +1179,7 @@ class App(modes.ModesMixin):
         if recache:
             self.patch_changed()
         if name in ("Sound", "Filter", "Resonance"):
-            self.flash("rendering %s..." % synth.PATCHES[self.patch]["name"])
+            self.flash("rendering %s..." % self.bank[self.patch]["name"])
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
@@ -1179,6 +1198,8 @@ class App(modes.ModesMixin):
             self.stop_chord()
             self.learn_sticks()
             self.menu = False
+        elif name == "Edit Sound" and self.bank[self.patch].get("sample"):
+            self.flash("SAMPLES HAVE NO SOUND EDITOR YET")
         elif name == "Edit Sound":
             self.stop_chord()
             self.editor = True
@@ -1200,11 +1221,11 @@ class App(modes.ModesMixin):
             elif key == "sub":
                 val = "%d%%" % round(synth.param_value(p, "sub") * 100)
             elif key == "cutoff":
-                val = "%d Hz" % round(synth.edited_patch(synth.PATCHES[self.patch], e)["cutoff"])
+                val = "%d Hz" % round(synth.edited_patch(self.bank[self.patch], e)["cutoff"])
             elif key in ("fs", "s", "pwm"):
                 val = "%d%%" % round(p[key] * 100)
             elif key in ("res", "fenv"):
-                val = "%.2f" % synth.edited_patch(synth.PATCHES[self.patch], e)[key]
+                val = "%.2f" % synth.edited_patch(self.bank[self.patch], e)[key]
             else:
                 val = ("%d ms" % round(p[key] * 1000)) if p[key] < 1 else ("%.2f s" % p[key])
             rows.append((key, label, val, key in e))
@@ -1217,7 +1238,7 @@ class App(modes.ModesMixin):
         key = self.editor_items()[self.ed_i][0]
         if key.startswith("_"):
             return
-        base = synth.PATCHES[self.patch]
+        base = self.bank[self.patch]
         e = self.edits.setdefault(str(self.patch), {})
         spec = {k: (lo, hi, st) for k, _, lo, hi, st in synth.EDIT_PARAMS}[key]
         lo, hi, st = spec
@@ -1441,8 +1462,8 @@ class App(modes.ModesMixin):
         self.text(c, edition.NAME.upper(), self.f_small, ACCENT, (62, 12))
         chips_end = self.draw_mode_chip(c, 172, 9)
         info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
-                                                   synth.PATCHES[self.patch]["name"], self.mode(), self.bpm)
-        for alt in ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, synth.PATCHES[self.patch]["name"], self.bpm),
+                                                   self.bank[self.patch]["name"], self.mode(), self.bpm)
+        for alt in ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bank[self.patch]["name"], self.bpm),
                     "%s %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bpm)):
             if BASE_W - 12 - self.f_small.size(info)[0] > chips_end + 10:
                 break
@@ -1976,7 +1997,7 @@ class App(modes.ModesMixin):
 
     def draw_editor(self, c, a=1.0):
         rows = [(label, val, MOD_ON if edited else INK) for key, label, val, edited in self.editor_items()]
-        self.draw_list(c, a, "EDIT  " + synth.PATCHES[self.patch]["name"].upper(), rows, self.ed_i, "ed", 90)
+        self.draw_list(c, a, "EDIT  " + self.bank[self.patch]["name"].upper(), rows, self.ed_i, "ed", 90)
         hint = "LEFT/RIGHT tweak   START audition   B done" + ("   (changes apply on exit)" if self.ed_dirty else "")
         self.text(c, hint, self.f_small, self.mix(BG, DIM, a), (BASE_W // 2, L["hint_y"]), center=True)
 
@@ -2017,7 +2038,7 @@ class App(modes.ModesMixin):
         e = getattr(self.eng, "eng", None)
         print("status: underruns %d load %.2f voices %d misses %d cached %d audio_t %.1fs sound %s mode %s" % (
             self.eng.underruns, self.eng.load, len(e.voices) if e else -1, getattr(self.eng, "misses", 0),
-            len(getattr(self.eng, "cache", ())), (e.t / e.sr) if e else -1, synth.PATCHES[self.patch]["name"],
+            len(getattr(self.eng, "cache", ())), (e.t / e.sr) if e else -1, self.bank[self.patch]["name"],
             self.mode()), flush=True)
         prof = getattr(e, "prof", None)
         if prof:

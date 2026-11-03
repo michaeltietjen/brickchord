@@ -28,8 +28,8 @@ RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
                "Vibrato": (0.3, 0), "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4),
                "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Glide": (0.3, 0)}
-TFX_ROWS = ["Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "FX bus", "Cutoff", "Resonance"] + FX_ORDER
-TFX_SECTION = {"Sound": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "LIVE FILTER", "Drive": "EFFECTS"}
+TFX_ROWS = ["Machine", "Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "FX bus", "Cutoff", "Resonance"] + FX_ORDER
+TFX_SECTION = {"Machine": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "LIVE FILTER", "Drive": "EFFECTS"}
 NO_RATE = ("Drive", "Lo-fi", "Wide")
 TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), (120, 200, 110), (255, 120, 160)]
 DRUM_ROW = {"kick": 0.85, "snare": 0.6, "clap": 0.55, "tom": 0.7, "rim": 0.45, "hat": 0.25, "ohat": 0.2, "shk": 0.35}
@@ -56,7 +56,8 @@ def new_drum():
 
 
 def new_track(k=1):
-    t = {"name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
+    t = {"machine": "drums" if k == DT else "chord",
+         "name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
          "rs": 0.25, "ds": 0.0, "bus": 0, "mute": False,
          "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER},
          "flt": [0.0, 0.0]}
@@ -205,8 +206,14 @@ class SongMixin:
         except Exception as ex:
             print("song save failed", ex, flush=True)
 
-    def patch_json(self, i, tone=None, res=None):
-        p = synth.edited_patch(synth.PATCHES[i], self.edits.get(str(i)))
+    def patch_json(self, i, tone=None, res=None, machine=None):
+        mc = machine or self.machine
+        if mc == "sample":
+            files = synth.sample_files()
+            base = synth.sample_patch(files[i % len(files)]) if files else dict(synth.SAMPLE_PATCH, name="no samples")
+            return json.dumps(base, sort_keys=True)
+        bank = synth.machine_bank(mc)
+        p = synth.edited_patch(bank[i % len(bank)], self.edits.get(self.edit_key(i, mc)))
         p["cutoff"] = p["cutoff"] * (2 ** (self.tone if tone is None else tone))
         p["res"] = max(0.5, p["res"] + (self.res if res is None else res))
         return json.dumps(p, sort_keys=True)
@@ -303,11 +310,17 @@ class SongMixin:
         p = e.cur if e else 0
         k = self.lp_sel
         m = self.pm[p][k]
+        mc = m.get("machine", "drums" if self.is_drum(k) else "chord")
+        if mc != "drums" and mc != self.machine:
+            self.set_bank(mc)                   # the live sound list follows the track's machine
+            if m["patch"] is None:
+                self.patch = 0
+                self.patch_changed()
         if self.is_drum(k):
             pass                                # drums keep the live sound as it is
         elif m["patch"] is None:
             m.update(patch=self.patch, tone=self.tone, res=self.res, pj=self.ckey(0)[1],
-                     name=synth.PATCHES[self.patch]["name"], rs=self.base_rev, ds=self.base_dly)
+                     name=self.bank[self.patch]["name"], rs=self.base_rev, ds=self.base_dly)
             self.lp_push_track(p, k)
         elif (m["patch"], m["tone"], m["res"]) != (self.patch, self.tone, self.res):
             self.patch, self.tone, self.res = m["patch"], m["tone"], m["res"]
@@ -331,7 +344,7 @@ class SongMixin:
         if self.is_drum(k):
             pass
         elif (m["patch"], m["tone"], m["res"], m["pj"]) != (self.patch, self.tone, self.res, pj):
-            m.update(patch=self.patch, tone=self.tone, res=self.res, pj=pj, name=synth.PATCHES[self.patch]["name"])
+            m.update(patch=self.patch, tone=self.tone, res=self.res, pj=pj, name=self.bank[self.patch]["name"])
             e = self.lp_e()
             if e and e.pats[p].tracks[k].ev:
                 self.lp_resolve(p, k, replace=True)
@@ -405,6 +418,9 @@ class SongMixin:
                 self.flash("ALL %s LAYERS USED   SONG > Y+B CLEARS ONE" % ("DRUM" if drums else "6"))
                 return
             k = free[0]
+        if not drums and not e.pats[p].tracks[k].ev and self.pm[p][k].get("machine") != self.machine:
+            self.pm[p][k]["machine"] = self.machine          # a fresh layer is whatever you are playing
+            self.pm[p][k]["patch"] = None
         if k != self.lp_sel:
             self.lp_select(k)
         self.lp_watch = (p, k)
@@ -448,13 +464,8 @@ class SongMixin:
             return
         if k != self.lp_sel:
             self.lp_select(k)
-        back = self.lp_return if self.lp_return in ("Play", "Lead", "Drone", "Drums") else "Play"
-        if self.is_drum(k):
-            back = "Drums"
-        elif back == "Drums":
-            back = "Play"
-        self.set_mode(back)
-        self.flash("TRACK %d: PLAY   SELECT+A TO RECORD" % (k + 1))
+        self.set_mode(self.machine_mode(k))
+        self.flash("TRACK %d: PLAY   R2 TO RECORD" % (k + 1))
 
     def lp_toggle_play(self, row=None):
         e = self.lp_e()
@@ -495,14 +506,44 @@ class SongMixin:
         if self.is_drum(k):
             self.set_kit(p, d)
             return
-        i = ((m["patch"] if m["patch"] is not None else self.patch) + d) % len(synth.PATCHES)
+        mc = m.get("machine", "chord")
+        n = len(synth.sample_files()) if mc == "sample" else len(synth.machine_bank(mc))
+        n = max(1, n)
+        i = ((m["patch"] if m["patch"] is not None else (self.patch if mc == self.machine else 0)) + d) % n
         if (p, k) == self.sel_key:
             self.patch = i               # pull_live() carries it to the track
             self.patch_changed()
         else:
-            m.update(patch=i, name=synth.PATCHES[i]["name"], pj=self.patch_json(i, m["tone"], m["res"]))
+            pj = self.patch_json(i, m["tone"], m["res"], mc)
+            m.update(patch=i, name=json.loads(pj)["name"], pj=pj)
             self.lp_resolve(p, k, replace=True)
         self.lp_dirty = True
+
+    def set_machine(self, p, k, d):
+        """LEFT/RIGHT on the Machine row: a track becomes a different machine and
+        starts on that machine's first sound. Its notes stay and are re-rendered."""
+        if self.is_drum(k):
+            return
+        m = self.pm[p][k]
+        opts = [x for x in synth.MACHINES if x != "drums"]
+        mc = opts[(opts.index(m.get("machine", "chord")) + d) % len(opts)]
+        m["machine"] = mc
+        pj = self.patch_json(0, m["tone"], m["res"], mc)
+        m.update(patch=0, name=json.loads(pj)["name"], pj=pj)
+        if (p, k) == self.sel_key:
+            self.set_bank(mc)
+            self.patch = 0
+            self.patch_changed()
+        e = self.lp_e()
+        if e is not None and e.pats[p].tracks[k].ev:
+            self.lp_resolve(p, k, replace=True)
+        self.lp_dirty = True
+        self.flash("TRACK %d: %s   %s" % (k + 1, synth.MACHINE_NAME[mc].upper(), json.loads(pj)["name"]))
+
+    def machine_mode(self, k):
+        """The play mode a track's machine wants."""
+        mc = self.pm[self.lp_e().cur][k].get("machine", "chord") if self.lp_e() else "chord"
+        return {"drums": "Drums", "lead": "Lead", "bass": "Lead", "sample": "Lead", "drone": "Drone"}.get(mc, "Play")
 
     def set_kit(self, p, d):
         dr = self.pm[p][DT]["drum"]
@@ -1010,10 +1051,12 @@ class SongMixin:
         return True
 
     def tfx_value(self, m, row):
+        if row == "Machine":
+            return synth.MACHINE_NAME[m.get("machine", "chord")]
         if row == "Sound":
             if "drum" in m:
                 return "Kit: " + m["drum"]["kit"]
-            return m["name"] or synth.PATCHES[self.patch]["name"]
+            return m["name"] or self.bank[self.patch]["name"]
         if row in FX_ORDER:
             return m["rack"][row]
         if row == "FX bus":
@@ -1047,6 +1090,9 @@ class SongMixin:
             self.nudge = (time.perf_counter(), d)
             if row == "Sound":
                 self.set_track_sound(p, k, d)
+                return True
+            if row == "Machine":
+                self.set_machine(p, k, d)
                 return True
             if fx:
                 v = m["rack"][row]
@@ -1310,7 +1356,7 @@ class SongMixin:
                 pygame.draw.rect(c, col if tr.ev and not m["mute"] else mm.BG, badge, border_radius=12)
             self.text(c, str(k + 1), self.f_small, mm.BG if (rec or (tr.ev and not m["mute"])) else mm.DIM,
                       badge.center, center=True)
-            nm = m["name"] or (synth.PATCHES[self.patch]["name"] if k == self.lp_sel else "empty")
+            nm = m["name"] or (self.bank[self.patch]["name"] if k == self.lp_sel else "empty")
             if self.is_drum(k):
                 nm = "Drums  " + m["drum"]["kit"]
             self.text(c, nm[:14], self.f_small, mm.INK if (k == self.lp_sel or tr.ev) else mm.DIM, (50, y + rh // 2 - 15))
@@ -1445,7 +1491,7 @@ class SongMixin:
         top = 46
         bottom = mm.L["tiles_y"] + mm.L["tile_h"]
         col = TRACK_COLS[k % len(TRACK_COLS)]
-        nm = ("Drums  " + m["drum"]["kit"]) if self.is_drum(k) else (m["name"] or synth.PATCHES[self.patch]["name"])
+        nm = ("Drums  " + m["drum"]["kit"]) if self.is_drum(k) else (m["name"] or self.bank[self.patch]["name"])
         self.text(c, "P%02d  TRACK %d" % (p + 1, k + 1), self.f_med, col, (20, top))
         self.text(c, nm, self.f_med, mm.INK, (210, top))
         if m["mute"]:
@@ -1486,8 +1532,9 @@ class SongMixin:
             self.text(c, row, self.f_small if len(row) > 9 else self.f_med,
                       mm.ACCENT if sel else (mm.INK if on else mm.DIM), (28, y + 1))
             kick = int(6 * nd * (1 - self.since(nt, 0.18)) ** 2) if sel else 0
-            if row == "Sound":
-                self.text(c, "< %s >" % val, self.f_med, mm.INK, (230 + kick, y + 1))
+            if row in ("Sound", "Machine"):
+                self.text(c, ("< %s >" % val) if not (row == "Machine" and self.is_drum(k)) else val,
+                          self.f_med, mm.INK, (230 + kick, y + 1))
                 continue
             if row == "Mute":
                 pill = pygame.Rect(230, y + 3, 54, rh - 7)
