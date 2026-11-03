@@ -64,7 +64,8 @@ DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0),
                ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
 # Settings pages (L1/R1 flips between them). Drums is Bricklab only.
 MENU_PAGES = {
-    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Metronome", "Click sound", "Click level",
+    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome", "Click sound",
+               "Click level",
                "Volume", "Latency",
                "Relearn buttons", "Learn sticks", "Quit"],
     "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
@@ -72,6 +73,7 @@ MENU_PAGES = {
     "Drums": None,
     "FX": ["Reverb", "Reverb Type", "Delay", "Delay Type", "Delay Time"],
 }
+REC_QUANT = {0: "Off", 1: "1/16", 2: "1/8", 4: "1/4"}      # record quantize, in 16ths
 METRO_MODES = {"off": "Off", "rec": "When recording", "on": "Always"}
 DELAY_TYPES = ["Ping-Pong", "Straight", "Tape", "Dub", "Slapback", "Multi-Tap"]
 
@@ -288,6 +290,7 @@ class App(modes.ModesMixin):
         self.rev_type = s.get("reverb_type", "Hall") if s.get("reverb_type") in synth.REVERBS else "Hall"
         self.dly_type = s.get("delay_type", "Ping-Pong") if s.get("delay_type") in DELAY_TYPES else "Ping-Pong"
         self.quantize = s.get("quantize", True)
+        self.rec_quant = s.get("rec_quant", 1) if s.get("rec_quant", 1) in REC_QUANT else 1
         self.countin = s.get("countin", 1) if s.get("countin", 1) in (0, 1, 2) else 1
         self.metro = s.get("metro", "rec") if s.get("metro") in METRO_MODES else "rec"
         self.metro_snd = s.get("metro_snd") if s.get("metro_snd") in synth.METRO_SOUNDS else "Click"
@@ -384,7 +387,8 @@ class App(modes.ModesMixin):
     # ---------------- engine glue
     def push_params(self):
         p = self.cur_patch()
-        self.eng.post("params", self.bpm, p["r"], p["s"] > 0.001, self.spread, self.mode(), self.quantize)
+        self.eng.post("params", self.bpm, p["r"], p["s"] > 0.001, self.spread, self.mode(), self.quantize,
+                      self.rec_quant if edition.LAB else 0)
 
     def push_metro(self, sound=True, hear=False):
         self.eng.post("metro", self.metro, self.metro_lvl, self.metro_snd if sound else None)
@@ -681,7 +685,7 @@ class App(modes.ModesMixin):
                                     latch=self.latch, spread=self.spread, volume=self.volume,
                                     reverb=self.base_rev, delay=self.base_dly, delay_time=self.dly_time,
                                     reverb_type=self.rev_type, delay_type=self.dly_type,
-                                    latency=self.block, quantize=self.quantize,
+                                    latency=self.block, quantize=self.quantize, rec_quant=self.rec_quant,
                                     bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
                                     imode=getattr(self, "imode", "Play"), countin=getattr(self, "countin", 1),
                                     metro=self.metro, metro_snd=self.metro_snd, metro_lvl=self.metro_lvl)
@@ -935,6 +939,7 @@ class App(modes.ModesMixin):
             ("Quantize", "On" if self.quantize else "Off"),
         ] + ([("Count-in", ("%d bar%s" % (self.countin, "" if self.countin == 1 else "s")) if self.countin
                             else "Off, starts on first note"),
+             ("Rec quantize", REC_QUANT[self.rec_quant]),
              ("Metronome", METRO_MODES[self.metro]),
              ("Click sound", self.metro_snd),
              ("Click level", "%d%%" % round(self.metro_lvl * 100))] if edition.LAB else []) + [
@@ -1020,6 +1025,10 @@ class App(modes.ModesMixin):
             self.push_params()
         elif name == "Count-in":
             self.countin = (self.countin + d) % 3
+        elif name == "Rec quantize":
+            ks = list(REC_QUANT)
+            self.rec_quant = ks[(ks.index(self.rec_quant) + d) % len(ks)]
+            self.push_params()
         elif name in ("Metronome", "Click sound", "Click level"):
             if name == "Metronome":
                 ks = list(METRO_MODES)

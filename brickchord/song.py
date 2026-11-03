@@ -625,8 +625,9 @@ class SongMixin:
             if here:
                 self.eng.post("lp", "ed", "del", p, k, x)
         elif name == "X":
-            self.eng.post("lp", "ed", "quant", p, k)
-            self.flash("TRACK %d QUANTIZED   SELECT+B UNDOES" % (k + 1))
+            q = self.rec_quant or 1
+            self.eng.post("lp", "ed", "quant", p, k, q)
+            self.flash("TRACK %d QUANTIZED TO %s   SELECT+B UNDOES" % (k + 1, M().REC_QUANT[q]))
         else:
             return False
         return True

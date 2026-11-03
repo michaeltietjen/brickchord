@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Record quantize (Bricklab): Settings > Global > Rec quantize: Off, 1/16, 1/8 or 1/4. Notes, bass and drum hits snap to that grid as they are recorded; X on the GRID page quantizes an existing track to the same grid.
 - Bricklab: the play-along beat is gone. START is play/stop for the song in every mode (drums are track 1), the beat row and the logo follow the transport, Settings > Global has no Beat row, and quantize locks live chords to the transport. Brickchord keeps its START beat.
 - Recording is explicit now (Bricklab). A on the Pattern page just takes you to the track to play it; nothing records unless you turn REC on with SELECT+A (and SELECT+A again turns it off). The REC chip in the header shows when a track is recording.
 - A UI watchdog writes the stuck call stack to the log if the screen loop stalls for 2 seconds, and the metronome sound is now rendered on the audio side instead of being sent over the pipe (a message that large could wedge the two processes).

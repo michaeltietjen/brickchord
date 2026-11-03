@@ -139,6 +139,7 @@ class Engine:
         self.lp_rec_p = 0
         self.lp_rec = None         # armed / recording track
         self.lp_state = None       # None | "armed" | "rec"
+        self.rec_quant = 0         # record quantize, in 16ths (0 off, 1 = 1/16, 2 = 1/8, 4 = 1/4)
         self.lp_rec_start = 0.0
         self.lp_rec_end = 0.0
         self.lp_open = []          # recorded voices whose length isn't known yet
@@ -823,6 +824,10 @@ class Engine:
         pat = self.pats[self.cur]
         L = pat.len
         pos = self._ppos(T)
+        if self.rec_quant and kind in ("n", "b", "d"):
+            q = float(self.rec_quant)
+            pos = (round(pos / q) * q) % L
+            ap = self.lp_rec_start + ((ap - self.lp_rec_start) // L) * L + pos   # the same snap, in absolute steps
         tr = pat.tracks[k]
         if tr.drum and kind != "d":
             return None                   # the drum track only takes drum hits
@@ -1072,9 +1077,10 @@ class Engine:
             for e in tr.ev:
                 if int(e[0]) == step:
                     e[5] = max(0.25, min(float(pat.len), (e[5] or 1.0) + d))
-        elif what == "quant":
+        elif what == "quant":                # snap every step to the grid: (grid in 16ths,)
+            q = float(a[0]) if a and a[0] else 1.0
             for e in tr.ev:
-                e[0] = float(int(round(e[0])) % pat.len)
+                e[0] = float((round(e[0] / q) * q) % pat.len)
         elif what == "dtog":                 # drum step on/off: (step, part, gain, pan)
             step, part = int(a[0]), a[1]
             hit = [e for e in tr.ev if e[1] == "d" and e[2] == part and int(round(e[0])) % pat.len == step]
@@ -1200,9 +1206,11 @@ class Engine:
         if kind == "d":
             v.part = ident
 
-    def c_params(self, bpm=None, rel=None, sustains=None, spread=None, mode=None, quantize=None):
+    def c_params(self, bpm=None, rel=None, sustains=None, spread=None, mode=None, quantize=None, rec_quant=None):
         if quantize is not None:
             self.quantize = quantize
+        if rec_quant is not None:
+            self.rec_quant = int(rec_quant)
         if bpm:
             self.bpm = float(bpm)
         if rel is not None:
