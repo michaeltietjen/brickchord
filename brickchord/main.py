@@ -636,6 +636,8 @@ class App(modes.ModesMixin):
             hits.append((self.LAB_T0 + 16 * self.LAB_STEP, "kick"))
         while True:
             t = time.perf_counter() - self.t0
+            if hasattr(self.eng, "pump"):
+                self.eng.pump()          # keep draining the audio process, or the pipes wedge
             if edition.LAB:
                 while hits and t >= hits[0][0]:
                     _, part = hits.pop(0)

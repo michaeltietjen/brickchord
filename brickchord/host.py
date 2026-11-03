@@ -603,7 +603,11 @@ class SplitHost:
         self.cache = ()
 
     def _send(self, *msg):
+        """Send a command. If the audio process is not reading (its outbound
+        snapshots have backed up), drain them first so neither side can wedge."""
         try:
+            if hasattr(self.conn, "poll") and self.conn.poll(0):
+                self.pump()
             self.conn.send(msg)
         except (BrokenPipeError, OSError) as e:
             _log("audio process gone:", e)
