@@ -379,6 +379,67 @@ class SongMixin:
         self.flash("REC P%02d TRACK %d: %s   SELECT+A STOPS" % (e.cur + 1, k + 1,
                                                                  "PLAY TO START" if not self.countin else "COUNT-IN"))
 
+    def looper_rec(self):
+        """REC (R3, or SELECT+A outside Song mode), HiChord style: records a layer
+        on the next empty track with the sound you are playing, in whatever mode
+        you are in. Tap it while a layer records to close that layer and arm the
+        next one. The layer closes itself at the end of the pattern and loops."""
+        e = self.lp_e()
+        if e is None:
+            self.flash("SONG MODE NEEDS THE AUDIO ENGINE")
+            return
+        p = e.cur
+        drums = self.imode == "Drums"
+        if e.lp_state:                               # a layer is recording: close it
+            self.eng.post("lp", "arm", None)
+            cur = e.lp_rec
+        else:
+            cur = None
+        # the next empty track for this kind of layer (track 1 only takes drums)
+        order = [k for k in range(NT) if self.is_drum(k) == drums]
+        if cur is None and self.lp_sel in order and not e.pats[p].tracks[self.lp_sel].ev:
+            k = self.lp_sel
+        else:
+            free = [k for k in order if not e.pats[p].tracks[k].ev and k != cur]
+            if not free:
+                self.flash("ALL %s LAYERS USED   SONG > Y+B CLEARS ONE" % ("DRUM" if drums else "6"))
+                return
+            k = free[0]
+        if k != self.lp_sel:
+            self.lp_select(k)
+        self.lp_watch = (p, k)
+        self.lp_was_empty = True
+        self.eng.post("lp", "arm", k, 16 * self.countin if not e.lp_on else 0)
+        self.flash("LAYER %d: %s   REC AGAIN FOR THE NEXT LAYER" % (
+            k + 1, "PLAY TO START" if (e.lp_on or not self.countin) else "COUNT-IN"))
+
+    def draw_layers(self, c, x, y):
+        """Six lamps in the header: one per track. Lit = has notes, red = recording,
+        dim = empty, dark bar = muted."""
+        mm = M()
+        e = self.lp_e()
+        if e is None:
+            return x
+        p = e.cur
+        for k in range(NT):
+            tr = e.pats[p].tracks[k]
+            m = self.pm[p][k]
+            if e.lp_state and e.lp_rec == k:
+                col = REC if (e.lp_state == "rec" or int(time.perf_counter() * 3) % 2 == 0) else mm.PANEL
+            elif tr.ev:
+                col = mm.DIM if m["mute"] else TRACK_COLS[k % len(TRACK_COLS)]
+            else:
+                col = mm.PANEL
+            r = pygame.Rect(x + k * 13, y + 5, 10, 10)
+            pygame.draw.rect(c, col, r, border_radius=3)
+            if col == mm.PANEL:
+                pygame.draw.rect(c, mm.DIM, r, 1, border_radius=3)
+            if k == self.lp_sel:
+                pygame.draw.rect(c, mm.INK, r, 1, border_radius=3)
+            if m["mute"] and tr.ev:
+                pygame.draw.line(c, mm.BG, (r.left + 2, r.centery), (r.right - 2, r.centery), 2)
+        return x + NT * 13 + 4
+
     def lp_play_track(self, k):
         """A on the Pattern page: go play this track (audition, no recording).
         Recording is only ever SELECT+A, so nothing records unless REC is on."""
@@ -496,7 +557,10 @@ class SongMixin:
             self.flash("SONG MODE NEEDS THE AUDIO ENGINE")
             return True
         if name == "A":
-            self.lp_arm(self.lp_sel, stay=True)
+            if self.imode == "Song":
+                self.lp_arm(self.lp_sel, stay=True)         # Song page: REC on the selected track
+            else:
+                self.looper_rec()                           # anywhere else: the next layer
         elif name == "B":
             if e.lp_undo:
                 self.eng.post("lp", "undo")
@@ -1116,6 +1180,7 @@ class SongMixin:
         e = self.lp_e()
         if e is None:
             return x
+        x = self.draw_layers(c, x, y)
         if e.lp_state:
             t = ("COUNT" if e.lp_state == "count" else "REC") + " P%02d T%d" % (e.cur + 1, (e.lp_rec or 0) + 1)
             col = REC if (e.lp_state == "rec" or int(time.perf_counter() * 3) % 2 == 0) else mm.PANEL

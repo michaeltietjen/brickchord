@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Looper (Bricklab), HiChord style: click the right stick (R3) in any play mode to record a layer on the next empty track with the sound you are playing. The layer closes itself at the end of the pattern and loops; click again to close it early and arm the next one. Track 1 takes drum layers from Drums mode, the other five take everything else. Six lamps in the header show the layers: lit has notes, red is recording, a bar means muted. SELECT+A does the same outside Song mode; on the Song page it still records the selected track.
 - Two FX buses (Bricklab). Settings > FX now has bus A and bus B, each with its own reverb type, delay type and delay time. Every track picks its bus on the track page (SENDS > FX bus), so one group of tracks can sit in a Hall with a ping-pong delay while another gets a Plate and a tape delay. A bus that nothing feeds costs nothing. Reverb types now go to the audio process by name (it renders the impulse itself), which also removes the last big message on the pipe.
 - Record quantize (Bricklab): Settings > Global > Rec quantize: Off, 1/16, 1/8 or 1/4. Notes, bass and drum hits snap to that grid as they are recorded; X on the GRID page quantizes an existing track to the same grid.
 - Bricklab: the play-along beat is gone. START is play/stop for the song in every mode (drums are track 1), the beat row and the logo follow the transport, Settings > Global has no Beat row, and quantize locks live chords to the transport. Brickchord keeps its START beat.

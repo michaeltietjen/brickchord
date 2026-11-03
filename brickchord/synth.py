@@ -137,6 +137,8 @@ EDIT_PARAMS = [
 def edited_patch(base, edits):
     """Apply Sound Editor edits to a base patch (returns a new dict)."""
     p = dict(base)
+    if base.get("sample"):
+        return p
     oscs = [list(o) for o in base["oscs"]]
     if edits:
         for k in ("cutoff", "res", "fenv", "fa", "fd", "fs", "a", "d", "s", "r", "pwm"):
@@ -293,11 +295,64 @@ def _convolve(x, ir, out_len):
     return y
 
 
+SAMPLE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+SAMPLE_PATCH = {"sample": None, "root": 60, "tune": 0, "start": 0.0, "end": 1.0, "rev": False, "loop": False,
+                "a": 0.0, "d": 0.0, "s": 0.0, "r": 0.25, "fa": 0.0, "fd": 0.0, "fs": 1.0, "fenv": 0.0,
+                "cutoff": 9000.0, "res": 0.5, "name": "", "oscs": []}
+
+
+def sample_files(folder=None):
+    """WAV files a Sample track can play: samples/*.wav (kits live in sub-folders)."""
+    folder = folder or SAMPLE_DIR
+    try:
+        return sorted(f for f in os.listdir(folder) if f.lower().endswith(".wav")
+                      and os.path.isfile(os.path.join(folder, f)))
+    except OSError:
+        return []
+
+
+def sample_patch(file, **kw):
+    p = dict(SAMPLE_PATCH)
+    p["sample"] = file
+    p["name"] = os.path.splitext(file)[0][:16]
+    p.update(kw)
+    return p
+
+
+def render_sample(midi, p, arrays=False):
+    """A Sample track's note: the WAV pitched from its root to midi (plus tune),
+    trimmed to start..end, optionally reversed; loop=True sustains it."""
+    x = read_wav(os.path.join(SAMPLE_DIR, p["sample"]), SR, max_sec=12.0) if p.get("sample") else None
+    if x is None or len(x) < 16:
+        x = np.zeros(int(0.05 * SR), np.float32)
+    n = len(x)
+    a, b = int(max(0.0, min(1.0, p.get("start", 0.0))) * n), int(max(0.0, min(1.0, p.get("end", 1.0))) * n)
+    if b - a < 16:
+        a, b = 0, n
+    x = x[a:b]
+    if p.get("rev"):
+        x = x[::-1]
+    r = 2.0 ** ((midi - p.get("root", 60) + p.get("tune", 0)) / 12.0)
+    m = max(16, int(len(x) / r))
+    y = np.interp(np.arange(m) * r, np.arange(len(x)), x).astype(np.float32)
+    fade = min(len(y) // 4, int(0.004 * SR))
+    if fade:
+        y[:fade] *= np.linspace(0, 1, fade)
+        y[-fade:] *= np.linspace(1, 0, fade)
+    st = np.repeat(y[:, None], 2, axis=1) * (GAIN * 2.5)
+    loop = st.copy() if p.get("loop") else None
+    if arrays:
+        return np.ascontiguousarray(st, np.float32), (np.ascontiguousarray(loop, np.float32) if loop is not None else None)
+    return _to_bytes(st), (_to_bytes(loop) if loop is not None else None), len(y) / SR
+
+
 def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, xfade=0.25, wet=False,
                 arrays=False):
     """Return (attack int16 stereo bytes, loop int16 stereo bytes, total_attack_sec).
     wet=True returns the reverb-only version of the same note (with a ringing tail
     for non-sustaining sounds)."""
+    if p.get("sample"):
+        return render_sample(midi, p, arrays)
     f0 = 440.0 * 2 ** ((midi - 69) / 12.0)
     if attack_len is None:
         attack_len = max(0.6, p["a"] + p["d"] * 0.8, p["fa"] + p["fd"] * 0.8) + 0.2

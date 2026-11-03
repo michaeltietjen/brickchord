@@ -1260,6 +1260,10 @@ class App(modes.ModesMixin):
             return
         if self.imode != "Play" and self.mode_input(name, down):
             return
+        if name == "R3" and edition.LAB:
+            if down:
+                self.looper_rec()                           # REC: the next layer, HiChord style
+            return
         if name == "R3":
             if down:
                 if self.fx_hold:
@@ -1514,7 +1518,7 @@ class App(modes.ModesMixin):
             status.append("%d notes finish when quiet" % left)
         status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
-        hint = self.mode_hint() or ("SELECT menu (hold: song)   START play/stop   L3 modes" if edition.LAB
+        hint = self.mode_hint() or ("R3 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
