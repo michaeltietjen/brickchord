@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta property="og:title" content="Bricklab">
+<meta property="og:description" content="A pocket groovebox for the TrimUI Brick Pro running KNULLI: looper, patterns, Moog-style leads, samples and drums.">
+<meta property="og:image" content="https://michaeltietjen.github.io/brickchord/bricklab-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://michaeltietjen.github.io/brickchord/bricklab-card.png">
+<link rel="icon" href="../bricklab-image.png" type="image/png">
+<title>Bricklab</title>
+<meta name="description" content="Bricklab: a pocket groovebox for the TrimUI Brick Pro running KNULLI. Looper, 16 patterns of 6 tracks, Chord, Lead, Bass, Drone and Sample machines, a drum machine, per-track effects.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a hardware front panel. Light grey chassis, ink labels, one orange key.
+   Sections are "modules" separated by panel seams; the playable keypad is the hero. */
+:root {
+  --chassis: #e4e2dc;     /* panel grey, the logo's key colour pushed warm */
+  --plate: #efede8;       /* raised plates and keys */
+  --ink: #18161c;         /* labels, wordmark */
+  --dim: #6d6874;         /* secondary labels */
+  --seam: #cfccc4;        /* panel seams */
+  --orange: #ff5a1f;      /* the one lit key */
+  --teal: #3f9e95;        /* secondary accent from the app screen */
+  --screen: #121016;      /* the device screen */
+  --screen-ink: #ece4d6;
+  --key-shadow: #bdb9b0;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --chassis: #1b1a1f; --plate: #26242b; --ink: #ece9e2; --dim: #9a94a2; --seam: #322f37;
+    --orange: #ff6a33; --teal: #5cc0b5; --screen: #0c0b0f; --screen-ink: #ece4d6; --key-shadow: #0d0c10;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --chassis: #1b1a1f; --plate: #26242b; --ink: #ece9e2; --dim: #9a94a2; --seam: #322f37;
+  --orange: #ff6a33; --teal: #5cc0b5; --screen: #0c0b0f; --screen-ink: #ece4d6; --key-shadow: #0d0c10;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--chassis); color: var(--ink);
+  font-family: var(--body); font-size: 16px; line-height: 1.55;
+  font-variation-settings: "wdth" 100;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+
+.wrap {
+  max-width: 1120px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.label {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--dim);
+}
+
+/* ---------- top strip */
+.strip { border-bottom: 1px solid var(--seam); }
+.strip .wrap { display: flex; align-items: center; gap: 24px; padding-block: 14px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand b {
+  font-family: var(--display); font-weight: 800; font-size: 21px; letter-spacing: -.01em;
+  font-variation-settings: "wdth" 112;
+}
+.mark { display: grid; grid-template-columns: repeat(4, 9px); gap: 2px; }
+.mark i { width: 9px; height: 9px; border-radius: 2px; background: var(--ink); }
+.mark i:nth-child(7) { background: var(--orange); }
+.strip nav { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; }
+.strip nav a { text-decoration: none; }
+.strip nav a:hover { color: var(--ink); }
+.tag {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  border: 1px solid var(--ink); border-radius: 3px; padding: 1px 6px; text-transform: uppercase;
+}
+
+/* ---------- hero */
+.hero .wrap {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 470px);
+  gap: 56px; padding-block: 64px 72px; align-items: center;
+}
+.hero h1 {
+  font-family: var(--display); font-weight: 850; line-height: .92; margin: 14px 0 22px;
+  font-size: clamp(44px, 7.2vw, 88px); letter-spacing: -.025em;
+  font-variation-settings: "wdth" 118; text-wrap: balance;
+}
+.hero h1 em { font-style: normal; color: var(--orange); }
+.hero p.lede { font-size: 19px; max-width: 34em; margin: 0 0 30px; color: var(--ink); }
+.ctas { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
+  font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 13px 18px; border-radius: 6px; border: 1.5px solid var(--ink);
+  transition: transform .08s ease, box-shadow .08s ease;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+.btn.primary { background: var(--orange); color: #fff; border-color: var(--orange); box-shadow: 0 3px 0 #b8380b; }
+.btn.primary:active { box-shadow: 0 0 0 #b8380b; }
+.fine { margin-top: 18px; font-size: 13.5px; color: var(--dim); }
+
+/* ---------- playable unit */
+.unit {
+  background: var(--plate); border-radius: 22px; padding: 22px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 0 var(--seam), 0 18px 40px -24px rgba(0,0,0,.35);
+  border: 1px solid var(--seam);
+}
+.screen {
+  background: var(--screen); color: var(--screen-ink); border-radius: 12px;
+  height: 168px; position: relative; overflow: hidden; padding: 14px 16px;
+  display: grid; grid-template-rows: auto 1fr auto;
+}
+.screen .top { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: #8a8392; letter-spacing: .06em; }
+.screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.chordname {
+  position: relative; align-self: center; text-align: center;
+  font-family: var(--display); font-weight: 800; font-size: 60px; line-height: 1;
+  font-variation-settings: "wdth" 105; letter-spacing: -.01em;
+}
+.chordname span { display: inline-block; }
+.chordname.drop span { animation: drop .32s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes drop { from { transform: translateY(-46px); opacity: 0; } to { transform: none; opacity: 1; } }
+.roman { position: relative; text-align: center; font-family: var(--display); font-weight: 700; font-size: 20px; color: var(--orange); min-height: 26px; }
+
+.keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.key {
+  aspect-ratio: 1; max-width: 100%; border: 0; border-radius: 12px; cursor: pointer;
+  background: var(--chassis); color: var(--ink);
+  box-shadow: 0 5px 0 var(--key-shadow);
+  display: grid; place-items: center; align-content: center; gap: 2px;
+  font-family: var(--display); transition: transform .06s ease, box-shadow .06s ease, background .15s ease;
+  touch-action: manipulation; -webkit-user-select: none; user-select: none;
+}
+.key .r { font-weight: 800; font-size: 22px; line-height: 1; font-variation-settings: "wdth" 110; }
+.key .n { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.key.on { transform: translateY(5px); box-shadow: 0 0 0 var(--key-shadow); background: var(--orange); color: #fff; }
+.key.on .n { color: rgba(255,255,255,.85); }
+.key.mod { background: var(--orange); color: #fff; box-shadow: 0 5px 0 #b8380b; }
+.key.mod .n { color: rgba(255,255,255,.85); }
+.key.mod.on { background: var(--ink); color: var(--plate); box-shadow: 0 0 0 #b8380b; }
+.mods { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.mods button, .mods select {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  background: transparent; color: var(--ink); border: 1.5px solid var(--seam); border-radius: 999px;
+  padding: 7px 12px; cursor: pointer;
+}
+.mods button[aria-pressed="true"] { border-color: var(--orange); color: var(--orange); }
+.mods select { appearance: none; padding-right: 12px; }
+.hint { margin-top: 12px; font-size: 12.5px; color: var(--dim); font-family: var(--mono); }
+
+/* ---------- modules */
+.module { border-top: 1px solid var(--seam); }
+.module .wrap { padding-block: 72px; }
+.module h2 {
+  font-family: var(--display); font-weight: 800; font-size: clamp(30px, 4vw, 46px); line-height: 1.02;
+  letter-spacing: -.02em; margin: 10px 0 18px; font-variation-settings: "wdth" 115; text-wrap: balance;
+}
+.module p.intro { max-width: 38em; font-size: 17.5px; margin: 0 0 36px; }
+
+.see { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.bezel {
+  background: #2a282e; border-radius: 18px; padding: 16px; max-width: 100%;
+  box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 22px 40px -26px rgba(0,0,0,.5);
+}
+.bezel img { display: block; width: 100%; height: auto; border-radius: 6px; image-rendering: auto; }
+.bezel figcaption { font-family: var(--mono); font-size: 11px; color: #8f8996; margin-top: 10px; letter-spacing: .05em; }
+.anim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.anim-list li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; }
+.anim-list li::before { content: ""; width: 12px; height: 12px; margin-top: 6px; border-radius: 3px; background: var(--ink); }
+.anim-list li:nth-child(2)::before { background: var(--orange); }
+.anim-list b { font-weight: 700; }
+
+/* control map */
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--seam); border-radius: 14px; overflow: hidden; background: var(--plate); }
+.controls > div { padding: 22px 24px; border-bottom: 1px solid var(--seam); }
+.controls > div:nth-child(odd) { border-right: 1px solid var(--seam); }
+.controls > div:nth-last-child(-n+2) { border-bottom: 0; }
+.controls .k { font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .04em; }
+.controls .v { margin-top: 4px; }
+.controls .v small { display: block; color: var(--dim); font-size: 14px; margin-top: 4px; }
+
+/* inventory */
+.inv { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.bank { background: var(--plate); border: 1px solid var(--seam); border-radius: 14px; padding: 22px; }
+.bank header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.bank h3 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 20px; font-variation-settings: "wdth" 112; }
+.bank .count { font-family: var(--mono); font-weight: 600; font-size: 28px; color: var(--orange); font-variant-numeric: tabular-nums; line-height: 1; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips span { font-family: var(--mono); font-size: 12px; padding: 4px 9px; border-radius: 4px; background: var(--chassis); border: 1px solid var(--seam); }
+.bank p { margin: 12px 0 0; font-size: 14.5px; color: var(--dim); }
+
+/* install */
+.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 0; max-width: 760px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; padding: 20px 0; border-top: 1px solid var(--seam); }
+.steps li:last-child { border-bottom: 1px solid var(--seam); }
+.steps li::before { content: counter(s, decimal-leading-zero); font-family: var(--mono); font-weight: 600; color: var(--orange); font-size: 15px; padding-top: 2px; }
+code { font-family: var(--mono); font-size: .88em; background: var(--plate); border: 1px solid var(--seam); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.note { margin-top: 26px; max-width: 760px; font-size: 15px; color: var(--dim); }
+
+footer { border-top: 1px solid var(--seam); }
+footer .wrap { padding-block: 36px 48px; display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; color: var(--dim); font-size: 13.5px; }
+footer p { margin: 0; max-width: 56em; }
+
+@media (max-width: 860px) {
+  .hero .wrap, .see { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .hero .wrap { padding-block: 40px 56px; }
+  .controls { grid-template-columns: minmax(0, 1fr); }
+  .controls > div:nth-child(odd) { border-right: 0; }
+  .controls > div:nth-last-child(2) { border-bottom: 1px solid var(--seam); }
+}
+@media (max-width: 480px) {
+  .strip nav { margin-left: 0; width: 100%; }
+  .unit { padding: 14px; border-radius: 18px; }
+  .chordname { font-size: 48px; }
+  .key .r { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chordname.drop span { animation: none; }
+  .key, .btn { transition: none; }
+}
+</style>
+<style>
+:root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
+  --chassis: #16244c; --plate: #1e2d5a; --ink: #ece4d6; --dim: #9aa6c4; --seam: #2a3a6c;
+  --orange: #29aeb8; --teal: #ff6a33; --screen: #0c0b0f; --screen-ink: #ece4d6; --key-shadow: #0d1430;
+  color-scheme: dark;
+}
+body { background: var(--chassis); color: var(--ink); }
+.xlink { display:inline-block; margin-top:1rem; color: var(--dim); }
+.xlink a { color: var(--ink); }
+.feat { display:grid; gap:1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top:1.5rem; }
+.feat div { background: var(--plate); border: 1px solid var(--seam); border-radius: 12px; padding: 1rem 1.1rem; }
+.feat h3 { margin: 0 0 .4rem; }
+.feat p { margin: 0; color: var(--dim); }
+.hero-img { max-width: 420px; width: 100%; border-radius: 14px; display:block; margin: 0 auto 1.5rem; }
+</style>
+</head>
+<body>
+  <section class="module" id="top">
+    <div class="wrap">
+      <img class="hero-img" src="../bricklab-lockup.png" alt="Bricklab">
+      <div class="label">For the TrimUI Brick Pro on KNULLI</div>
+      <h1>A pocket groovebox</h1>
+      <p class="intro">Jam a loop in seconds, then open it up: 16 patterns of 6 tracks, a machine per track, Moog-style leads and basses, your own samples, a drum machine, and effects on every track. Same engine and buttons as <a href="../">Brickchord</a>, built out into a pocket Digitakt.</p>
+      <p><a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/latest">Download Bricklab</a></p>
+      <p class="xlink">Just want to play chords? <a href="../">Brickchord is the simple one.</a></p>
+    </div>
+  </section>
+
+  <section class="module" id="looper">
+    <div class="wrap">
+      <div class="label">Start here</div>
+      <h2>The looper</h2>
+      <p class="intro">Press R2, play, and a layer records with the sound you are playing. It closes at the bar and loops. Press R2 again for the next layer. Six lamps in the header show your layers; one button undoes the last one. No pattern pages, no arming, no menus. When you want to edit, it is all still there underneath.</p>
+    </div>
+  </section>
+
+  <section class="module" id="machines">
+    <div class="wrap">
+      <div class="label">Every track is a machine</div>
+      <h2>Chord, Lead, Bass, Drone, Sample, Drums</h2>
+      <div class="feat">
+        <div><h3>Chord</h3><p>The Brickchord engine: 23 sounds, strum, harp, arps, voicings, all on seven buttons.</p></div>
+        <div><h3>Lead and Bass</h3><p>Their own banks through a Moog-style 4-pole ladder filter: Fat Saw, Sync Lead, Acid, Brass Lead, Moog Bass, Reese, Pluck Bass and more. Glide included.</p></div>
+        <div><h3>Drone</h3><p>Slow, evolving sounds that slide between degrees. The left stick pulses, swells, thins or blooms the drone while it plays.</p></div>
+        <div><h3>Sample</h3><p>Drop WAVs on the card and play them pitched across the buttons, with start, end, reverse, loop, tune and a granular mode that turns a second of audio into a pad.</p></div>
+        <div><h3>Drums</h3><p>A 16-step grid on track 1 with five kits (Classic, 808, 909, Lo-fi, Acoustic) and your own WAV kits, swing, accents, ghosts, humanize, per-lane level and tune.</p></div>
+        <div><h3>Effects on every track</h3><p>Each track has its own rack of ten effects, a live filter, level, pan and sends, and picks one of two FX buses, each with its own reverb and delay type.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="sequencing">
+    <div class="wrap">
+      <div class="label">Then build the song</div>
+      <h2>Patterns, grid, song</h2>
+      <p class="intro">Step grid for every track, 16 patterns you chain on the song page, count-in, record quantize that snaps starts and lengths, a metronome, and a track page where one tap copies a track's whole setup to every pattern.</p>
+    </div>
+  </section>
+
+  <section class="module" id="install">
+    <div class="wrap">
+      <div class="label">Install</div>
+      <h2>Two minutes on KNULLI</h2>
+      <ol>
+        <li>Download the Bricklab zip from the <a href="https://github.com/michaeltietjen/brickchord/releases/latest">latest release</a>.</li>
+        <li>Unzip it. Copy the <code>bricklab</code> folder and <code>Bricklab.sh</code> into <code>roms/ports</code> on the Brick's SD card (over the network share or with a card reader).</li>
+        <li>Update Gamelists on the Brick. Bricklab appears under Ports.</li>
+        <li>On first launch, press each button once and push each stick once so it learns your controls.</li>
+      </ol>
+      <p class="note">Tested on <code>knulli-a133-trimui-brick-pro-beta-20260921</code>. Bricklab and Brickchord install side by side and share a sound cache. Samples go in <code>roms/ports/bricklab/samples/</code>.</p>
+      <p class="xlink">Source and issues: <a href="https://github.com/michaeltietjen/brickchord">github.com/michaeltietjen/brickchord</a> &middot; <a href="../">Brickchord</a></p>
+    </div>
+  </section>
+</body>
+</html>

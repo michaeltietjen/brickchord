@@ -264,6 +264,69 @@ body { background: var(--chassis); color: var(--ink); }
     </div>
   </section>
 
+  <section class="module" id="try">
+    <div class="wrap">
+      <div class="label">Try the grid</div>
+      <h2>A bar of Bricklab, in your browser</h2>
+      <p class="intro">Tap steps to build a beat. Four lanes, sixteen steps, the way track 1 works on the Brick.</p>
+      <div class="seq" id="seq"></div>
+      <p><button class="btn" id="seqplay" type="button">Play</button> <span class="dim" id="seqbpm">112 BPM</span></p>
+    </div>
+  </section>
+<style>
+.seq { display:grid; grid-template-columns: 70px repeat(16, 1fr); gap:4px; max-width: 760px; margin: 1.2rem auto; }
+.seq .lane { color: var(--dim); font-size: .85rem; align-self:center; }
+.seq button { aspect-ratio:1; border-radius:5px; border:1px solid var(--seam); background: var(--plate); cursor:pointer; padding:0; }
+.seq button.on { background: var(--ink); }
+.seq button.on.hit { background: var(--orange); }
+.seq button.head { outline: 2px solid var(--orange); outline-offset: -2px; }
+.seq button:nth-child(16n+2), .seq button:nth-child(16n+6), .seq button:nth-child(16n+10), .seq button:nth-child(16n+14) { border-color: var(--dim); }
+.dim { color: var(--dim); margin-left: .6rem; }
+</style>
+<script>
+(function(){
+  const lanes = ["Kick","Snare","Hat","Clap"];
+  const pat = [[1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0]];
+  const seq = document.getElementById("seq"), cells = [];
+  lanes.forEach((n,l) => {
+    const lab = document.createElement("div"); lab.className = "lane"; lab.textContent = n; seq.appendChild(lab);
+    cells[l] = [];
+    for (let s = 0; s < 16; s++) {
+      const b = document.createElement("button"); b.type = "button"; b.setAttribute("aria-label", n + " step " + (s+1));
+      if (pat[l][s]) b.classList.add("on");
+      b.addEventListener("click", () => { pat[l][s] ^= 1; b.classList.toggle("on", !!pat[l][s]); });
+      seq.appendChild(b); cells[l][s] = b;
+    }
+  });
+  let ctx = null, timer = null, step = 0, playing = false;
+  const bpm = 112, stepLen = 60 / bpm / 4;
+  function noise(len) { const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate*len), ctx.sampleRate); const d = buf.getChannelData(0); for (let i=0;i<d.length;i++) d[i] = Math.random()*2-1; const src = ctx.createBufferSource(); src.buffer = buf; return src; }
+  function env(g, t, a, peak, dec) { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dec); }
+  function kick(t) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.09); env(g, t, 0.002, 0.9, 0.45); o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.5); }
+  function snare(t) { const n = noise(0.3), f = ctx.createBiquadFilter(), g = ctx.createGain(); f.type = "bandpass"; f.frequency.value = 3200; f.Q.value = 0.8; env(g, t, 0.001, 0.5, 0.22); n.connect(f).connect(g).connect(ctx.destination); n.start(t); const o = ctx.createOscillator(), g2 = ctx.createGain(); o.frequency.setValueAtTime(190, t); env(g2, t, 0.001, 0.4, 0.12); o.connect(g2).connect(ctx.destination); o.start(t); o.stop(t + 0.15); }
+  function hat(t) { const n = noise(0.08), f = ctx.createBiquadFilter(), g = ctx.createGain(); f.type = "highpass"; f.frequency.value = 7000; env(g, t, 0.001, 0.28, 0.06); n.connect(f).connect(g).connect(ctx.destination); n.start(t); }
+  function clap(t) { for (let i = 0; i < 3; i++) { const n = noise(0.2), f = ctx.createBiquadFilter(), g = ctx.createGain(); f.type = "bandpass"; f.frequency.value = 1500; f.Q.value = 1; env(g, t + i*0.011, 0.001, 0.35, 0.16 + i*0.02); n.connect(f).connect(g).connect(ctx.destination); n.start(t + i*0.011); } }
+  const hits = [kick, snare, hat, clap];
+  let nextT = 0;
+  function tick() {
+    while (nextT < ctx.currentTime + 0.1) {
+      const s = step;
+      hits.forEach((fn, l) => { if (pat[l][s]) fn(nextT); });
+      const delay = Math.max(0, (nextT - ctx.currentTime) * 1000);
+      setTimeout(() => { cells.forEach(row => row.forEach((b, i) => { b.classList.toggle("head", i === s); b.classList.toggle("hit", i === s && b.classList.contains("on")); })); }, delay);
+      nextT += stepLen; step = (step + 1) % 16;
+    }
+  }
+  document.getElementById("seqplay").addEventListener("click", () => {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") ctx.resume();
+    playing = !playing;
+    document.getElementById("seqplay").textContent = playing ? "Stop" : "Play";
+    if (playing) { step = 0; nextT = ctx.currentTime + 0.05; timer = setInterval(tick, 25); }
+    else { clearInterval(timer); cells.forEach(row => row.forEach(b => b.classList.remove("head", "hit"))); }
+  });
+})();
+</script>
   <section class="module" id="machines">
     <div class="wrap">
       <div class="label">Every track is a machine</div>
