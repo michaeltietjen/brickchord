@@ -71,6 +71,7 @@ MENU_PAGES = {
     "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
                "Lead glide", "Drone slide", "Bass", "Bass Level"],
     "Drums": None,
+    "Sample": None,
     "FX": ["Reverb", "Delay", "Reverb Type", "Delay Type", "Delay Time",
            "A Reverb Type", "A Delay Type", "A Delay Time", "B Reverb Type", "B Delay Type", "B Delay Time"],
 }
@@ -457,9 +458,18 @@ class App(modes.ModesMixin):
         self.patch = min(self.patch, len(self.bank) - 1)
         self.patch_changed()
 
+    def cur_patch_smp(self, p):
+        """A Sample track's live sound carries the track's sample settings."""
+        if edition.LAB and self.machine == "sample" and p.get("sample") is not None and hasattr(self, "pm"):
+            q = dict(p)
+            q.update({k: v for k, v in (self.pm[self.sel_key[0]][self.sel_key[1]].get("smp") or {}).items()
+                      if k in synth.SAMPLE_PATCH})
+            return q
+        return p
+
     def cur_patch(self):
         """Current sound with Sound Editor edits and the quick Filter/Resonance macros applied."""
-        p = synth.edited_patch(self.bank[self.patch], self.edits.get(self.edit_key()))
+        p = self.cur_patch_smp(synth.edited_patch(self.bank[self.patch], self.edits.get(self.edit_key())))
         p["cutoff"] = p["cutoff"] * (2 ** self.tone)
         p["res"] = max(0.5, p["res"] + self.res)
         return p
@@ -993,7 +1003,10 @@ class App(modes.ModesMixin):
 
     # ---------------- menu
     def menu_pages(self):
-        return [n for n in MENU_PAGES if n != "Drums" or edition.LAB]
+        out = [n for n in MENU_PAGES if n not in ("Drums", "Sample") or edition.LAB]
+        if edition.LAB and self.machine != "sample" and "Sample" in out:
+            out.remove("Sample")
+        return out
 
     def menu_context_page(self):
         """The page Settings opens on: the one for what you are doing."""
@@ -1004,6 +1017,8 @@ class App(modes.ModesMixin):
             return "FX"
         if im == "Song":
             return "Global"
+        if edition.LAB and self.machine == "sample":
+            return "Sample"
         return "Chords"
 
     def open_menu(self):
@@ -1023,6 +1038,8 @@ class App(modes.ModesMixin):
     def menu_items(self):
         if self.menu_pg == "Drums" and edition.LAB:
             return self.drum_menu_items()
+        if self.menu_pg == "Sample" and edition.LAB:
+            return self.smp_menu_items()
         rows = dict(self.all_menu_items())
         return [(n, rows[n]) for n in MENU_PAGES.get(self.menu_pg) or MENU_PAGES["Chords"]
                 if n in rows and not (n == "Beat" and edition.LAB)]
@@ -1077,6 +1094,9 @@ class App(modes.ModesMixin):
             name = name[2:]                 # bus A rows share the Brickchord handlers
         if self.menu_pg == "Drums":
             self.drum_menu_change(name, d)
+            return
+        if self.menu_pg == "Sample":
+            self.smp_menu_change(name, d)
             return
         recache = False
         if name == "Key":
@@ -1193,6 +1213,9 @@ class App(modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if self.menu_pg == "Drums":
             self.drum_menu_activate(name)
+            return
+        if self.menu_pg == "Sample":
+            self.smp_menu_change(name, 1)
             return
         if name == "Quit":
             self.running = False

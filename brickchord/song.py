@@ -56,7 +56,7 @@ def new_drum():
 
 
 def new_track(k=1):
-    t = {"machine": "drums" if k == DT else "chord",
+    t = {"machine": "drums" if k == DT else "chord", "smp": {},
          "name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
          "rs": 0.25, "ds": 0.0, "bus": 0, "mute": False,
          "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER},
@@ -206,11 +206,14 @@ class SongMixin:
         except Exception as ex:
             print("song save failed", ex, flush=True)
 
-    def patch_json(self, i, tone=None, res=None, machine=None):
+    def patch_json(self, i, tone=None, res=None, machine=None, smp=None):
         mc = machine or self.machine
         if mc == "sample":
             files = synth.sample_files()
             base = synth.sample_patch(files[i % len(files)]) if files else dict(synth.SAMPLE_PATCH, name="no samples")
+            if smp is None and self.machine == "sample":
+                smp = self.pm[self.sel_key[0]][self.sel_key[1]].get("smp")
+            base.update({k: v for k, v in (smp or {}).items() if k in synth.SAMPLE_PATCH})
             return json.dumps(base, sort_keys=True)
         bank = synth.machine_bank(mc)
         p = synth.edited_patch(bank[i % len(bank)], self.edits.get(self.edit_key(i, mc)))
@@ -514,7 +517,7 @@ class SongMixin:
             self.patch = i               # pull_live() carries it to the track
             self.patch_changed()
         else:
-            pj = self.patch_json(i, m["tone"], m["res"], mc)
+            pj = self.patch_json(i, m["tone"], m["res"], mc, m.get("smp"))
             m.update(patch=i, name=json.loads(pj)["name"], pj=pj)
             self.lp_resolve(p, k, replace=True)
         self.lp_dirty = True
@@ -805,6 +808,76 @@ class SongMixin:
         else:
             return False
         return True
+
+    # ------------------------------------------------------------ Settings > Sample page
+    SMP_ROWS = [("Start", "start", 0.05, 0.0, 0.95), ("End", "end", 0.05, 0.05, 1.0), ("Reverse", "rev", None, 0, 1),
+                ("Loop", "loop", None, 0, 1), ("Tune", "tune", 1, -24, 24), ("Grain", "grain", None, 0, 1),
+                ("Grain size", "gsize", 10, 20, 400), ("Density", "gdens", 10, 10, 200),
+                ("Position", "gpos", 0.05, 0.0, 1.0), ("Spray", "gspray", 0.05, 0.0, 1.0),
+                ("Pitch spray", "gpitch", 0.5, 0.0, 12.0)]
+
+    def smp_track(self):
+        e = self.lp_e()
+        if e is None:
+            return None
+        p, k = self.sel_key
+        m = self.pm[p][k]
+        return (p, k, m) if m.get("machine") == "sample" else None
+
+    def smp_menu_items(self):
+        t = self.smp_track()
+        if t is None:
+            return [("No sample track", "pick one first")]
+        m = t[2]
+        d = dict(synth.SAMPLE_PATCH)
+        d.update(m.get("smp") or {})
+        rows = [("Sample", m["name"] or "")]
+        for label, key, step, lo, hi in self.SMP_ROWS:
+            v = d[key]
+            if step is None:
+                txt = "On" if v else "Off"
+            elif key in ("start", "end", "gpos", "gspray"):
+                txt = "%d%%" % round(v * 100)
+            elif key == "tune":
+                txt = "%+d st" % v
+            elif key == "gsize":
+                txt = "%d ms" % v
+            elif key == "gdens":
+                txt = "%d / s" % v
+            else:
+                txt = "%.1f st" % v
+            rows.append((label, txt))
+        return rows
+
+    def smp_menu_change(self, name, d):
+        t = self.smp_track()
+        if t is None:
+            return
+        p, k, m = t
+        if name == "Sample":
+            self.set_track_sound(p, k, d)
+            return
+        smp = m.setdefault("smp", {})
+        for label, key, step, lo, hi in self.SMP_ROWS:
+            if label != name:
+                continue
+            cur = smp.get(key, synth.SAMPLE_PATCH[key])
+            if step is None:
+                smp[key] = not cur
+            else:
+                v = round(cur + step * d, 3)
+                smp[key] = int(v) if isinstance(synth.SAMPLE_PATCH[key], int) else max(lo, min(hi, v))
+                if isinstance(synth.SAMPLE_PATCH[key], int):
+                    smp[key] = max(int(lo), min(int(hi), smp[key]))
+            if key == "start" and smp.get("end", 1.0) <= smp[key]:
+                smp["end"] = min(1.0, smp[key] + 0.05)
+        pj = self.patch_json(m["patch"] or 0, m["tone"], m["res"], "sample", smp)
+        m["pj"] = pj
+        self.patch_changed()                     # the live sound follows (cur_patch merges smp)
+        e = self.lp_e()
+        if e is not None and e.pats[p].tracks[k].ev:
+            self.lp_resolve(p, k, replace=True)
+        self.lp_dirty = True
 
     # ------------------------------------------------------------ Settings > Drums page
     DRUM_MENU_HINT = "A select   X hear   lanes: A mute, Y+LEFT/RIGHT tune   L1/R1 page   B close"

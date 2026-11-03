@@ -379,6 +379,7 @@ def _convolve(x, ir, out_len):
 
 SAMPLE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
 SAMPLE_PATCH = {"sample": None, "root": 60, "tune": 0, "start": 0.0, "end": 1.0, "rev": False, "loop": False,
+                "grain": False, "gsize": 80, "gdens": 40, "gpos": 0.3, "gspray": 0.3, "gpitch": 0.0,
                 "a": 0.0, "d": 0.0, "s": 0.0, "r": 0.25, "fa": 0.0, "fd": 0.0, "fs": 1.0, "fenv": 0.0,
                 "cutoff": 9000.0, "res": 0.5, "name": "", "oscs": []}
 
@@ -401,6 +402,35 @@ def sample_patch(file, **kw):
     return p
 
 
+def _grain_cloud(x, r, p, secs=2.5, seed=11):
+    """A granular cloud rendered into a note: grains of gsize ms, gdens per
+    second, taken around gpos (0..1) with gspray wander and gpitch semitones of
+    random detune, each pitched by r and Hann-windowed."""
+    rng = np.random.RandomState(seed)
+    n = int(secs * SR)
+    out = np.zeros(n + int(0.5 * SR), np.float32)
+    gl = max(8, int(p.get("gsize", 80) / 1000.0 * SR))
+    count = max(4, int(p.get("gdens", 40) * secs))
+    win = np.hanning(gl).astype(np.float32)
+    pos, spray, pj = p.get("gpos", 0.3), p.get("gspray", 0.3), p.get("gpitch", 0.0)
+    L = len(x)
+    for g in range(count):
+        rr = r * 2.0 ** (rng.uniform(-pj, pj) / 12.0)
+        src = int((pos + rng.uniform(-spray, spray) * 0.5) * L) % max(1, L - 1)
+        idx = src + np.arange(gl) * rr
+        idx = np.clip(idx, 0, L - 1.001)
+        i0 = idx.astype(np.int64)
+        fr = (idx - i0).astype(np.float32)
+        grain = (x[i0] * (1 - fr) + x[i0 + 1] * fr) * win
+        at = int(rng.uniform(0, n))
+        out[at:at + gl] += grain
+    out = out[:n]
+    env = np.minimum(np.arange(n) / (0.05 * SR), 1.0).astype(np.float32)           # soft start
+    out *= env / (max(1.0, np.sqrt(count * gl / n)) * 0.5)
+    pk = np.max(np.abs(out)) + 1e-9
+    return (out / pk * 0.9).astype(np.float32)
+
+
 def render_sample(midi, p, arrays=False):
     """A Sample track's note: the WAV pitched from its root to midi (plus tune),
     trimmed to start..end, optionally reversed; loop=True sustains it."""
@@ -415,8 +445,11 @@ def render_sample(midi, p, arrays=False):
     if p.get("rev"):
         x = x[::-1]
     r = 2.0 ** ((midi - p.get("root", 60) + p.get("tune", 0)) / 12.0)
-    m = max(16, int(len(x) / r))
-    y = np.interp(np.arange(m) * r, np.arange(len(x)), x).astype(np.float32)
+    if p.get("grain"):
+        y = _grain_cloud(x, r, p)
+    else:
+        m = max(16, int(len(x) / r))
+        y = np.interp(np.arange(m) * r, np.arange(len(x)), x).astype(np.float32)
     fade = min(len(y) // 4, int(0.004 * SR))
     if fade:
         y[:fade] *= np.linspace(0, 1, fade)
