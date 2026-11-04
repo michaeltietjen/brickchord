@@ -368,6 +368,8 @@ class ModesMixin(song.SongMixin):
     def modes_tick(self, now):
         if edition.LAB:
             self.song_tick(now)
+        if edition.AMBIENT:
+            self.amb_tick(now)
         t = self.anim.get("_lead_preview")
         if t and now - t > 0.45:
             self.anim["_lead_preview"] = None

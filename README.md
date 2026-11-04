@@ -38,6 +38,9 @@ Bricklab is the groovebox built on the same engine. It adds:
 
 It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`, add a file `edition.txt` containing `lab`, and copy `Bricklab.sh` into `ports`. It shares Brickchord's sound cache when both are installed.
 
+## Brickambient
+An ambient machine on the same engine. Six drone voices (D-pad, X, Y) fade in and glide between notes over seconds or minutes, two melodic voices (A, B) step through five notes, and the screen draws each voice's pitch as a line against guides for the scale. Scenes morph the whole texture (SELECT + a drone button saves, R1 + it recalls), R2 evolves every voice to a nearby note, START freezes the cloud, the left stick spreads and moves the voices, L2 + left stick plays Cloud. Settings has a page per voice: sound, note and cents, level, pan, glide, fade, vibrato, tremolo, drift.
+
 ## Install (KNULLI)
 1. Download the latest zip from **[Releases](https://github.com/michaeltietjen/brickchord/releases)** (it bundles the ARM64 NumPy that Brickchord needs).
 2. Copy `brickchord/` and `Brickchord.sh` into `/userdata/roms/ports/` (on the SD card: `roms/ports/`).

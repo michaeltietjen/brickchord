@@ -14,9 +14,11 @@ def _read():
                 v = f.read().strip()
         except Exception:
             v = "chord"
-    return "lab" if v.lower().startswith("lab") else "chord"
+    v = v.lower()
+    return "lab" if v.startswith("lab") else ("ambient" if v.startswith("amb") else "chord")
 
 
 EDITION = _read()
 LAB = EDITION == "lab"
-NAME = "Bricklab" if LAB else "Brickchord"
+AMBIENT = EDITION == "ambient"           # Brickambient: drones, long glides, scenes
+NAME = "Bricklab" if LAB else ("Brickambient" if AMBIENT else "Brickchord")

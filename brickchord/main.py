@@ -15,6 +15,7 @@ import pygame
 
 import edition
 import host
+import ambient
 import modes
 import song
 import synth
@@ -99,6 +100,8 @@ ACCENT = (255, 140, 66)
 ACCENT2 = (110, 200, 190)
 if edition.LAB:                           # Bricklab is teal, with orange as its second colour
     ACCENT, ACCENT2 = (41, 174, 184), (255, 150, 80)
+elif edition.AMBIENT:                     # Brickambient is violet dusk, with pale gold
+    ACCENT, ACCENT2 = (150, 130, 235), (240, 200, 120)
 MOD_ON = (255, 200, 90)
 
 
@@ -283,7 +286,7 @@ KEYMAP_SIG = {"k:" + v: v for v in KEYMAP.values()}
 
 
 # ------------------------------------------------------------------ app
-class App(modes.ModesMixin):
+class App(ambient.AmbientMixin, modes.ModesMixin):
     def __init__(self, eng, cfg):
         self.cfg = cfg
         s = self.cfg["settings"]
@@ -404,6 +407,8 @@ class App(modes.ModesMixin):
         if not edition.LAB:
             self.eng.post("lp", "route", False)     # Brickchord: no tracks, live sound goes straight out
             self.push_rack()                        # Bricklab: every track has its own rack (lp_push_track)
+        if edition.AMBIENT:
+            self.amb_init()
         self.intro()
         self.queue_precache()
 
@@ -512,6 +517,8 @@ class App(modes.ModesMixin):
         self.push_params()
 
     def queue_precache(self):
+        if edition.AMBIENT:
+            return                      # Brickambient renders one note per voice, when a voice needs it
         o = 12 * self.octave
         notes = set()
         # every chord any button / stick modifier can make, including its harp run
@@ -827,6 +834,8 @@ class App(modes.ModesMixin):
             return {"settings": {}}
 
     def save_cfg(self):
+        if edition.AMBIENT and hasattr(self, "av"):
+            self.cfg["amb"] = self.amb_state()
         self.cfg["settings"] = dict(key=self.key, scale=self.scale, patch=self.patch, tone=self.tone, res=self.res,
                                     octave=self.octave, bpm=self.bpm, beat=self.beat, play=self.play,
                                     latch=self.latch, spread=self.spread, volume=self.volume,
@@ -985,7 +994,11 @@ class App(modes.ModesMixin):
 
     def update_sticks(self):
         st = self.cfg.get("sticks") or {}
-        if (st.get("lx") or st.get("ly")) and (self.wheel_open or self.imode != "Play"):
+        if edition.AMBIENT and (st.get("lx") or st.get("ly")):
+            x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
+            self.stick_xy = (x, y)
+            self.amb_stick(x, y)
+        elif (st.get("lx") or st.get("ly")) and (self.wheel_open or self.imode != "Play"):
             x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
             self.stick_xy = (x, y)
             if self.wheel_open:
@@ -1043,6 +1056,8 @@ class App(modes.ModesMixin):
         return synth.MACHINE_NAME.get(self.pm[e.cur][k].get("machine", "chord"), "Chord")
 
     def menu_pages(self):
+        if edition.AMBIENT:
+            return self.amb_menu_pages()
         if edition.LAB:
             return ["Songs", "Global", self.track_tab(), "FX"]
         return ["Global", "Chords", "FX"]
@@ -1050,6 +1065,8 @@ class App(modes.ModesMixin):
     def menu_context_page(self):
         """The page Settings opens on: the one for what you are doing."""
         im = self.imode
+        if edition.AMBIENT:
+            return "Melody" if self.asel >= 6 else "Voice"
         if im == "Effects":
             return "FX"
         if edition.LAB:
@@ -1074,7 +1091,14 @@ class App(modes.ModesMixin):
             self.beat_pick = b if b else self.beat_pick
         self.menu_i %= max(1, len(self.menu_items()))
 
+    AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn", "Learn sticks", "Quit"]
+
     def menu_items(self):
+        if edition.AMBIENT and self.menu_pg in ("Voice", "Melody", "Scenes"):
+            return self.amb_menu_items(self.menu_pg)
+        if edition.AMBIENT and self.menu_pg == "Global":
+            rows = dict(self.all_menu_items())
+            return [(n, rows[n]) for n in self.AMB_GLOBAL if n in rows]
         if edition.LAB and self.menu_pg in self.TRACK_TABS and self.menu_pg != "Drums":
             # every machine tab starts with the track's Machine, so it can be changed right here
             return [("Machine", self.menu_pg)] + self.machine_rows()
@@ -1146,6 +1170,9 @@ class App(modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
+        if edition.AMBIENT and self.menu_pg in ("Voice", "Melody", "Scenes"):
+            self.amb_menu_change(self.menu_pg, name, d)
+            return
         if name == "Machine" and edition.LAB:
             e = self.lp_e()
             self.set_machine(e.cur, self.lp_sel, d)
@@ -1278,6 +1305,9 @@ class App(modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
+        if edition.AMBIENT and self.menu_pg in ("Voice", "Melody", "Scenes"):
+            self.amb_menu_activate(self.menu_pg, name)
+            return
         if self.menu_pg == "Drums":
             self.drum_menu_activate(name)
             return
@@ -1422,6 +1452,8 @@ class App(modes.ModesMixin):
         held = self.inp.held
         if "SELECT" in held and "START" in held:
             self.running = False
+            return
+        if edition.AMBIENT and not self.menu and not self.editor and self.amb_handle(name, down):
             return
         if getattr(self, "welcome", False):
             if down and name in ("A", "B", "START"):
@@ -1598,9 +1630,11 @@ class App(modes.ModesMixin):
             info = None
         else:
             self.text(c, edition.NAME.upper(), self.f_small, ACCENT, (62, 12))
-            chips_end = self.draw_mode_chip(c, 172, 9)
+            chips_end = self.draw_mode_chip(c, 172, 9) if not edition.AMBIENT else 200
             info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
                                                        self.bank[self.patch]["name"], self.mode(), self.bpm)
+            if edition.AMBIENT:
+                info = self.amb_header_info()
         for alt in (() if info is None else
                     ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bank[self.patch]["name"], self.bpm),
                      "%s %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bpm))):
@@ -1617,7 +1651,9 @@ class App(modes.ModesMixin):
         if beat_pop and info is not None:
             pygame.draw.rect(c, self.mix(PANEL, ACCENT, beat_pop), (0, 36, BASE_W, 2))
 
-        if self.imode in ("Song", "Effects"):
+        if edition.AMBIENT:
+            self.draw_ambient(c, now)
+        elif self.imode in ("Song", "Effects"):
             self.draw_page(c)
         else:
             # ---- brick well + scope behind the chord name
@@ -1771,7 +1807,9 @@ class App(modes.ModesMixin):
             status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2 if self.eng.load <= 0.8 else (230, 90, 80),
                        (20, L["status_y"]))
-        hint = self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
+        hint = ("^>v<XY drones   AB melody   R1+ scene   R2 evolve   START freeze"
+                if edition.AMBIENT else None) or \
+            self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
@@ -2050,7 +2088,7 @@ class App(modes.ModesMixin):
     def draw_mini_mark(self, c, x, y, step):
         """Tiny logo in the header; with the beat running, its keys follow the 16ths."""
         k, g = 6, 2
-        if edition.LAB:                      # Bricklab's mark: 4 x 4, step 1 teal, the playhead runs the 16ths
+        if edition.LAB or edition.AMBIENT:   # Bricklab's (and Brickambient's) mark: 4 x 4, step 1 lit
             k, g = 4, 2
             lit = (step - 1) % 16 if self.clock_on() else -1
             for i in range(16):

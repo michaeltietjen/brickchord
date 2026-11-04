@@ -142,6 +142,9 @@ class Engine:
         self.drone_xy = (0.0, 0.0) # left stick in Drone mode: x = thin/shimmer, y = pulse/swell
         self.drone_slide = 0.0     # seconds; > 0 and the drone glides to a new degree instead of restriking
         self.dvoices = []          # sliding drone voices (lead-style, pitch-shifted on the fly)
+        self.amb = {}              # Brickambient: slot -> a long-gliding voice (see c_amb)
+        self.amb_spread = 0.0      # cents of detune fanned across the voices (left stick X)
+        self.amb_move = 1.0        # movement depth multiplier (left stick Y)
         self.gvoices = []          # sequenced slide voices: a track with slide locks plays mono and glides
         self.slide_time = 0.09     # seconds a slide step takes to reach its note
         self.drone_ph = 0.0
@@ -743,6 +746,105 @@ class Engine:
             self.kit = kits["Classic"]
 
     # ------------------------------------------------------------ drone layer
+    # ------------------------------------------------------------ Brickambient voices
+    # Each slot is one sustained voice: a sound rendered once at its base note and
+    # pitched on the fly, so it can glide anywhere over seconds or minutes. Level
+    # fades in and out; vibrato, tremolo and a slow random drift keep it moving.
+    class _Amb:
+        pass
+
+    def _amb_slot(self, k):
+        v = self.amb.get(k)
+        if v is None:
+            v = self.amb[k] = self._Amb()
+            v.a = v.l = None
+            v.pos, v.cur, v.tgt, v.glide = 0.0, 0.0, 0.0, 2.0
+            v.lvl, v.lvl_t, v.fade = 0.0, 0.0, 3.0
+            v.pan, v.vib, v.rate, v.trem, v.drift = 0.0, 0.0, 0.2, 0.0, 0.0
+            v.ph = k * 1.7
+            v.dr, v.dr_t, v.dr_n = 0.0, 0.0, 0
+            v.retrig = False
+        return v
+
+    def c_amb_snd(self, k, snd, base_restart=True):
+        v = self._amb_slot(int(k))
+        if snd is None:
+            return
+        v.a, v.l = snd
+        if base_restart or v.pos >= len(v.a) + (len(v.l) if v.l is not None else 0):
+            v.pos = 0.0
+
+    def c_amb(self, k, d):
+        """Update a voice: tgt (cents from its base note), level, on, pan, glide,
+        fade, vib (cents), rate (Hz), trem (0..1), drift (cents)."""
+        v = self._amb_slot(int(k))
+        for name in ("tgt", "pan", "glide", "fade", "vib", "rate", "trem", "drift", "retrig"):
+            if name in d:
+                setattr(v, name, d[name])
+        if "level" in d or "on" in d:
+            v.lvl_t = float(d.get("level", getattr(v, "level", 0.7))) if d.get("on", v.lvl_t > 0) else 0.0
+            v.level = float(d.get("level", getattr(v, "level", 0.7)))
+        if d.get("jump"):
+            v.cur = v.tgt
+
+    def c_amb_trig(self, k, cents):
+        """Melodic voice step on a struck sound: start the sound again at this pitch."""
+        v = self._amb_slot(int(k))
+        v.pos, v.cur, v.tgt = 0.0, float(cents), float(cents)
+
+    def c_amb_global(self, spread, move):
+        self.amb_spread, self.amb_move = float(spread), float(move)
+
+    def _amb_render(self, mix, N, sr):
+        dt = N / sr
+        keep = {}
+        for k, v in self.amb.items():
+            if v.a is None:
+                continue
+            if v.lvl <= 0.0 and v.lvl_t <= 0.0:
+                continue
+            # pitch: glide toward the target (about 98% of the way in `glide` seconds)
+            c0 = v.cur
+            if v.glide > 0.02:
+                v.cur = v.tgt + (v.cur - v.tgt) * math.exp(-4.0 * dt / v.glide)
+            else:
+                v.cur = v.tgt
+            # slow random drift: a new target every few seconds, eased toward
+            if v.drift > 0:
+                v.dr_n -= 1
+                if v.dr_n <= 0:
+                    v.dr_t = (random.random() * 2 - 1) * v.drift * self.amb_move
+                    v.dr_n = int((2.0 + 4.0 * random.random()) / dt)
+                v.dr += (v.dr_t - v.dr) * min(1.0, dt / 1.5)
+            ph0 = v.ph
+            v.ph = (v.ph + 2 * math.pi * v.rate * dt) % (2 * math.pi)
+            vib0 = v.vib * self.amb_move * math.sin(ph0)
+            vib1 = v.vib * self.amb_move * math.sin(v.ph)
+            spread = self.amb_spread * ((k % 6) / 2.5 - 1.0) if k < 6 else 0.0
+            cents0 = c0 + v.dr + vib0 + spread
+            cents1 = v.cur + v.dr + vib1 + spread
+            r0, r1 = 2.0 ** (cents0 / 1200.0), 2.0 ** (cents1 / 1200.0)
+            # level: linear fade, with tremolo riding on it
+            l0 = v.lvl
+            step = dt / max(0.05, v.fade)
+            v.lvl = min(v.lvl_t, v.lvl + step) if v.lvl_t > v.lvl else max(v.lvl_t, v.lvl - step)
+            t0 = 1.0 - v.trem * 0.5 * (1 + math.sin(ph0 * 0.5))
+            t1 = 1.0 - v.trem * 0.5 * (1 + math.sin(v.ph * 0.5))
+            ramp = self._ramp(N)[:, 0]
+            r = r0 + (r1 - r0) * ramp
+            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1], dtype=np.float64)))
+            v.pos = float(pos[-1] + r[-1])
+            total = len(v.a) + (1e18 if v.l is not None else 0)
+            if pos[0] >= total:
+                continue
+            seg = self._lead_interp(v, pos)
+            g = (l0 * t0 + (v.lvl * t1 - l0 * t0) * ramp).astype(np.float32)
+            lg, rg = min(1.0, 1.0 - v.pan), min(1.0, 1.0 + v.pan)
+            seg[:, 0] *= g * lg
+            seg[:, 1] *= g * rg
+            mix += seg
+        return keep
+
     def c_drone_slide(self, secs):
         self.drone_slide = max(0.0, float(secs))
 
@@ -2011,6 +2113,8 @@ class Engine:
                 self._lead_render(mix, N, sr)
         if self.gvoices:
             self._glide_render(tb, N, sr)
+        if self.amb:
+            self._amb_render(mix, N, sr)
         if self.dvoices:
             if self.route and not self._seltr().drum:
                 key = (self.cur, self.sel)

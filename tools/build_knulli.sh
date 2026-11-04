@@ -46,4 +46,5 @@ EOF
 
 build brickchord Brickchord.sh "" brickchord
 build bricklab Bricklab.sh lab bricklab
+build brickambient Brickambient.sh ambient bricklab
 rm -rf "$WHL"

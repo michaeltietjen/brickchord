@@ -1,0 +1,537 @@
+# Brickambient: an ambient machine on the Brickchord engine. Six drone voices
+# you switch on and leave running, two melodic voices that step through five
+# notes, long glides between pitches drawn as guides on screen, scenes that
+# morph the whole texture, and the sticks for spread, movement and Cloud.
+#
+#   UP RIGHT DOWN LEFT X Y   drone voices 1-6 on/off (they fade)
+#   A B                      melodic voices 1-2: start / stop their steps
+#   L1 + a voice button      select that voice (Settings opens on it)
+#   R1 + a drone button      recall scene 1-6 (the voices glide there)
+#   SELECT + a drone button  save the current sound as that scene
+#   R2                       evolve: every voice glides to a new note of the scale
+#   START                    freeze: the cloud holds what is sounding
+#   left stick               X spreads the voices apart, Y deepens their movement
+#   L2 + left stick          Cloud compass (direction = texture, distance = amount)
+import json
+import math
+import time
+
+import pygame
+
+import synth
+
+DRONE_BTNS = ["UP", "RIGHT", "DOWN", "LEFT", "X", "Y"]
+MEL_BTNS = ["A", "B"]
+GLYPH = {"UP": "^", "RIGHT": ">", "DOWN": "v", "LEFT": "<", "X": "X", "Y": "Y", "A": "A", "B": "B"}
+VCOL = [(110, 200, 190), (190, 140, 255), (255, 170, 110), (120, 200, 140), (255, 120, 160), (140, 170, 255),
+        (255, 215, 120), (235, 235, 225)]
+NV = 8
+GLIDES = [0.0, 0.5, 1, 2, 4, 8, 15, 30, 60]
+FADES = [0.2, 0.5, 1, 2, 4, 8, 15]
+STEP_TIMES = [0.5, 1, 2, 3, 4, 6, 8, 12, 16]
+MORPHS = [1, 2, 4, 8, 15, 30, 60]
+HIST_SECS = 24.0
+
+
+def M():
+    import main
+    return main
+
+
+def _find(bank, name):
+    return next(p for p in bank if p["name"] == name)
+
+
+def amb_bank():
+    """The sounds a voice can be: sustaining drones and pads first, struck and
+    plucked ones (for the melodic voices) after."""
+    out = list(synth.DRONE_PATCHES)
+    for n in ("Bowed String", "Bowed Glass", "Blown Pipe", "Vowel Choir", "Juno Strings", "Poly Pad", "Organ Pipes",
+              "Folded Sine", "Bell Bowl", "Marimba", "Kalimba", "Plucked String", "Twin Strings"):
+        try:
+            out.append(_find(synth.MACRO_PATCHES, n))
+        except StopIteration:
+            pass
+    for n in ("Choir Pad", "Air Pad", "Glass Bells"):
+        try:
+            out.append(_find(synth.PATCHES, n))
+        except StopIteration:
+            pass
+    return out
+
+
+def struck(p):
+    return p.get("macro") is not None and int(p.get("macro", 0)) in synth.MACRO_STRUCK
+
+
+class AmbientMixin:
+    # ------------------------------------------------------------ state
+    def amb_init(self):
+        self.amb_sounds = amb_bank()
+        names = [p["name"] for p in self.amb_sounds]
+
+        def ix(n):
+            return names.index(n) if n in names else 0
+        st = self.cfg.get("amb") or {}
+        k = self.key
+        default_notes = [36, 43, 48, 55, 60, 64]           # root, fifth, octave, fifth, two octaves, tenth
+        default_snd = [ix("Sub Drone"), ix("Deep Space"), ix("Tape Choir"), ix("Bowed Glass"), ix("Shimmer"),
+                       ix("Breath")]
+        self.av = []
+        for i in range(NV):
+            d = {"on": False, "snd": default_snd[i] if i < 6 else ix("Kalimba" if i == 6 else "Bowed String"),
+                 "note": (default_notes[i] + k) if i < 6 else 60 + k, "cents": 0,
+                 "level": 0.6 if i < 6 else 0.5, "pan": [0.0, -0.4, 0.4, -0.2, 0.2, 0.0, -0.3, 0.3][i],
+                 "glide": 4 if i < 6 else 2, "fade": 4 if i < 6 else 1, "vib": 4, "rate": 0.15 + 0.05 * i,
+                 "trem": 0.0, "drift": 8 if i < 6 else 0, "base": None}
+            if i < len(st.get("voices", [])):
+                d.update({kk: vv for kk, vv in st["voices"][i].items() if kk in d})
+                d["on"] = False
+                d["base"] = None
+            self.av.append(d)
+        self.amel = st.get("mel") or [{"steps": [0, 2, 4, 2, None], "time": 4, "run": False},
+                                       {"steps": [7, None, 4, 5, None], "time": 6, "run": False}]
+        for m in self.amel:
+            m["run"] = False
+            m["i"] = -1
+            m["next"] = 0.0
+        self.ascenes = st.get("scenes") or [None] * 6
+        self.amorph = st.get("morph", 8)
+        self.asel = 0
+        self.afreeze = False
+        self.ahist = [[] for _ in range(NV)]
+        self.aui = [{"cur": None, "lvl": 0.0} for _ in range(NV)]
+        self.alast = time.perf_counter()
+        self.ahist_t = 0.0
+        self.aspread = self.amove = 0.0
+        self.amb_pending = {}
+        self.eng.post("amb_global", 0.0, 1.0)
+
+    def amb_state(self):
+        keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
+        return {"voices": [{k: v[k] for k in keys} for v in self.av],
+                "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
+                "scenes": self.ascenes, "morph": self.amorph}
+
+    # ------------------------------------------------------------ talking to the engine
+    def amb_patch(self, i):
+        return self.amb_sounds[self.av[i]["snd"] % len(self.amb_sounds)]
+
+    def amb_render(self, i):
+        """Ask for voice i's sound at its base note (rendered once, pitched on the fly)."""
+        v = self.av[i]
+        v["base"] = int(v["note"])
+        key = (v["base"], json.dumps(self.amb_patch(i), sort_keys=True))
+        if hasattr(self.eng, "request"):
+            self.eng.request("hi", [key])
+        if hasattr(self.eng, "resolve"):
+            snd = self.eng.resolve({0: key}).get(0)
+            self.eng.post("amb_snd", i, snd, True)
+
+    def amb_tgt(self, i):
+        v = self.av[i]
+        if v["base"] is None:
+            return 0.0
+        return (v["note"] - v["base"]) * 100.0 + v["cents"]
+
+    def amb_push(self, i, jump=False, glide=None):
+        v = self.av[i]
+        if v["base"] is None or abs(v["note"] - v["base"]) > 24:
+            self.amb_render(i)
+            jump = True
+        d = {"tgt": self.amb_tgt(i), "on": v["on"], "level": v["level"], "pan": v["pan"],
+             "glide": float(v["glide"] if glide is None else glide), "fade": float(v["fade"]),
+             "vib": float(v["vib"]), "rate": float(v["rate"]), "trem": float(v["trem"]), "drift": float(v["drift"])}
+        if jump:
+            d["jump"] = True
+        self.eng.post("amb", i, d)
+        if jump or self.aui[i]["cur"] is None:
+            self.aui[i]["cur"] = v["note"] * 100.0 + v["cents"]
+        if glide is not None:
+            self.aui[i]["glide"] = glide
+
+    def amb_toggle(self, i):
+        v = self.av[i]
+        v["on"] = not v["on"]
+        if v["on"] and v["base"] is None:
+            self.amb_render(i)
+        self.amb_push(i, jump=self.aui[i]["lvl"] < 0.02)
+        if i >= 6:
+            m = self.amel[i - 6]
+            m["run"] = v["on"]
+            m["i"], m["next"] = -1, 0.0
+        self.flash("%s %s   %s" % ("VOICE %d" % (i + 1) if i < 6 else "MELODY %s" % "AB"[i - 6],
+                                    "ON" if v["on"] else "OFF", self.amb_patch(i)["name"]))
+
+    def amb_degree_midi(self, deg, octave=4):
+        sc = M().SCALES[self.scale]
+        o, d = divmod(int(deg), 7)
+        return 12 * (octave + 1 + o) + self.key + sc[d]
+
+    # ------------------------------------------------------------ input
+    def amb_handle(self, name, down):
+        held = self.inp.held
+        if not down:
+            return name in DRONE_BTNS + MEL_BTNS + ["R2", "START", "L3"]
+        if name in DRONE_BTNS or name in MEL_BTNS:
+            i = (DRONE_BTNS + MEL_BTNS).index(name)
+            if "L1" in held:
+                self.asel = i
+                self.flash("SELECTED %s   SELECT EDITS IT" % (("VOICE %d" % (i + 1)) if i < 6 else "MELODY %s" % "AB"[i - 6]))
+                return True
+            if "R1" in held and i < 6:
+                self.amb_recall(i)
+                return True
+            if "SELECT" in held and i < 6:
+                self.select_used = True
+                self.amb_save_scene(i)
+                return True
+            self.amb_toggle(i)
+            self.asel = i
+            return True
+        if name == "R2":
+            self.amb_evolve()
+            return True
+        if name == "START":
+            self.afreeze = not self.afreeze
+            if self.afreeze:
+                self.amb_prev_cloud = list(self.rack.get("Cloud") or [False, 0.5, 3])
+                self.set_cloud(True, 0.85, 7)
+            else:
+                pc = getattr(self, "amb_prev_cloud", [False, 0.5, 3])
+                self.set_cloud(pc[0], pc[1], pc[2])
+            self.flash("FREEZE " + ("ON: THE CLOUD HOLDS WHAT IS SOUNDING" if self.afreeze else "OFF"))
+            return True
+        if name == "L3":
+            return True                                      # no mode wheel here
+        return False
+
+    def amb_stick(self, x, y):
+        if "L2" in self.inp.held:
+            self.l2_moved = getattr(self, "l2_moved", False) or math.hypot(x, y) > 0.3
+            self.drone_cloud(x, y)
+            return
+        dz = 0.15
+        sx = 0.0 if abs(x) < dz else x
+        sy = 0.0 if abs(y) < dz else y
+        spread = round(sx * 40) / 1.0                       # up to 40 cents fanned across the voices
+        move = round((1.0 + sy * 2.0) * 10) / 10.0          # 0x .. 3x movement
+        if (spread, move) != (self.aspread, self.amove):
+            self.aspread, self.amove = spread, move
+            self.eng.post("amb_global", spread, max(0.0, move))
+
+    # ------------------------------------------------------------ scenes and evolve
+    def amb_save_scene(self, s):
+        keys = ("on", "snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
+        self.ascenes[s] = [{k: v[k] for k in keys} for v in self.av[:6]]
+        self.save_cfg()
+        self.flash("SCENE %d SAVED   R1+%s RECALLS IT" % (s + 1, GLYPH[DRONE_BTNS[s]]))
+
+    def amb_recall(self, s):
+        sc = self.ascenes[s] if s < len(self.ascenes) else None
+        if not sc:
+            self.flash("SCENE %d IS EMPTY   SELECT+%s SAVES ONE" % (s + 1, GLYPH[DRONE_BTNS[s]]))
+            return
+        for i, d in enumerate(sc[:6]):
+            v = self.av[i]
+            new_snd = d.get("snd", v["snd"]) != v["snd"]
+            v.update({k: d[k] for k in d if k in v})
+            if new_snd or v["base"] is None:
+                v["base"] = None
+                if v["on"]:
+                    self.amb_render(i)
+            self.amb_push(i, glide=self.amorph)
+        self.flash("SCENE %d   MORPHING OVER %ds" % (s + 1, self.amorph))
+
+    def amb_evolve(self):
+        """Every sounding drone glides to a nearby note of the scale: the slow
+        harmonic turn of a film cue."""
+        import random
+        moved = 0
+        for i in range(6):
+            v = self.av[i]
+            if not v["on"]:
+                continue
+            sc = M().SCALES[self.scale]
+            cands = [n for n in range(v["note"] - 5, v["note"] + 6) if (n - self.key) % 12 in sc and n != v["note"]]
+            if cands:
+                v["note"] = random.choice(cands)
+                v["cents"] = 0
+                self.amb_push(i, glide=max(v["glide"], self.amorph))
+                moved += 1
+        self.flash("EVOLVE   %d VOICES GLIDING" % moved if moved else "TURN SOME VOICES ON FIRST")
+
+    # ------------------------------------------------------------ time
+    def amb_tick(self, now):
+        dt = min(0.25, now - self.alast)
+        self.alast = now
+        # the melodic voices step through their notes
+        for j, m in enumerate(self.amel):
+            i = 6 + j
+            if not m["run"]:
+                continue
+            if now >= m["next"]:
+                for _ in range(5):
+                    m["i"] = (m["i"] + 1) % 5
+                    if m["steps"][m["i"]] is not None:
+                        break
+                deg = m["steps"][m["i"]]
+                m["next"] = now + float(m["time"])
+                if deg is None:
+                    continue
+                v = self.av[i]
+                v["note"] = self.amb_degree_midi(deg)
+                v["cents"] = 0
+                if struck(self.amb_patch(i)):
+                    if v["base"] is None:
+                        self.amb_render(i)
+                    self.eng.post("amb_trig", i, self.amb_tgt(i))
+                    self.aui[i]["cur"] = v["note"] * 100.0
+                    self.aui[i]["hit"] = now
+                else:
+                    self.amb_push(i)
+        # the screen's model of every voice: same glide and fade as the engine
+        for i, v in enumerate(self.av):
+            u = self.aui[i]
+            tgt = v["note"] * 100.0 + v["cents"]
+            if u["cur"] is None:
+                u["cur"] = tgt
+            g = u.get("glide", v["glide"])
+            if g and g > 0.02:
+                u["cur"] = tgt + (u["cur"] - tgt) * math.exp(-4.0 * dt / g)
+            else:
+                u["cur"] = tgt
+            if abs(u["cur"] - tgt) < 2:
+                u.pop("glide", None)
+            lt = v["level"] if v["on"] else 0.0
+            step = dt / max(0.05, float(v["fade"]))
+            u["lvl"] = min(lt, u["lvl"] + step) if lt > u["lvl"] else max(lt, u["lvl"] - step)
+        self.sounding = [v["note"] for v in self.av if v["on"]]          # the keyboard lights them
+        if now - self.ahist_t > 0.08:
+            self.ahist_t = now
+            for i in range(NV):
+                h = self.ahist[i]
+                u = self.aui[i]
+                h.append((now, u["cur"], u["lvl"]))
+                while h and now - h[0][0] > HIST_SECS:
+                    h.pop(0)
+
+    # ------------------------------------------------------------ settings pages
+    def amb_menu_pages(self):
+        return ["Voice", "Melody", "Scenes", "Global", "FX"]
+
+    def amb_menu_items(self, pg):
+        mm = M()
+        if pg == "Voice":
+            i = self.asel
+            v = self.av[i]
+            vname = ("Voice %d   %s" % (i + 1, GLYPH[DRONE_BTNS[i]])) if i < 6 else ("Melody %s" % "AB"[i - 6])
+            nn = mm.NOTE_NAMES[v["note"] % 12] + str(v["note"] // 12 - 1)
+            return [("Voice", vname), ("Sound", self.amb_patch(i)["name"]), ("On", "On" if v["on"] else "Off"),
+                    ("Note", nn), ("Fine", "%+d cents" % v["cents"]), ("Level", "%d%%" % round(v["level"] * 100)),
+                    ("Pan", "C" if abs(v["pan"]) < 0.05 else ("L%d" % round(-v["pan"] * 100) if v["pan"] < 0
+                                                               else "R%d" % round(v["pan"] * 100))),
+                    ("Glide", ("%g s" % v["glide"]) if v["glide"] else "Off"), ("Fade", "%g s" % v["fade"]),
+                    ("Vibrato", "%d cents" % v["vib"]), ("Rate", "%.2f Hz" % v["rate"]),
+                    ("Tremolo", "%d%%" % round(v["trem"] * 100)), ("Drift", "%d cents" % v["drift"])]
+        if pg == "Melody":
+            j = max(0, self.asel - 6) if self.asel >= 6 else getattr(self, "amel_sel", 0)
+            self.amel_sel = j
+            m = self.amel[j]
+            sc = mm.SCALES[self.scale]
+            rows = [("Melody", "Melody %s   %s" % ("AB"[j], "running" if m["run"] else "stopped"))]
+            for s in range(5):
+                d = m["steps"][s]
+                rows.append(("Step %d" % (s + 1), "rest" if d is None else
+                             "%s  (degree %d)" % (mm.NOTE_NAMES[(self.key + sc[d % 7]) % 12] + str(4 + d // 7), d + 1)))
+            rows.append(("Step time", "%g s" % m["time"]))
+            rows.append(("Sound", self.amb_patch(6 + j)["name"]))
+            rows.append(("Glide", ("%g s" % self.av[6 + j]["glide"]) if self.av[6 + j]["glide"] else "Off"))
+            return rows
+        if pg == "Scenes":
+            rows = [("Morph time", "%d s" % self.amorph)]
+            for s in range(6):
+                sc = self.ascenes[s] if s < len(self.ascenes) else None
+                rows.append(("Scene %d  %s" % (s + 1, GLYPH[DRONE_BTNS[s]]),
+                             ("%d voices   R1+%s recalls" % (sum(1 for d in sc if d.get("on")), GLYPH[DRONE_BTNS[s]]))
+                             if sc else "empty   SELECT+%s saves" % GLYPH[DRONE_BTNS[s]]))
+            rows.append(("Evolve", "R2 on the main screen"))
+            return rows
+        return []
+
+    def amb_menu_change(self, pg, name, d):
+        if pg == "Voice":
+            i = self.asel
+            v = self.av[i]
+            if name == "Voice":
+                self.asel = (i + d) % NV
+                return
+            if name == "Sound":
+                v["snd"] = (v["snd"] + d) % len(self.amb_sounds)
+                v["base"] = None
+                if v["on"]:
+                    self.amb_render(i)
+                self.amb_push(i)
+                return
+            if name == "On":
+                self.amb_toggle(i)
+                return
+            if name == "Note":
+                v["note"] = max(24, min(96, v["note"] + d))
+            elif name == "Fine":
+                v["cents"] = max(-50, min(50, v["cents"] + 2 * d))
+            elif name == "Level":
+                v["level"] = round(max(0.0, min(1.0, v["level"] + 0.05 * d)), 2)
+            elif name == "Pan":
+                v["pan"] = round(max(-1.0, min(1.0, v["pan"] + 0.1 * d)), 2)
+            elif name == "Glide":
+                v["glide"] = self._amb_step(GLIDES, v["glide"], d)
+            elif name == "Fade":
+                v["fade"] = self._amb_step(FADES, v["fade"], d)
+            elif name == "Vibrato":
+                v["vib"] = max(0, min(60, v["vib"] + 2 * d))
+            elif name == "Rate":
+                v["rate"] = round(max(0.02, min(6.0, v["rate"] * (1.25 if d > 0 else 0.8))), 3)
+            elif name == "Tremolo":
+                v["trem"] = round(max(0.0, min(1.0, v["trem"] + 0.05 * d)), 2)
+            elif name == "Drift":
+                v["drift"] = max(0, min(100, v["drift"] + 2 * d))
+            self.amb_push(i)
+            return
+        if pg == "Melody":
+            j = getattr(self, "amel_sel", 0)
+            m = self.amel[j]
+            if name == "Melody":
+                self.amel_sel = (j + d) % 2
+                self.asel = 6 + self.amel_sel
+            elif name.startswith("Step ") and name != "Step time":
+                s = int(name.split()[1]) - 1
+                opts = [None] + list(range(15))
+                cur = m["steps"][s]
+                m["steps"][s] = opts[(opts.index(cur) + d) % len(opts)]
+            elif name == "Step time":
+                m["time"] = self._amb_step(STEP_TIMES, m["time"], d)
+            elif name == "Sound":
+                v = self.av[6 + j]
+                v["snd"] = (v["snd"] + d) % len(self.amb_sounds)
+                v["base"] = None
+                if v["on"]:
+                    self.amb_render(6 + j)
+                self.amb_push(6 + j)
+            elif name == "Glide":
+                v = self.av[6 + j]
+                v["glide"] = self._amb_step(GLIDES, v["glide"], d)
+                self.amb_push(6 + j)
+            return
+        if pg == "Scenes" and name == "Morph time":
+            self.amorph = self._amb_step(MORPHS, self.amorph, d)
+
+    def amb_menu_activate(self, pg, name):
+        if pg == "Voice" and name == "On":
+            self.amb_toggle(self.asel)
+        elif pg == "Melody" and name == "Melody":
+            self.amb_toggle(6 + getattr(self, "amel_sel", 0))
+        elif pg == "Scenes" and name.startswith("Scene "):
+            self.menu = False
+            self.amb_recall(int(name.split()[1]) - 1)
+
+    @staticmethod
+    def _amb_step(opts, cur, d):
+        i = min(range(len(opts)), key=lambda n: abs(opts[n] - cur))
+        return opts[max(0, min(len(opts) - 1, i + d))]
+
+    # ------------------------------------------------------------ drawing
+    def amb_header_info(self):
+        n = sum(1 for v in self.av if v["on"])
+        return "%s %s   %d voice%s%s" % (M().NOTE_NAMES[self.key], self.scale, n, "" if n == 1 else "s",
+                                         "   FREEZE" if self.afreeze else "")
+
+    def draw_ambient(self, c, now):
+        mm = M()
+        L = mm.L
+        W = mm.BASE_W
+        gx0, gx1 = 20, W - 20
+        gy0, gy1 = 46, L["tiles_y"] - 12
+        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.55), (gx0 - 8, gy0 - 4, gx1 - gx0 + 16, gy1 - gy0 + 8),
+                         border_radius=10)
+        lo, hi = (self.key + 36) * 100.0, (self.key + 84) * 100.0      # four octaves
+
+        def ypos(cents):
+            return gy1 - (cents - lo) / (hi - lo) * (gy1 - gy0)
+        # guides: every note of the scale, roots and fifths brighter and labelled
+        sc = mm.SCALES[self.scale]
+        for n in range(self.key + 36, self.key + 85):
+            if (n - self.key) % 12 not in sc:
+                continue
+            y = int(ypos(n * 100))
+            root = (n - self.key) % 12 == 0
+            fifth = (n - self.key) % 12 == 7
+            col = self.mix(mm.BG, mm.DIM, 0.55 if root else (0.32 if fifth else 0.16))
+            pygame.draw.line(c, col, (gx0, y), (gx1, y), 1)
+            if root or fifth:
+                self.text(c, mm.NOTE_NAMES[n % 12] + str(n // 12 - 1), self.f_small, col, (gx0 + 2, y - 15))
+        # each voice's pitch over the last seconds: a line that glides
+        span = HIST_SECS
+        for i in range(NV):
+            h = self.ahist[i]
+            if len(h) < 2:
+                continue
+            col = VCOL[i]
+            pts = []
+            for (t, cents, lvl) in h:
+                if lvl < 0.01:
+                    if len(pts) > 1:
+                        pygame.draw.lines(c, self.mix(mm.BG, col, 0.85), False, pts, 2)
+                    pts = []
+                    continue
+                pts.append((int(gx1 - (now - t) / span * (gx1 - gx0)), int(ypos(cents))))
+            if len(pts) > 1:
+                pygame.draw.lines(c, self.mix(mm.BG, col, 0.85), False, pts, 2 if i < 6 else 3)
+            u = self.aui[i]
+            v = self.av[i]
+            if u["lvl"] > 0.01:
+                y = int(ypos(u["cur"]))
+                rr = 4 + int(4 * u["lvl"])
+                pygame.draw.circle(c, col, (gx1, y), rr)
+                tgt = v["note"] * 100.0 + v["cents"]
+                if abs(tgt - u["cur"]) > 8:                    # gliding: a guide to where it is headed
+                    ty = int(ypos(tgt))
+                    for yy in range(min(y, ty), max(y, ty), 6):
+                        pygame.draw.line(c, col, (gx1 + 6, yy), (gx1 + 6, min(yy + 3, max(y, ty))), 1)
+                    pygame.draw.line(c, col, (gx1 + 2, ty), (gx1 + 10, ty), 2)
+        # voice tiles
+        tw, gap = 70, 6
+        x0 = (W - (NV * tw + (NV - 1) * gap)) // 2
+        ty0, th = L["tiles_y"], L["tile_h"]
+        for i in range(NV):
+            v = self.av[i]
+            u = self.aui[i]
+            col = VCOL[i]
+            r = pygame.Rect(x0 + i * (tw + gap) + (8 if i >= 6 else 0) - (8 if i < 6 else 0), ty0, tw, th)
+            lv = u["lvl"] / max(0.05, v["level"]) if v["level"] else 0.0
+            pygame.draw.rect(c, self.mix(mm.PANEL, col, 0.28 * min(1.0, lv)), r, border_radius=10)
+            if i == self.asel:
+                pygame.draw.rect(c, mm.INK, r, 2, border_radius=10)
+            btn = (DRONE_BTNS + MEL_BTNS)[i]
+            self.text(c, GLYPH[btn], self.f_med, col if v["on"] else mm.DIM, (r.centerx, r.y + th * 20 // 100),
+                      center=True)
+            nm = self.amb_patch(i)["name"]
+            self.text(c, nm if len(nm) <= 9 else nm[:8] + ".", self.f_small, mm.INK if v["on"] else mm.DIM,
+                      (r.centerx, r.y + th * 48 // 100), center=True)
+            note = mm.NOTE_NAMES[v["note"] % 12] + str(v["note"] // 12 - 1)
+            if v["cents"]:
+                note += " %+d" % v["cents"]
+            if i >= 6:
+                m = self.amel[i - 6]
+                note = ("step %d" % (m["i"] + 1)) if m["run"] and m["i"] >= 0 else "steps"
+            self.text(c, note, self.f_small, self.mix(mm.DIM, col, 0.5), (r.centerx, r.y + th * 70 // 100),
+                      center=True)
+            bw = int((tw - 16) * min(1.0, u["lvl"]))
+            pygame.draw.rect(c, mm.BG, (r.x + 8, r.bottom - 9, tw - 16, 4), border_radius=2)
+            if bw:
+                pygame.draw.rect(c, col, (r.x + 8, r.bottom - 9, bw, 4), border_radius=2)
+        # scenes: six dots under the graph
+        for s in range(6):
+            sx = gx0 + s * 14
+            full = s < len(self.ascenes) and self.ascenes[s]
+            pygame.draw.circle(c, mm.ACCENT if full else self.mix(mm.BG, mm.DIM, 0.5), (sx + 4, gy1 + 2), 3)
