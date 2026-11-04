@@ -179,7 +179,44 @@ class ModesMixin(song.SongMixin):
             return True
         return self.tfx_input(name)
 
+    # Drone mode, L2 held: the left stick plays Cloud. Direction picks one of the
+    # eight textures (a compass), distance from centre sets the amount.
+    CLOUD_COMPASS = [3, 6, 5, 4, 1, 0, 2, 7]   # up Shimmer, up-right Bloom, right Drift, down-right Haze,
+                                               # down Grit, down-left Dust, left Smear, up-left Freeze
+
+    def drone_cloud(self, x, y):
+        r = math.hypot(x, y)
+        if r < 0.3:
+            return
+        sector = int(((math.degrees(math.atan2(x, y)) + 360 + 22.5) % 360) // 45)
+        tex = self.CLOUD_COMPASS[sector]
+        amt = round(min(1.0, (r - 0.3) / 0.6) * 20) / 20
+        if (tex, amt) == getattr(self, "drone_cloud_last", None):
+            return
+        self.drone_cloud_last = (tex, amt)
+        self.set_cloud(True, max(0.05, amt), tex)
+        self.flash("CLOUD  %s  %d%%   (L2 TAP OFF)" % (engine.Engine.CLOUD_TEX[tex][0].upper(), round(amt * 100)))
+
+    def set_cloud(self, on, amt, tex):
+        """Cloud on the track the drone plays through (or the live sound in Brickchord)."""
+        e = self.lp_e() if edition.LAB else None
+        if e is not None and not self.is_drum(self.lp_sel):
+            m = self.pm[e.cur][self.lp_sel]
+            m["rack"]["Cloud"] = [bool(on), float(amt), int(tex)]
+            self.lp_push_track(e.cur, self.lp_sel)
+            self.lp_dirty = True
+        else:
+            self.rack["Cloud"] = [bool(on), float(amt), int(tex)]
+            self.push_rack()
+
     def mode_stick(self, x, y):
+        if self.imode == "Drone" and "L2" in self.inp.held:
+            self.l2_moved = getattr(self, "l2_moved", False) or math.hypot(x, y) > 0.3
+            self.drone_cloud(x, y)
+            if getattr(self, "drone_xy_last", None) != (0.0, 0.0):
+                self.drone_xy_last = (0.0, 0.0)
+                self.eng.post("drone_mod", 0.0, 0.0)      # the stick is playing Cloud now, not the drone
+            return
         if self.imode == "Drone":
             xy = (round(x * 20) / 20, round(y * 20) / 20)   # 5% steps, so a jittery stick is quiet
             if xy != getattr(self, "drone_xy_last", None):
@@ -358,7 +395,7 @@ class ModesMixin(song.SongMixin):
 
     def mode_hint(self):
         return {"Lead": "Y oct+  L1 oct-  R1 sharp  L-stick bend/vibrato  L3 modes",
-                "Drone": "tap a degree to drone, again to stop  Y adds 3rd  L stick: down pulse  up swell  left thin  right bloom",
+                "Drone": "tap a degree to drone  Y adds 3rd  L stick: pulse swell thin bloom  L2+L stick: Cloud",
                 "Drums": ("8 pads  L1 soft  R1 accent  SELECT+A record track 1  L3 modes" if edition.LAB
                           else "8 pads  L1 soft  R1 accent  L3 modes"),
                 "Song": self.song_hint(),

@@ -316,9 +316,6 @@ class Engine:
             pan = float(rng.uniform(-0.7, 0.7) * (0.4 + spread))
             rev = (not up) and rng.random() < revs
             ch.cl_grains.append([start, 0, gl, -1 if rev else (2 if up else 1), pan, int(rng.integers(0, N))])
-        wv = self._CL_WIN.get(gl)
-        if wv is None:
-            wv = self._CL_WIN[gl] = np.hanning(gl).astype(np.float32)
         wl = np.zeros(N, np.float32)
         wr = np.zeros(N, np.float32)
         keep = []
@@ -326,6 +323,9 @@ class Engine:
             start, done, L, step, pan, off = g
             o = off if done == 0 else 0
             n = min(N - o, L - done)
+            wv = self._CL_WIN.get(L)                       # each grain keeps its own length's window
+            if wv is None:                                 # (it may have started under another texture)
+                wv = self._CL_WIN[L] = np.hanning(L).astype(np.float32)
             if n > 0:
                 if step < 0:                               # reversed grain: read backwards through it
                     e0 = start + L - done

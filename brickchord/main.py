@@ -1479,6 +1479,15 @@ class App(modes.ModesMixin):
             if down:
                 self.looper_rec()                           # REC: the next layer, HiChord style
             return
+        if name == "L2" and self.imode == "Drone":
+            # L2 + left stick plays Cloud on the drone; a tap without moving the stick turns it off
+            if down:
+                self.l2_moved = False
+            elif not getattr(self, "l2_moved", False):
+                self.set_cloud(False, 0.5, 3)
+                self.drone_cloud_last = None
+                self.flash("CLOUD OFF")
+            return
         if name in ("R2", "L2"):
             return                                          # spare triggers (R2 records in Bricklab)
         if name == "R3":
