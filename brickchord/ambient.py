@@ -1,4 +1,4 @@
-# Brickambient: an ambient machine on the Brickchord engine. Six drone voices
+# Brickglide: an ambient machine on the Brickchord engine. Six drone voices
 # you switch on and leave running, two melodic voices that step through five
 # notes, long glides between pitches drawn as guides on screen, scenes that
 # morph the whole texture, and the sticks for spread, movement and Cloud.

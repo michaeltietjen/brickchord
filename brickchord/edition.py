@@ -15,10 +15,10 @@ def _read():
         except Exception:
             v = "chord"
     v = v.lower()
-    return "lab" if v.startswith("lab") else ("ambient" if v.startswith("amb") else "chord")
+    return "lab" if v.startswith("lab") else ("ambient" if v.startswith(("amb", "glide")) else "chord")
 
 
 EDITION = _read()
 LAB = EDITION == "lab"
-AMBIENT = EDITION == "ambient"           # Brickambient: drones, long glides, scenes
-NAME = "Bricklab" if LAB else ("Brickambient" if AMBIENT else "Brickchord")
+AMBIENT = EDITION == "ambient"           # Brickglide: drones, long glides, chords, scenes
+NAME = "Bricklab" if LAB else ("Brickglide" if AMBIENT else "Brickchord")
