@@ -266,11 +266,11 @@ class Engine:
     FX_ORDER = ["Drive", "Lo-fi", "Chorus", "Flanger", "Vibrato", "Tremolo", "Gate",
                 "Auto-Pan", "Wide", "Filter LFO", "Cloud"]
     # Cloud: a granular texture processor on the track. Its "rate" picks a texture:
-    # (name, grain ms, grains per second, pitch spread in semitones, octave-up share, freeze)
-    CLOUD_TEX = [("Dust", 30, 40, 0.0, 0.0, False), ("Grit", 60, 30, 0.3, 0.0, False),
-                 ("Smear", 140, 18, 0.15, 0.0, False), ("Shimmer", 200, 14, 0.1, 0.5, False),
-                 ("Haze", 320, 10, 0.4, 0.0, False), ("Drift", 500, 7, 0.8, 0.15, False),
-                 ("Bloom", 800, 5, 0.25, 0.3, False), ("Freeze", 400, 12, 0.2, 0.2, True)]
+    # (name, grain ms, grains per second, stereo spread, octave-up share, freeze, reverse share, crush)
+    CLOUD_TEX = [("Dust", 30, 40, 0.0, 0.0, False, 0.0, 0), ("Grit", 35, 55, 0.6, 0.0, False, 0.5, 5),
+                 ("Smear", 140, 18, 0.15, 0.0, False, 0.0, 0), ("Shimmer", 200, 14, 0.1, 0.5, False, 0.0, 0),
+                 ("Haze", 320, 10, 0.4, 0.0, False, 0.3, 0), ("Drift", 500, 7, 0.8, 0.15, False, 0.5, 0),
+                 ("Bloom", 800, 5, 0.25, 0.3, False, 0.0, 0), ("Freeze", 400, 12, 0.2, 0.2, True, 0.25, 0)]
 
     def c_rack(self, rack):
         """The Effects page: the selected track's rack."""
@@ -283,7 +283,7 @@ class Engine:
         are read back from it (behind the write head, scattered), at the same pitch or
         an octave up, windowed, panned and mixed in. Freeze keeps the last thing played.
         Cheap on purpose: grains are plain slices of the buffer, at most six at once."""
-        name, gms, dens, spread, octup, freeze = self.CLOUD_TEX[ti % len(self.CLOUD_TEX)]
+        name, gms, dens, spread, octup, freeze, revs, crush = self.CLOUD_TEX[ti % len(self.CLOUD_TEX)]
         B = 2 * sr
         if getattr(ch, "cl_buf", None) is None:
             ch.cl_buf = np.zeros(2 * B, np.float32)         # the ring, written twice, so reads never wrap
@@ -314,7 +314,8 @@ class Engine:
             back += gl * (2 if up else 1)
             start = int(ch.cl_w - back) % B
             pan = float(rng.uniform(-0.7, 0.7) * (0.4 + spread))
-            ch.cl_grains.append([start, 0, gl, 2 if up else 1, pan, int(rng.integers(0, N))])
+            rev = (not up) and rng.random() < revs
+            ch.cl_grains.append([start, 0, gl, -1 if rev else (2 if up else 1), pan, int(rng.integers(0, N))])
         wv = self._CL_WIN.get(gl)
         if wv is None:
             wv = self._CL_WIN[gl] = np.hanning(gl).astype(np.float32)
@@ -326,8 +327,12 @@ class Engine:
             o = off if done == 0 else 0
             n = min(N - o, L - done)
             if n > 0:
-                p0 = start + done * step
-                seg = ch.cl_buf[p0:p0 + n * step:step][:n] * wv[done:done + n]
+                if step < 0:                               # reversed grain: read backwards through it
+                    e0 = start + L - done
+                    seg = ch.cl_buf[e0 - n:e0][::-1] * wv[done:done + n]
+                else:
+                    p0 = start + done * step
+                    seg = ch.cl_buf[p0:p0 + n * step:step][:n] * wv[done:done + n]
                 if len(seg) == n:
                     wl[o:o + n] += seg * (1.0 - max(0.0, pan))
                     wr[o:o + n] += seg * (1.0 + min(0.0, pan))
@@ -339,6 +344,11 @@ class Engine:
         norm = 1.0 / max(1.0, math.sqrt(dens * gms / 1000.0))
         mix = min(1.0, a * 1.2)
         g_wet = norm * (0.4 + 1.2 * mix)
+        if crush:                                          # Grit: the cloud itself is bit-crushed and sample-held
+            q = float(2 ** crush)
+            wl = np.round(np.repeat(wl[::3], 3)[:N] * q) / q
+            wr = np.round(np.repeat(wr[::3], 3)[:N] * q) / q
+            g_wet *= 1.4
         out = x * (1.0 - 0.6 * mix)
         out[:, 0] += wl * g_wet
         out[:, 1] += wr * g_wet
