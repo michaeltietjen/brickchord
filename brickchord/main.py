@@ -76,6 +76,12 @@ MENU_PAGES = {
     "Drums": None,
     "Sample": None,
     "Macro": None,
+    # Bricklab: one tab for the selected track, holding only its machine's settings
+    "Chord": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
+              "Bass", "Bass Level"],
+    "Lead": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Lead glide"],
+    "Bass": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Lead glide"],
+    "Drone": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Drone slide"],
     "FX": ["Reverb", "Delay", "Reverb Type", "Delay Type", "Delay Time",
            "A Reverb Type", "A Delay Type", "A Delay Time", "B Reverb Type", "B Delay Type", "B Delay Time"],
 }
@@ -1013,27 +1019,34 @@ class App(modes.ModesMixin):
     # ---------------- drums
 
     # ---------------- menu
+    TRACK_TABS = ("Drums", "Chord", "Lead", "Bass", "Drone", "Sample", "Macro")
+
+    def track_tab(self):
+        """Bricklab's settings tab for the selected track: named after its machine."""
+        e = self.lp_e()
+        if e is None:
+            return "Chord"
+        k = self.lp_sel
+        if self.is_drum(k):
+            return "Drums"
+        return synth.MACHINE_NAME.get(self.pm[e.cur][k].get("machine", "chord"), "Chord")
+
     def menu_pages(self):
-        out = [n for n in MENU_PAGES if n not in ("Drums", "Sample", "Songs", "Macro") or edition.LAB]
-        if edition.LAB and self.machine != "sample" and "Sample" in out:
-            out.remove("Sample")
-        if edition.LAB and self.machine != "macro" and "Macro" in out:
-            out.remove("Macro")
-        return out
+        if edition.LAB:
+            return ["Songs", "Global", self.track_tab(), "FX"]
+        return ["Global", "Chords", "FX"]
 
     def menu_context_page(self):
         """The page Settings opens on: the one for what you are doing."""
         im = self.imode
-        if edition.LAB and (im == "Drums" or (im == "Song" and self.sg_page == "grid" and self.lp_sel == 0)):
-            return "Drums"
         if im == "Effects":
             return "FX"
+        if edition.LAB:
+            if im == "Song" and self.sg_page != "grid":
+                return "Global"
+            return self.track_tab()
         if im == "Song":
             return "Global"
-        if edition.LAB and self.machine == "sample":
-            return "Sample"
-        if edition.LAB and self.machine == "macro":
-            return "Macro"
         return "Chords"
 
     def open_menu(self):
@@ -1042,7 +1055,7 @@ class App(modes.ModesMixin):
 
     def menu_set_page(self, pg):
         self.menu_pos[self.menu_pg] = self.menu_i
-        self.menu_pg = pg if pg in self.menu_pages() else "Chords"
+        self.menu_pg = pg if pg in self.menu_pages() else (self.track_tab() if edition.LAB else "Chords")
         self.menu_i = self.menu_pos.get(self.menu_pg, 0)
         if self.menu_pg == "Drums":
             e = self.lp_e()
@@ -1051,15 +1064,22 @@ class App(modes.ModesMixin):
         self.menu_i %= max(1, len(self.menu_items()))
 
     def menu_items(self):
+        if edition.LAB and self.menu_pg in self.TRACK_TABS and self.menu_pg != "Drums":
+            # every machine tab starts with the track's Machine, so it can be changed right here
+            return [("Machine", self.menu_pg)] + self.machine_rows()
         if self.menu_pg == "Drums" and edition.LAB:
             return self.drum_menu_items()
-        if self.menu_pg == "Sample" and edition.LAB:
-            return self.smp_menu_items()
-        if self.menu_pg == "Macro" and edition.LAB:
-            return self.mac_menu_items()
         rows = dict(self.all_menu_items())
         return [(n, rows[n]) for n in MENU_PAGES.get(self.menu_pg) or MENU_PAGES["Chords"]
                 if n in rows and not (n == "Beat" and edition.LAB)]
+
+    def machine_rows(self):
+        if self.menu_pg == "Sample":
+            return [r for r in self.smp_menu_items() if r[0] != "No sample track"]
+        if self.menu_pg == "Macro":
+            return [r for r in self.mac_menu_items() if r[0] != "No Macro track"]
+        rows = dict(self.all_menu_items())
+        return [(n, rows[n]) for n in MENU_PAGES[self.menu_pg] if n in rows]
 
     def all_menu_items(self):
         return [
@@ -1115,6 +1135,12 @@ class App(modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
+        if name == "Machine" and edition.LAB:
+            e = self.lp_e()
+            self.set_machine(e.cur, self.lp_sel, d)
+            self.menu_pg = self.track_tab()
+            self.menu_i = 0
+            return
         if self.menu_pg == "Drums":
             self.drum_menu_change(name, d)
             return
@@ -2135,8 +2161,9 @@ class App(modes.ModesMixin):
         """SETTINGS tabs across the top; the open page is lit."""
         pages = self.menu_pages()
         off = int((1 - a) ** 2 * 60) if self.menu else 0
-        labels = [("DRUMS  P%02d" % ((self.lp_e().cur if self.lp_e() else 0) + 1)) if (pg == "Drums" and pg == self.menu_pg)
-                  else pg.upper() for pg in pages]
+        cur = (self.lp_e().cur if self.lp_e() else 0) + 1
+        labels = [("T%d %s%s" % (self.lp_sel + 1, pg.upper(), ("  P%02d" % cur) if pg == "Drums" else ""))
+                  if (edition.LAB and pg in self.TRACK_TABS) else pg.upper() for pg in pages]
         gap = 34
         ws = [self.f_med.size(t)[0] for t in labels]
         x = BASE_W // 2 - (sum(ws) + gap * (len(ws) - 1)) // 2
