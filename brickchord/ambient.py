@@ -22,6 +22,7 @@ import json
 import math
 import time
 
+import numpy as np
 import pygame
 
 import engine
@@ -279,7 +280,10 @@ class AmbientMixin:
             self.flash("FREEZE " + ("ON: THE CLOUD HOLDS WHAT IS SOUNDING" if self.afreeze else "OFF"))
             return True
         if name == "L3":
-            return True                                      # no mode wheel here
+            self.aview = "spectrum" if getattr(self, "aview", "guides") == "guides" else "guides"
+            self.flash("VIEW: " + ("SPECTROGRAM  (the real sound, every harmonic)" if self.aview == "spectrum"
+                                   else "GLIDE GUIDES"))
+            return True
         return False
 
     def amb_stick(self, x, y):
@@ -833,6 +837,54 @@ class AmbientMixin:
         return "%s %s   %d voice%s%s" % (M().NOTE_NAMES[self.key], self.scale, n, "" if n == 1 else "s",
                                          "   FREEZE" if self.afreeze else "")
 
+    # ------------------------------------------------------------ spectrogram view (L3)
+    SPEC_LO, SPEC_HI = 45.0, 4000.0
+
+    def amb_spec_feed(self, w, h):
+        """Take each new block of output from the scope, keep the last 2048 samples,
+        and add one column of a log-frequency spectrogram: harmonics as lines."""
+        e = getattr(self.eng, "eng", None)
+        sc = getattr(e, "scope", None)
+        if sc is None or not len(sc):
+            return
+        last = getattr(self, "_spec_last", None)
+        if last is not None and len(last) == len(sc) and np.array_equal(last, sc):
+            return                                          # the same block again
+        self._spec_last = np.array(sc, copy=True)
+        buf = getattr(self, "_spec_buf", None)
+        if buf is None:
+            buf = np.zeros(2048, np.float32)
+        buf = np.concatenate([buf, np.asarray(sc, np.float32)])[-2048:]
+        self._spec_buf = buf
+        surf = getattr(self, "_spec_surf", None)
+        if surf is None or surf.get_size() != (w, h):
+            surf = self._spec_surf = pygame.Surface((w, h))
+            surf.fill(M().BG)
+            self._spec_rows = None
+        sr = 11025.0                                        # the scope is the output at half rate
+        if self._spec_rows is None or len(self._spec_rows) != h:
+            f = np.geomspace(self.SPEC_LO, self.SPEC_HI, h)[::-1]
+            self._spec_rows = np.clip((f / sr * 2048).astype(int), 1, 1023)
+            self._spec_win = np.hanning(2048).astype(np.float32)
+        mag = np.abs(np.fft.rfft(buf * self._spec_win))
+        db = 20 * np.log10(mag[self._spec_rows] + 1e-4)
+        pk = getattr(self, "_spec_pk", 0.0)
+        pk = max(db.max(), pk - 0.3)                        # a slowly falling reference, so quiet parts still show
+        self._spec_pk = pk
+        lv = np.clip((db - (pk - 60)) / 60.0, 0, 1) ** 1.6
+        # palette: background, violet, gold, white
+        bg = np.array(M().BG, np.float32)
+        v = np.array(M().ACCENT, np.float32)
+        g = np.array(M().ACCENT2, np.float32)
+        wht = np.array((250, 246, 236), np.float32)
+        col = np.where(lv[:, None] < 0.5, bg + (v - bg) * (lv[:, None] / 0.5),
+                       np.where(lv[:, None] < 0.85, v + (g - v) * ((lv[:, None] - 0.5) / 0.35),
+                                g + (wht - g) * ((lv[:, None] - 0.85) / 0.15)))
+        surf.scroll(-1, 0)
+        px = pygame.surfarray.pixels3d(surf)
+        px[w - 1, :, :] = col.astype(np.uint8)
+        del px
+
     def draw_ambient(self, c, now):
         mm = M()
         L = mm.L
@@ -841,6 +893,22 @@ class AmbientMixin:
         gy0, gy1 = 46, L["tiles_y"] - 12
         pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.55), (gx0 - 8, gy0 - 4, gx1 - gx0 + 16, gy1 - gy0 + 8),
                          border_radius=10)
+        if getattr(self, "aview", "guides") == "spectrum":
+            gw, gh = gx1 - gx0, gy1 - gy0
+            self.amb_spec_feed(gw, gh)
+            if getattr(self, "_spec_surf", None) is not None:
+                c.blit(self._spec_surf, (gx0, gy0))
+            # a few note names up the side, where those frequencies sit
+            for n in range(24, 108, 12):
+                fq = 440.0 * 2 ** ((n + self.key - 69) / 12.0)
+                if self.SPEC_LO < fq < self.SPEC_HI:
+                    y = gy1 - math.log(fq / self.SPEC_LO) / math.log(self.SPEC_HI / self.SPEC_LO) * gh
+                    self.text(c, mm.NOTE_NAMES[(n + self.key) % 12] + str((n + self.key) // 12 - 1), self.f_small,
+                              self.mix(mm.BG, mm.DIM, 0.8), (gx0 + 4, int(y) - 15))
+            self.text(c, "SPECTROGRAM   L3 GUIDES", self.f_small, self.mix(mm.BG, mm.DIM, 0.8), (gx1 - 4, gy0 + 2),
+                      right=True)
+            self.draw_amb_tiles(c, now)
+            return
         # the range follows the voices (at least three octaves), easing as they move
         ps = [p for i in range(NV) if self.aui[i]["lvl"] > 0.01 or self.av[i]["on"]
               for p in (self.aui[i]["cur"] or 0, self.av[i]["note"] * 100.0) if p]
@@ -896,6 +964,27 @@ class AmbientMixin:
                     for yy in range(min(y, ty), max(y, ty), 6):
                         pygame.draw.line(c, col, (gx1 + 6, yy), (gx1 + 6, min(yy + 3, max(y, ty))), 1)
                     pygame.draw.line(c, col, (gx1 + 2, ty), (gx1 + 10, ty), 2)
+        self.draw_amb_tiles(c, now)
+        # the progression: its chords along the bottom of the graph, the current one lit
+        pr = self.aprog
+        if pr["run"]:
+            xx = gx0 + 100
+            for s, deg in enumerate(pr["steps"]):
+                if deg is None:
+                    continue
+                lab = ROMAN[deg % 7]
+                r = self.text(c, lab, self.f_small, mm.ACCENT if s == pr["i"] else mm.DIM, (xx, gy1 - 16))
+                xx = r.right + 10
+        # scenes: six dots under the graph
+        for s in range(6):
+            sx = gx0 + s * 14
+            full = s < len(self.ascenes) and self.ascenes[s]
+            pygame.draw.circle(c, mm.ACCENT if full else self.mix(mm.BG, mm.DIM, 0.5), (sx + 4, gy1 + 2), 3)
+
+    def draw_amb_tiles(self, c, now):
+        mm = M()
+        L = mm.L
+        W = mm.BASE_W
         # voice tiles
         tw, gap = 70, 6
         x0 = (W - (NV * tw + (NV - 1) * gap)) // 2
@@ -927,18 +1016,3 @@ class AmbientMixin:
             pygame.draw.rect(c, mm.BG, (r.x + 8, r.bottom - 9, tw - 16, 4), border_radius=2)
             if bw:
                 pygame.draw.rect(c, col, (r.x + 8, r.bottom - 9, bw, 4), border_radius=2)
-        # the progression: its chords along the bottom of the graph, the current one lit
-        pr = self.aprog
-        if pr["run"]:
-            xx = gx0 + 100
-            for s, deg in enumerate(pr["steps"]):
-                if deg is None:
-                    continue
-                lab = ROMAN[deg % 7]
-                r = self.text(c, lab, self.f_small, mm.ACCENT if s == pr["i"] else mm.DIM, (xx, gy1 - 16))
-                xx = r.right + 10
-        # scenes: six dots under the graph
-        for s in range(6):
-            sx = gx0 + s * 14
-            full = s < len(self.ascenes) and self.ascenes[s]
-            pygame.draw.circle(c, mm.ACCENT if full else self.mix(mm.BG, mm.DIM, 0.5), (sx + 4, gy1 + 2), 3)
