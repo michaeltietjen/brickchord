@@ -27,7 +27,7 @@ FX_ROWS = engine.Engine.FX_ORDER + ["Glide"]
 RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
                "Vibrato": (0.3, 0), "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4),
-               "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Glide": (0.3, 0)}
+               "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Cloud": (0.5, 2), "Glide": (0.3, 0)}
 DRUM_PADS = {"LEFT": "kick", "UP": "snare", "RIGHT": "hat", "DOWN": "ohat", "X": "clap", "A": "tom",
              "B": "rim", "Y": "shk"}
 PAD_LABEL = {"kick": "KICK", "snare": "SNARE", "hat": "HAT", "ohat": "OPEN", "clap": "CLAP", "tom": "TOM",
@@ -462,7 +462,9 @@ class ModesMixin(song.SongMixin):
             fill = int(bw * self.sm("fxamt_" + k, amt, 18))
             if fill:
                 pygame.draw.rect(c, mm.ACCENT if on else mm.DIM, (bx, y + rh // 2 - 4, fill, 8), border_radius=4)
-            val = ("%.2fs" % (amt * 0.4)) if k == "Glide" else (RATES[ri][0] if k not in ("Drive", "Lo-fi", "Wide") else "")
+            val = ("%.2fs" % (amt * 0.4)) if k == "Glide" else (
+                engine.Engine.CLOUD_TEX[ri % 8][0] if k == "Cloud" else
+                (RATES[ri][0] if k not in ("Drive", "Lo-fi", "Wide") else ""))
             self.text(c, val, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28 + kick, y + 6), right=True)
 
     def draw_wheel(self, c):

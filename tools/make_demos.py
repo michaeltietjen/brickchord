@@ -18,9 +18,10 @@ import synth  # noqa: E402
 
 OUT = os.path.join(APP, "demos")
 NP, NT = 16, 6
-FX = ["Drive", "Lo-fi", "Chorus", "Flanger", "Vibrato", "Tremolo", "Gate", "Auto-Pan", "Wide", "Filter LFO"]
+FX = ["Drive", "Lo-fi", "Chorus", "Flanger", "Vibrato", "Tremolo", "Gate", "Auto-Pan", "Wide", "Filter LFO", "Cloud"]
 FX_DEF = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6), "Vibrato": (0.3, 0),
-          "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4), "Wide": (0.6, 3), "Filter LFO": (0.6, 5)}
+          "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4), "Wide": (0.6, 3), "Filter LFO": (0.6, 5),
+          "Cloud": (0.5, 2)}
 DG = {"kick": 0.9, "snare": 0.75, "hat": 0.7, "ohat": 0.7, "clap": 0.8, "rim": 0.6, "tom": 0.8, "shk": 0.7}
 SCALES = {"Major": [0, 2, 4, 5, 7, 9, 11], "Minor": [0, 2, 3, 5, 7, 8, 10],
           "Dorian": [0, 2, 3, 5, 7, 9, 10], "Mixolydian": [0, 2, 4, 5, 7, 9, 10]}
@@ -409,9 +410,9 @@ def resonators():
                         (22, 6, 2), (24, 0, 2), (27, 0, 1), (30, 4, 2)], octave=2, gain=0.85, rel=0.2)
     t_drum = dict(drum_track("Modular", human=0.15), vol=0.7)
     t_mar = macro_track("Marimba", vol=0.7, pan=-0.2, rs=0.3, ds=0.2, bus=0)
-    t_kal = macro_track("Kalimba", vol=0.6, pan=0.3, rs=0.35, ds=0.35, bus=1)
+    t_kal = macro_track("Kalimba", vol=0.6, pan=0.3, rs=0.35, ds=0.35, bus=1, fx=rack(Cloud=(0.5, 3)))
     t_bowl = macro_track("Bell Bowl", vol=0.5, rs=0.5, ds=0.2, bus=1)
-    t_choir = macro_track("Vowel Choir", vol=0.45, rs=0.55, bus=1, fx=rack(Chorus=0.4), morph=0.6)
+    t_choir = macro_track("Bowed Glass", vol=0.5, rs=0.55, bus=1, fx=rack(Chorus=0.4))
     t_pluck = macro_track("Plucked String", vol=0.8, rs=0.1, timbre=0.5, morph=0.5)
     a = [dict(t_drum, ev=[]), with_ev(t_mar, mar), dict(t_kal, ev=[]), with_ev(t_bowl, bowl), with_ev(t_choir, choir),
          dict(t_pluck, ev=[])]

@@ -28,7 +28,7 @@ FX_ORDER = engine.Engine.FX_ORDER
 RATES = engine.Engine.RATES
 FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flanger": (0.5, 6),
                "Vibrato": (0.3, 0), "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4),
-               "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Glide": (0.3, 0)}
+               "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Cloud": (0.5, 2), "Glide": (0.3, 0)}
 TFX_ROWS = ["Machine", "Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "FX bus", "Cutoff", "Resonance"] + FX_ORDER
 TFX_SECTION = {"Machine": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "LIVE FILTER", "Drive": "EFFECTS"}
 NO_RATE = ("Drive", "Lo-fi", "Wide")
@@ -1005,7 +1005,7 @@ class SongMixin:
         model = int(d["macro"]) % len(synth.MACRO_MODELS)
         rows = [("Preset", t[2]["name"] or d["name"]), ("Model", synth.MACRO_MODELS[model])]
         for label, key in self.MAC_ROWS:
-            if key == "decay" and model < 6:
+            if key == "decay" and model not in synth.MACRO_STRUCK:
                 continue
             rows.append((label, "%d%%" % round(float(d[key]) * 100)))
         rows.append(("Reset to preset", "A"))
@@ -2007,6 +2007,6 @@ class SongMixin:
                     pygame.draw.rect(c, mm.ACCENT if on else mm.DIM, (bx, y + rh // 2 - 4, fill, 8), border_radius=4)
                 txt = "%d%%" % round(amt * 100)
                 if fx and row not in NO_RATE:
-                    txt += "   " + RATES[val[2]][0]
+                    txt += "   " + (engine.Engine.CLOUD_TEX[val[2] % 8][0] if row == "Cloud" else RATES[val[2]][0])
             self.text(c, txt, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28 + kick, y + 5), right=True)
         c.set_clip(None)

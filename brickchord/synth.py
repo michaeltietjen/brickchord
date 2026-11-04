@@ -439,7 +439,8 @@ def _grain_cloud(x, r, p, secs=2.5, seed=11):
 # model, each driven by the same three controls, HARMONICS, TIMBRE and MORPH
 # (0..1). Sustaining models render a seamless, period-locked loop; String and
 # Modal are struck and ring out.
-MACRO_MODELS = ["Analog", "Fold", "FM", "Vowel", "Additive", "Table", "String", "Modal"]
+MACRO_MODELS = ["Analog", "Fold", "FM", "Vowel", "Additive", "Table", "String", "Modal", "Bowed", "Blown"]
+MACRO_STRUCK = (6, 7)
 MACRO_PATCH = {"macro": 0, "harm": 0.5, "timbre": 0.5, "morph": 0.5, "decay": 0.5,
                "a": 0.005, "d": 0.3, "s": 0.7, "r": 0.3, "cutoff": 9000.0, "res": 0.5, "oscs": [], "name": ""}
 _FORMANTS = [(730, 1090, 2440), (530, 1840, 2480), (270, 2290, 3010), (570, 840, 2410), (300, 870, 2240)]   # a e i o u
@@ -549,11 +550,64 @@ def _modal(f, secs, h, t, m, seed):
     return out
 
 
+def _resonator_drive(f, secs, h, t, m, model, seed):
+    """Bowed and Blown: a continuous exciter through a resonator bank (the modal
+    voice idea): the exciter's spectrum is shaped by the resonator's peaks in the
+    frequency domain. HARMONICS bends the partials, TIMBRE brightens the exciter,
+    MORPH narrows the peaks (more ringing, more pitch)."""
+    n = int(secs * SR)
+    rng = np.random.RandomState(seed)
+    nz = rng.randn(n)
+    if model == 8:                                     # bow: noise plus a stick-slip pulse train at the pitch
+        ph = (np.arange(n) * f / SR) % 1.0
+        exc = nz * (0.3 + 0.7 * t) + (ph < 0.08).astype(float) * (2.0 - 1.5 * t)
+    else:                                              # blow: breath noise with a slow wobble
+        exc = nz * (1.0 + 0.3 * np.sin(2 * np.pi * 3.1 * np.arange(n) / SR))
+    X = np.fft.rfft(exc)
+    fr = np.fft.rfftfreq(n, 1.0 / SR)
+    if h < 0.5:
+        ratios = np.arange(1, 25) * (1 + (h / 0.5) * 0.003 * np.arange(1, 25) ** 2)
+    else:
+        ratios = np.array([1.0, 2.756, 5.404, 8.933, 13.34, 18.64, 24.81, 31.87]) ** (0.8 + 0.5 * (h - 0.5) / 0.5)
+    bw = f * (0.06 - 0.055 * m) + 1.0
+    H = np.zeros_like(fr)
+    for i, r in enumerate(ratios):
+        fc = f * r
+        if fc > SR * 0.45:
+            break
+        amp = np.exp(-i * (0.9 - 0.7 * t)) if model == 8 else np.exp(-i * (1.2 - 0.8 * t))
+        H += amp / (1.0 + ((fr - fc) / (bw * (1 + 0.15 * i))) ** 2)
+    y = np.fft.irfft(X * H, n)
+    if model == 9:
+        y += np.fft.irfft(X * np.exp(-((fr - 3000 - 4000 * t) / 2500) ** 2), n) * 0.05   # a breath of air on top
+    return y
+
+
 def render_macro(midi, p, arrays=False):
     model = int(p.get("macro", 0)) % len(MACRO_MODELS)
     h, t, m = (float(p.get(k, 0.5)) for k in ("harm", "timbre", "morph"))
     f = 440.0 * 2 ** ((midi - 69) / 12.0)
-    if model >= 6:                                     # struck models ring out
+    if model >= 8:                                     # bowed / blown: sustaining resonator, crossfaded loop
+        y = _resonator_drive(f, 3.0, h, t, m, model, midi)
+        y = y / (np.max(np.abs(y[int(0.2 * SR):])) + 1e-9)
+        att_n = int(max(0.2, float(p.get("a", 0.1)) + float(p.get("d", 0.3))) * SR)
+        loop_n = int(1.6 * SR)
+        F = int(0.25 * SR)
+        loop = y[att_n:att_n + loop_n].copy()
+        ramp = np.linspace(0, 1, F)
+        # the loop's end fades into the audio just before its start, so both the
+        # attack-to-loop join and the loop's own wrap are continuous
+        loop[-F:] = loop[-F:] * (1 - ramp) + y[att_n - F:att_n] * ramp
+        env = _adsr(att_n, float(p.get("a", 0.1)), float(p.get("d", 0.3)), float(p.get("s", 0.85)), SR)
+        att = y[:att_n] * env[:att_n]
+        loop = loop * float(p.get("s", 0.85))
+        g = GAIN * 2.2
+        a_st = np.repeat(att[:, None], 2, axis=1).astype(np.float32) * g
+        l_st = np.repeat(loop[:, None], 2, axis=1).astype(np.float32) * g
+        if arrays:
+            return np.ascontiguousarray(a_st), np.ascontiguousarray(l_st)
+        return _to_bytes(a_st), _to_bytes(l_st), att_n / SR
+    if model in MACRO_STRUCK:                          # struck models ring out
         secs = 0.4 + 3.5 * float(p.get("decay", 0.5))
         x = _ks_string(f, min(secs, 3.0), h, t, m, midi) if model == 6 else _modal(f, secs, h, t, m, midi)
         x = x / (np.max(np.abs(x)) + 1e-9)
@@ -605,6 +659,10 @@ MACRO_PATCHES = [
     _mc("Bell Bowl", 7, 0.8, 0.6, 0.85, decay=0.9),
     _mc("Steel Drum", 7, 0.55, 0.65, 0.45, decay=0.45),
     _mc("Kalimba", 7, 0.2, 0.55, 0.35, decay=0.35),
+    _mc("Bowed String", 8, 0.1, 0.5, 0.7, a=0.25, d=0.3, s=0.85, r=0.6),
+    _mc("Bowed Glass", 8, 0.75, 0.6, 0.85, a=0.4, d=0.4, s=0.8, r=1.0),
+    _mc("Blown Pipe", 9, 0.05, 0.35, 0.8, a=0.15, d=0.3, s=0.85, r=0.4),
+    _mc("Blown Bottle", 9, 0.6, 0.2, 0.9, a=0.1, d=0.2, s=0.8, r=0.5),
 ]
 
 

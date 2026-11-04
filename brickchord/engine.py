@@ -264,11 +264,75 @@ class Engine:
     RATES = [("1/16", 0.25), ("1/8", 0.5), ("1/8.", 0.75), ("1/4", 1.0), ("1/2", 2.0),
              ("1 bar", 4.0), ("2 bars", 8.0), ("4 bars", 16.0)]
     FX_ORDER = ["Drive", "Lo-fi", "Chorus", "Flanger", "Vibrato", "Tremolo", "Gate",
-                "Auto-Pan", "Wide", "Filter LFO"]
+                "Auto-Pan", "Wide", "Filter LFO", "Cloud"]
+    # Cloud: a granular texture processor on the track. Its "rate" picks a texture:
+    # (name, grain ms, grains per second, pitch spread in semitones, octave-up share, freeze)
+    CLOUD_TEX = [("Dust", 30, 40, 0.0, 0.0, False), ("Grit", 60, 30, 0.3, 0.0, False),
+                 ("Smear", 140, 18, 0.15, 0.0, False), ("Shimmer", 200, 14, 0.1, 0.5, False),
+                 ("Haze", 320, 10, 0.4, 0.0, False), ("Drift", 500, 7, 0.8, 0.15, False),
+                 ("Bloom", 800, 5, 0.25, 0.3, False), ("Freeze", 400, 12, 0.2, 0.2, True)]
 
     def c_rack(self, rack):
         """The Effects page: the selected track's rack."""
         self._sel_chain().rack = {k: tuple(v) for k, v in rack.items()}
+
+    def _cloud(self, ch, x, N, sr, a, ti):
+        """Granular texture: the track's last two seconds sit in a buffer; grains are
+        read back from it (a little behind the write head, scattered), pitched and
+        windowed, and mixed in. Freeze stops writing, so the texture holds."""
+        name, gms, dens, spread, octup, freeze = self.CLOUD_TEX[ti % len(self.CLOUD_TEX)]
+        B = 2 * sr
+        if getattr(ch, "cl_buf", None) is None:
+            ch.cl_buf = np.zeros((B, 2), np.float32)
+            ch.cl_w = 0
+            ch.cl_grains = []
+            ch.cl_rng = np.random.default_rng(1234)
+        if not freeze or float(np.abs(x).max()) > 1e-3:   # Freeze keeps the last thing played
+            w = ch.cl_w
+            idx = (w + np.arange(N)) % B
+            ch.cl_buf[idx] = x
+            ch.cl_w = (w + N) % B
+        rng = ch.cl_rng
+        gl = max(64, int(gms * sr / 1000))
+        expect = dens * (0.4 + 0.8 * a) * N / sr
+        n_new = rng.poisson(expect)
+        for _ in range(min(n_new, 12)):
+            back = rng.uniform(0.05, 1.6) * sr if not freeze else rng.uniform(0.0, 1.9) * sr
+            start = (ch.cl_w - back - gl) % B
+            st = 2.0 ** (rng.uniform(-spread, spread) / 12.0) * (2.0 if rng.random() < octup else 1.0)
+            pan = rng.uniform(-0.7, 0.7)
+            ch.cl_grains.append([start, 0, gl, st, pan, int(rng.integers(0, N))])
+        wet = np.zeros((N, 2), np.float32)
+        keep = []
+        win_cache = {}
+        for g in ch.cl_grains:
+            start, done, L, st, pan, off = g
+            o = off if done == 0 else 0
+            n = min(N - o, L - done)
+            if n <= 0:
+                keep.append(g)
+                g[5] = 0
+                continue
+            k = np.arange(done, done + n)
+            pos = (start + k * st) % B
+            i0 = pos.astype(np.int64)
+            fr = (pos - i0)[:, None].astype(np.float32)
+            seg = ch.cl_buf[i0] * (1 - fr) + ch.cl_buf[(i0 + 1) % B] * fr
+            wv = win_cache.get(L)
+            if wv is None:
+                wv = win_cache[L] = np.hanning(L).astype(np.float32)
+            seg = seg * wv[done:done + n, None]
+            seg[:, 0] *= 1.0 - max(0.0, pan)
+            seg[:, 1] *= 1.0 + min(0.0, pan)
+            wet[o:o + n] += seg
+            g[1] = done + n
+            g[5] = 0
+            if g[1] < L:
+                keep.append(g)
+        ch.cl_grains = keep[-48:]
+        norm = 1.0 / max(1.0, math.sqrt(dens * gms / 1000.0))
+        mix = min(1.0, a * 1.2)
+        return (x * (1.0 - 0.6 * mix) + wet * norm * (0.4 + 1.2 * mix)).astype(np.float32)
 
     def _lfo_phase(self, N, sr, beats):
         bps = self.bpm / 60.0 / sr
@@ -354,6 +418,8 @@ class Engine:
             elif "Filter LFO" in ch.was:
                 fu = ch.flt_user
                 ch.flt_t = (round(fu[0], 2), round(fu[1], 2))
+            if "Cloud" in on:
+                x = self._cloud(ch, x, N, sr, on["Cloud"][1], on["Cloud"][2])
             ch.was = set(on)
         elif ch.was:
             if "Filter LFO" in ch.was:
@@ -1866,7 +1932,7 @@ class Engine:
             b = tb.get(key)
             if b is None:
                 tr.idle += 1
-                if tr.idle > 2 and key != selkey:
+                if tr.idle > 2 and key != selkey and not (tr.ch.rack.get("Cloud") or (False,))[0]:
                     self._tails.discard(key)
                     continue
                 b = np.zeros((N, 2), np.float32)
