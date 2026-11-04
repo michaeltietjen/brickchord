@@ -333,10 +333,19 @@ class App(modes.ModesMixin):
         pygame.mouse.set_visible(False)
         pygame.display.set_caption(edition.NAME)
         self.canvas = pygame.Surface((BASE_W, BASE_H))
-        self.f_huge = pygame.font.Font(None, 132)
-        self.f_big = pygame.font.Font(None, 54)
-        self.f_med = pygame.font.Font(None, 30)
-        self.f_small = pygame.font.Font(None, 22)
+        # Inter (SIL OFL, in fonts/) when it is there: crisper at this size than the
+        # default font; the sizes are matched to the default font's so layouts hold
+        fd = os.path.join(APP_DIR, "fonts")
+
+        def font(name, size, fallback):
+            try:
+                return pygame.font.Font(os.path.join(fd, name), size)
+            except Exception:
+                return pygame.font.Font(None, fallback)
+        self.f_huge = font("Inter-Bold.ttf", 94, 132)
+        self.f_big = font("Inter-SemiBold.ttf", 38, 54)
+        self.f_med = font("Inter-SemiBold.ttf", 21, 30)
+        self.f_small = font("Inter-Medium.ttf", 15, 22)
 
         self.inp = Input(self.cfg.get("buttons", {}))
         self.edits = self.cfg.get("patch_edits", {})
@@ -1744,9 +1753,11 @@ class App(modes.ModesMixin):
             status.append("LATCH")
         left = self.eng.remaining
         if left:
-            status.append("%d notes finish when quiet" % left)
-        status.append("CPU %d%%" % round(self.eng.load * 100))
-        sr = self.text(c, "   ".join(status), self.f_small, ACCENT2, (20, L["status_y"]))
+            status.append("rendering %d" % left)
+        if self.eng.load > 0.6:                       # only when it matters
+            status.append("CPU %d%%" % round(self.eng.load * 100))
+        sr = self.text(c, "   ".join(status), self.f_small, ACCENT2 if self.eng.load <= 0.8 else (230, 90, 80),
+                       (20, L["status_y"]))
         hint = self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
         if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
@@ -2121,7 +2132,7 @@ class App(modes.ModesMixin):
     def draw_list(self, c, a, title, rows, sel_i, key, xin):
         """Shared look for Settings and the sound editor: the panel slides up,
         the highlight glides between rows, changed values flick sideways."""
-        self._ov.set_alpha(int(230 * a))
+        self._ov.set_alpha(int(250 * a))
         c.blit(self._ov, (0, 0))
         opening = self.menu or self.editor
         off = int((1 - a) ** 2 * 60) if opening else 0

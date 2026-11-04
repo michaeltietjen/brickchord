@@ -19,7 +19,7 @@ build() {   # build <folder name> <launcher> <edition or empty> <image prefix>
     local APP="$STAGE/$NAME"
     mkdir -p "$APP/_vendor" "$APP/samples" "$STAGE/images"
     cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$ROOT/brickchord/samples_README.txt" "$APP/"
-    cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$APP/"
+    cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$APP/"
     cp "$ROOT"/brickchord/samples/*.wav "$APP/samples/" 2>/dev/null || true
     cp "$ROOT/LICENSE" "$APP/LICENSE.txt"
     [ -n "$ED" ] && printf '%s\n' "$ED" > "$APP/edition.txt"

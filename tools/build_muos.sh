@@ -10,7 +10,7 @@ STAGE="$(mktemp -d)"
 APP="$STAGE/ports/brickchord"
 mkdir -p "$APP/_vendor/wheels" "$APP/samples" "$OUT"
 cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$ROOT/brickchord/samples_README.txt" "$APP/"
-cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$APP/"
+cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$APP/"
 cp "$ROOT/LICENSE" "$APP/LICENSE.txt"
 cp "$ROOT/muos/Brickchord.sh" "$ROOT/muos/Bricklab.sh" "$STAGE/ports/"
 chmod +x "$STAGE/ports/"*.sh

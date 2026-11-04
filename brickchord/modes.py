@@ -440,7 +440,7 @@ class ModesMixin(song.SongMixin):
                 sub = "lead" + ("  bend %+.1f" % bend if bend else "") + ("  vibrato" if vib else "")
                 self.text(c, sub, self.f_big, mm.ACCENT, (mm.BASE_W // 2, mm.L["roman_y"]), center=True)
             else:
-                self.text(c, "Lead", self.f_huge, mm.PANEL, (mm.BASE_W // 2, mm.L["name_y"]), center=True)
+                self.text(c, "Lead", self.f_huge, self.mix(mm.BG, mm.PANEL, 0.7), (mm.BASE_W // 2, mm.L["name_y"]), center=True)
                 self.text(c, "play a melody", self.f_med, mm.DIM, (mm.BASE_W // 2, mm.L["roman_y"]), center=True)
             return True
         if self.imode == "Drone":
@@ -452,14 +452,14 @@ class ModesMixin(song.SongMixin):
                 self.text(c, "drone" + ("  + 3rd" if len(self.drone_notes) > 4 else ""), self.f_big, mm.ACCENT2,
                           (mm.BASE_W // 2, mm.L["roman_y"]), center=True)
             else:
-                self.text(c, "Drone", self.f_huge, mm.PANEL, (mm.BASE_W // 2, mm.L["name_y"]), center=True)
+                self.text(c, "Drone", self.f_huge, self.mix(mm.BG, mm.PANEL, 0.7), (mm.BASE_W // 2, mm.L["name_y"]), center=True)
                 self.text(c, "pick a root", self.f_med, mm.DIM, (mm.BASE_W // 2, mm.L["roman_y"]), center=True)
             return True
         if self.imode == "Drums":
             if self.last_pad and x < 1:
                 self.draw_name(c, PAD_LABEL[self.last_pad], self.f_huge, mm.BASE_W // 2 - 10, mm.L["name_y"], x)
             else:
-                self.text(c, "Drums", self.f_huge, mm.PANEL, (mm.BASE_W // 2, mm.L["name_y"]), center=True)
+                self.text(c, "Drums", self.f_huge, self.mix(mm.BG, mm.PANEL, 0.7), (mm.BASE_W // 2, mm.L["name_y"]), center=True)
             self.text(c, "tap the pads", self.f_med, mm.DIM, (mm.BASE_W // 2, mm.L["roman_y"]), center=True)
             return True
         return False
