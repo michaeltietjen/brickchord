@@ -75,6 +75,7 @@ MENU_PAGES = {
                "Lead glide", "Drone slide", "Bass", "Bass Level"],
     "Drums": None,
     "Sample": None,
+    "Macro": None,
     "FX": ["Reverb", "Delay", "Reverb Type", "Delay Type", "Delay Time",
            "A Reverb Type", "A Delay Type", "A Delay Time", "B Reverb Type", "B Delay Type", "B Delay Time"],
 }
@@ -463,8 +464,13 @@ class App(modes.ModesMixin):
         self.patch_changed()
 
     def cur_patch_smp(self, p):
-        """A Sample track's live sound carries the track's sample settings."""
-        if edition.LAB and self.machine == "sample" and p.get("sample") is not None and hasattr(self, "pm"):
+        """A Sample (or Macro) track's live sound carries the track's own settings."""
+        if edition.LAB and self.machine == "macro" and p.get("macro") is not None and getattr(self, "sel_key", None):
+            q = dict(p)
+            q.update({k: v for k, v in (self.pm[self.sel_key[0]][self.sel_key[1]].get("mac") or {}).items()
+                      if k in synth.MACRO_PATCH})
+            return q
+        if edition.LAB and self.machine == "sample" and p.get("sample") is not None and getattr(self, "sel_key", None):
             q = dict(p)
             q.update({k: v for k, v in (self.pm[self.sel_key[0]][self.sel_key[1]].get("smp") or {}).items()
                       if k in synth.SAMPLE_PATCH})
@@ -1008,9 +1014,11 @@ class App(modes.ModesMixin):
 
     # ---------------- menu
     def menu_pages(self):
-        out = [n for n in MENU_PAGES if n not in ("Drums", "Sample", "Songs") or edition.LAB]
+        out = [n for n in MENU_PAGES if n not in ("Drums", "Sample", "Songs", "Macro") or edition.LAB]
         if edition.LAB and self.machine != "sample" and "Sample" in out:
             out.remove("Sample")
+        if edition.LAB and self.machine != "macro" and "Macro" in out:
+            out.remove("Macro")
         return out
 
     def menu_context_page(self):
@@ -1024,6 +1032,8 @@ class App(modes.ModesMixin):
             return "Global"
         if edition.LAB and self.machine == "sample":
             return "Sample"
+        if edition.LAB and self.machine == "macro":
+            return "Macro"
         return "Chords"
 
     def open_menu(self):
@@ -1045,6 +1055,8 @@ class App(modes.ModesMixin):
             return self.drum_menu_items()
         if self.menu_pg == "Sample" and edition.LAB:
             return self.smp_menu_items()
+        if self.menu_pg == "Macro" and edition.LAB:
+            return self.mac_menu_items()
         rows = dict(self.all_menu_items())
         return [(n, rows[n]) for n in MENU_PAGES.get(self.menu_pg) or MENU_PAGES["Chords"]
                 if n in rows and not (n == "Beat" and edition.LAB)]
@@ -1108,6 +1120,9 @@ class App(modes.ModesMixin):
             return
         if self.menu_pg == "Sample":
             self.smp_menu_change(name, d)
+            return
+        if self.menu_pg == "Macro":
+            self.mac_menu_change(name, d)
             return
         recache = False
         if name == "Key":
@@ -1232,6 +1247,9 @@ class App(modes.ModesMixin):
         if self.menu_pg == "Sample":
             self.smp_menu_change(name, 1)
             return
+        if self.menu_pg == "Macro":
+            self.mac_menu_change(name, 1)
+            return
         if name == "Song" and edition.LAB:
             if self.slot_pick != self.song_slot:
                 self.menu = False
@@ -1255,8 +1273,8 @@ class App(modes.ModesMixin):
             self.stop_chord()
             self.learn_sticks()
             self.menu = False
-        elif name == "Edit Sound" and self.bank[self.patch].get("sample"):
-            self.flash("SAMPLES HAVE NO SOUND EDITOR YET")
+        elif name == "Edit Sound" and (self.bank[self.patch].get("sample") or self.bank[self.patch].get("macro") is not None):
+            self.flash("THIS MACHINE HAS ITS OWN SETTINGS PAGE")
         elif name == "Edit Sound":
             self.stop_chord()
             self.editor = True

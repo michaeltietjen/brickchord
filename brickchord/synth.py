@@ -207,19 +207,21 @@ DRONE_PATCHES = [
         fenv=.6, fa=3.0, a=2.0),
 ]
 
-MACHINES = ["chord", "lead", "bass", "drone", "drums", "sample"]
-MACHINE_NAME = {"chord": "Chord", "lead": "Lead", "bass": "Bass", "drone": "Drone", "drums": "Drums", "sample": "Sample"}
+MACHINES = ["chord", "lead", "bass", "drone", "macro", "drums", "sample"]
+MACHINE_NAME = {"chord": "Chord", "lead": "Lead", "bass": "Bass", "drone": "Drone", "drums": "Drums", "sample": "Sample",
+                "macro": "Macro"}
 
 
 def machine_bank(machine):
     """The sound list a machine chooses from (Chord keeps the 23 Brickchord sounds)."""
-    return {"lead": LEAD_PATCHES, "bass": BASS_PATCHES, "drone": DRONE_PATCHES}.get(machine, PATCHES)
+    return {"lead": LEAD_PATCHES, "bass": BASS_PATCHES, "drone": DRONE_PATCHES,
+            "macro": MACRO_PATCHES}.get(machine, PATCHES)
 
 
 def edited_patch(base, edits):
     """Apply Sound Editor edits to a base patch (returns a new dict)."""
     p = dict(base)
-    if base.get("sample"):
+    if base.get("sample") or base.get("macro") is not None:
         return p
     oscs = [list(o) for o in base["oscs"]]
     if edits:
@@ -432,6 +434,180 @@ def _grain_cloud(x, r, p, secs=2.5, seed=11):
     return (out / pk * 0.9).astype(np.float32)
 
 
+# ---------------------------------------------------------------- the Macro machine
+# A macro oscillator in the spirit of the Eurorack ones: one sound engine per
+# model, each driven by the same three controls, HARMONICS, TIMBRE and MORPH
+# (0..1). Sustaining models render a seamless, period-locked loop; String and
+# Modal are struck and ring out.
+MACRO_MODELS = ["Analog", "Fold", "FM", "Vowel", "Additive", "Table", "String", "Modal"]
+MACRO_PATCH = {"macro": 0, "harm": 0.5, "timbre": 0.5, "morph": 0.5, "decay": 0.5,
+               "a": 0.005, "d": 0.3, "s": 0.7, "r": 0.3, "cutoff": 9000.0, "res": 0.5, "oscs": [], "name": ""}
+_FORMANTS = [(730, 1090, 2440), (530, 1840, 2480), (270, 2290, 3010), (570, 840, 2410), (300, 870, 2240)]   # a e i o u
+_FM_RATIOS = [0.5, 1.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 7.0]
+
+
+def _macro_wave(model, ph, h, t, m, f):
+    """One sustaining model, from phase (radians), with the three controls."""
+    if model == 0:                                     # Analog: saw to square, with a detuned twin
+        saw = ((ph / np.pi) % 2.0) - 1.0
+        pw = 0.5 + 0.45 * (t - 0.5)
+        sq = np.where(((ph / (2 * np.pi)) % 1.0) < pw, 1.0, -1.0)
+        x = saw * (1 - m) + sq * m
+        ph2 = ph * (1.0 + 0.012 * h)
+        x2 = ((ph2 / np.pi) % 2.0) - 1.0
+        return 0.6 * x + 0.4 * h * x2
+    if model == 1:                                     # Fold: a sine through a wavefolder
+        x = np.sin(ph) * (1 + m * 0.6) + h * 0.5 * np.sin(2 * ph)
+        g = 1 + t * 7
+        y = np.sin(x * g)
+        return y
+    if model == 2:                                     # FM: two operators, ratio from HARMONICS
+        r = _FM_RATIOS[int(h * (len(_FM_RATIOS) - 1) + 0.5)]
+        mod = np.sin(ph * r + m * 2.5 * np.sin(ph * r))
+        return np.sin(ph + t * 6 * mod)
+    if model == 3:                                     # Vowel: a pulse train through three formants
+        k = np.arange(1, int(min(60, 9000 / max(f, 30))) + 1)
+        pos = m * (len(_FORMANTS) - 1)
+        i0 = int(pos)
+        i1 = min(len(_FORMANTS) - 1, i0 + 1)
+        fr = pos - i0
+        fm_ = [(a * (1 - fr) + b * fr) * (0.8 + 0.5 * t) for a, b in zip(_FORMANTS[i0], _FORMANTS[i1])]
+        amp = sum(np.exp(-((k * f - F) / (80 + 60 * h)) ** 2) * w for F, w in zip(fm_, (1.0, 0.6, 0.3)))
+        return sum(a * np.sin(n * ph) for n, a in zip(k, amp)) / (np.sum(amp) + 1e-6) * 2.0
+    if model == 4:                                     # Additive: centre and tilt, odd vs even
+        k = np.arange(1, 33)
+        centre = 1 + h * 15
+        amp = np.exp(-((k - centre) / (2 + t * 10)) ** 2) + (1.0 / k) * 0.3
+        amp *= np.where(k % 2 == 0, 1 - m, 1.0)
+        return sum(a * np.sin(n * ph) for n, a in zip(k, amp)) / (np.sum(amp) + 1e-6) * 2.0
+    if model == 5:                                     # Table: scan through four shapes
+        sh = [np.sin(ph), np.abs(((ph / np.pi) % 2.0) - 1.0) * 2 - 1, ((ph / np.pi) % 2.0) - 1.0,
+              np.sign(np.sin(ph)) * np.abs(np.sin(ph)) ** (0.2 + 0.8 * (1 - t))]
+        pos = m * 3
+        i0 = int(min(2, pos))
+        fr = pos - i0
+        x = sh[i0] * (1 - fr) + sh[i0 + 1] * fr
+        return x + h * 0.4 * np.sin(3 * ph + x)
+    return np.sin(ph)
+
+
+def _ks_string(f, secs, h, t, m, seed):
+    """String: Karplus-Strong. TIMBRE brightens the pluck, MORPH lengthens the ring,
+    HARMONICS adds a second detuned string."""
+    n = int(secs * SR)
+    out = np.zeros(n)
+    for j, (df, g) in enumerate(((1.0, 1.0), (1.0 + 0.004 + 0.01 * h, h * 0.6))):
+        if g <= 0.001:
+            continue
+        L = max(2, int(round(SR / (f * df))))
+        rng = np.random.RandomState(seed + j)
+        buf = rng.uniform(-1, 1, L)
+        b = 0.2 + 0.75 * t
+        for _ in range(int((1 - t) * 4)):              # a darker pluck is a smoother one
+            buf = 0.5 * (buf + np.roll(buf, 1))
+        loss = 0.990 + 0.0095 * m
+        y = np.empty(n)
+        prev = 0.0
+        idx = 0
+        bl = buf.tolist()
+        for i in range(n):
+            v = bl[idx]
+            y[i] = v
+            nv = loss * (b * v + (1 - b) * prev) if True else v
+            prev = v
+            bl[idx] = 0.5 * (nv + bl[(idx + 1) % L] * loss) if L > 2 else nv
+            idx = (idx + 1) % L
+        out += y * g
+    return out
+
+
+def _modal(f, secs, h, t, m, seed):
+    """Modal: a struck resonator bank. HARMONICS bends the partials from a string
+    to a bar, a bell and a plate; TIMBRE is brightness; MORPH is how long it rings."""
+    n = int(secs * SR)
+    tt = np.arange(n) / SR
+    k = np.arange(1, 17)
+    if h < 0.33:
+        ratios = k * (1 + (h / 0.33) * 0.002 * k ** 2)
+    elif h < 0.66:
+        ratios = np.array([1.0, 2.756, 5.404, 8.933, 13.34, 18.64, 24.81, 31.87] * 2)[:16] ** (0.8 + 0.6 * (h - 0.33) / 0.33)
+    else:
+        ratios = np.array([1.0, 1.59, 2.14, 2.30, 2.65, 2.92, 3.16, 3.50, 3.60, 3.65, 4.06, 4.15, 4.60, 4.83, 5.40, 5.66])
+    ratios = ratios[:16]
+    out = np.zeros(n)
+    rng = np.random.RandomState(seed)
+    base_dec = 0.2 + 3.5 * m
+    for i, r in enumerate(ratios):
+        fr = f * r
+        if fr > SR * 0.45:
+            continue
+        a = np.exp(-i * (1.6 - 1.4 * t)) * (0.6 + 0.4 * rng.rand())
+        dec = base_dec / (1 + i * (0.25 + 0.5 * (1 - m)))
+        out += a * np.sin(2 * np.pi * fr * tt + rng.uniform(0, 6.28)) * np.exp(-tt / max(0.02, dec))
+    click = rng.randn(min(n, 64)) * np.linspace(1, 0, min(n, 64)) * 0.3 * t
+    out[:len(click)] += click
+    return out
+
+
+def render_macro(midi, p, arrays=False):
+    model = int(p.get("macro", 0)) % len(MACRO_MODELS)
+    h, t, m = (float(p.get(k, 0.5)) for k in ("harm", "timbre", "morph"))
+    f = 440.0 * 2 ** ((midi - 69) / 12.0)
+    if model >= 6:                                     # struck models ring out
+        secs = 0.4 + 3.5 * float(p.get("decay", 0.5))
+        x = _ks_string(f, min(secs, 3.0), h, t, m, midi) if model == 6 else _modal(f, secs, h, t, m, midi)
+        x = x / (np.max(np.abs(x)) + 1e-9)
+        fade = int(0.01 * SR)
+        x[-fade:] *= np.linspace(1, 0, fade)
+        st = np.repeat(x[:, None], 2, axis=1).astype(np.float32) * (GAIN * 2.4)
+        if arrays:
+            return np.ascontiguousarray(st), None
+        return _to_bytes(st), None, len(x) / SR
+    # sustaining models: an attack part, then a loop of whole periods so it repeats seamlessly
+    cycles = max(1, int(round(0.25 * f)))
+    loop_n = max(64, int(round(cycles * SR / f)))
+    f_lock = cycles * SR / loop_n
+    att_sec = max(0.08, float(p.get("a", 0.005)) + float(p.get("d", 0.3)) + 0.05)
+    att_n = int(np.ceil(att_sec * SR / loop_n)) * loop_n
+    n = att_n + loop_n
+    ph = 2 * np.pi * f_lock * np.arange(n) / SR
+    x = _macro_wave(model, ph, h, t, m, f_lock).astype(np.float64)
+    x -= np.mean(x[att_n:])
+    pk = np.max(np.abs(x)) + 1e-9
+    x /= pk
+    env = _adsr(att_n, float(p.get("a", 0.005)), float(p.get("d", 0.3)), float(p.get("s", 0.7)), SR)
+    att = x[:att_n] * env[:att_n]
+    loop = x[att_n:] * float(p.get("s", 0.7))
+    g = GAIN * 2.2
+    a_st = np.repeat(att[:, None], 2, axis=1).astype(np.float32) * g
+    l_st = np.repeat(loop[:, None], 2, axis=1).astype(np.float32) * g
+    if arrays:
+        return np.ascontiguousarray(a_st), np.ascontiguousarray(l_st)
+    return _to_bytes(a_st), _to_bytes(l_st), att_n / SR
+
+
+def _mc(name, model, harm, timbre, morph, **kw):
+    p = dict(MACRO_PATCH, name=name, macro=model, harm=harm, timbre=timbre, morph=morph)
+    p.update(kw)
+    return p
+
+
+MACRO_PATCHES = [
+    _mc("Analog Saw", 0, 0.6, 0.5, 0.0, d=0.4, s=0.75),
+    _mc("Folded Sine", 1, 0.3, 0.55, 0.3, d=0.5, s=0.7),
+    _mc("FM Glass", 2, 0.6, 0.45, 0.2, a=0.002, d=0.8, s=0.4, r=0.6),
+    _mc("Vowel Choir", 3, 0.5, 0.5, 0.3, a=0.25, d=0.6, s=0.85, r=0.8),
+    _mc("Organ Pipes", 4, 0.15, 0.3, 0.0, a=0.02, d=0.2, s=0.9, r=0.25),
+    _mc("Wave Scan", 5, 0.3, 0.6, 0.5, d=0.4, s=0.7),
+    _mc("Plucked String", 6, 0.3, 0.7, 0.6, decay=0.5),
+    _mc("Twin Strings", 6, 0.8, 0.5, 0.8, decay=0.7),
+    _mc("Marimba", 7, 0.45, 0.4, 0.25, decay=0.3),
+    _mc("Bell Bowl", 7, 0.8, 0.6, 0.85, decay=0.9),
+    _mc("Steel Drum", 7, 0.55, 0.65, 0.45, decay=0.45),
+    _mc("Kalimba", 7, 0.2, 0.55, 0.35, decay=0.35),
+]
+
+
 def render_sample(midi, p, arrays=False):
     """A Sample track's note: the WAV pitched from its root to midi (plus tune),
     trimmed to start..end, optionally reversed; loop=True sustains it."""
@@ -476,6 +652,8 @@ def render_note(midi, p, tone=0.0, res_add=0.0, attack_len=None, loop_len=2.0, x
     for non-sustaining sounds)."""
     if p.get("sample"):
         return render_sample(midi, p, arrays)
+    if p.get("macro") is not None:
+        return render_macro(midi, p, arrays)
     f0 = 440.0 * 2 ** ((midi - 69) / 12.0)
     if attack_len is None:
         attack_len = max(0.6, p["a"] + p["d"] * 0.8, p["fa"] + p["fd"] * 0.8) + 0.2

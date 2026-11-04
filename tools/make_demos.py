@@ -383,7 +383,46 @@ def patch_bay():
     return song("Patch Bay", 118, k, s, [a, b, c], [[0, 2], [1, 2], [2, 4], [0, 1], [2, 2]], [2, 2, 2])
 
 
-DEMOS = [analog_drift, slow_light, patch_bay, night_drive, tape_lofi, acid_room, cathedral]
+def macro_track(sound, vol=0.7, pan=0.0, rs=0.25, ds=0.0, bus=0, fx=None, **mac):
+    i, pj_ = pj("macro", sound)
+    d = json.loads(pj_)
+    d.update(mac)
+    return {"machine": "macro", "smp": {}, "mac": dict(mac), "name": sound, "patch": i, "tone": 0.0, "res": 0.0,
+            "pj": json.dumps(d, sort_keys=True), "vol": vol, "pan": pan, "rs": rs, "ds": ds, "bus": bus,
+            "mute": False, "rack": fx or rack(), "flt": [0.0, 0.0]}
+
+
+def resonators():
+    """The Macro machine: Marimba and Kalimba patterns in five against four, a Bell
+    Bowl on the downbeats, a Vowel Choir pad, a Plucked String bass, and the Modular
+    kit. C Mixolydian, 104 BPM."""
+    k, s = 0, "Mixolydian"
+    drums = beat({"kick": "x.....x...x.....", "snare": "....x.......x...",
+                  "shk": "".join("x" if i % 3 == 0 else "." for i in range(32)), "hat": "..x...x...x...x."}, 2)
+    mar = [[float(i), "n", degree(k, s, d, 4), 0.75, 0.0, 1.0, 0.3]
+           for i, d in zip(range(0, 32, 2), [0, 2, 4, 2, 5, 4, 2, 0, 1, 3, 5, 3, 6, 5, 3, 1])]
+    kal = [[float(i), "n", degree(k, s, d, 5), 0.6, 0.0, 1.0, 0.3]
+           for i, d in zip(range(1, 32, 5), [4, 2, 6, 4, 0, 2, 4])]
+    bowl = [[0.0, "n", degree(k, s, 0, 4), 0.7, 0.0, 8.0, 1.5], [16.0, "n", degree(k, s, 3, 4), 0.7, 0.0, 8.0, 1.5]]
+    choir = chords(k, s, [0, 3], bars_each=1, octave=3, notes=3, gain=0.55, dur_steps=15.5)
+    pluck = line(k, s, [(0, 0, 2), (3, 0, 1), (6, 4, 2), (8, 3, 2), (11, 3, 1), (14, 4, 2), (16, 3, 2), (19, 3, 1),
+                        (22, 6, 2), (24, 0, 2), (27, 0, 1), (30, 4, 2)], octave=2, gain=0.85, rel=0.2)
+    t_drum = dict(drum_track("Modular", human=0.15), vol=0.7)
+    t_mar = macro_track("Marimba", vol=0.7, pan=-0.2, rs=0.3, ds=0.2, bus=0)
+    t_kal = macro_track("Kalimba", vol=0.6, pan=0.3, rs=0.35, ds=0.35, bus=1)
+    t_bowl = macro_track("Bell Bowl", vol=0.5, rs=0.5, ds=0.2, bus=1)
+    t_choir = macro_track("Vowel Choir", vol=0.45, rs=0.55, bus=1, fx=rack(Chorus=0.4), morph=0.6)
+    t_pluck = macro_track("Plucked String", vol=0.8, rs=0.1, timbre=0.5, morph=0.5)
+    a = [dict(t_drum, ev=[]), with_ev(t_mar, mar), dict(t_kal, ev=[]), with_ev(t_bowl, bowl), with_ev(t_choir, choir),
+         dict(t_pluck, ev=[])]
+    b = [with_ev(t_drum, drums), with_ev(t_mar, mar), with_ev(t_kal, kal), with_ev(t_bowl, bowl),
+         with_ev(t_choir, choir), with_ev(t_pluck, pluck)]
+    c = [with_ev(t_drum, drums), dict(t_mar, ev=[]), with_ev(t_kal, kal), with_ev(t_bowl, bowl), dict(t_choir, ev=[]),
+         with_ev(t_pluck, pluck)]
+    return song("Resonators", 104, k, s, [a, b, c], [[0, 2], [1, 4], [2, 2], [1, 2]], [2, 2, 2])
+
+
+DEMOS = [analog_drift, slow_light, patch_bay, resonators, night_drive, tape_lofi, acid_room, cathedral]
 
 
 def main():

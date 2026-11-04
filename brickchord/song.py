@@ -77,7 +77,7 @@ def new_drum():
 
 
 def new_track(k=1):
-    t = {"machine": "drums" if k == DT else "chord", "smp": {}, "locks": {},
+    t = {"machine": "drums" if k == DT else "chord", "smp": {}, "mac": {}, "locks": {},
          "name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
          "rs": 0.25, "ds": 0.0, "bus": 0, "mute": False,
          "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER},
@@ -337,6 +337,11 @@ class SongMixin:
             base.update({k: v for k, v in (smp or {}).items() if k in synth.SAMPLE_PATCH})
             return json.dumps(base, sort_keys=True)
         bank = synth.machine_bank(mc)
+        if mc == "macro":
+            base = dict(bank[i % len(bank)])
+            mac = self.pm[self.sel_key[0]][self.sel_key[1]].get("mac") if (self.sel_key and self.machine == "macro") else None
+            base.update({k: v for k, v in (mac or {}).items() if k in synth.MACRO_PATCH})
+            return json.dumps(base, sort_keys=True)
         p = synth.edited_patch(bank[i % len(bank)], self.edits.get(self.edit_key(i, mc)))
         p["cutoff"] = p["cutoff"] * (2 ** (self.tone if tone is None else tone))
         p["res"] = max(0.5, p["res"] + (self.res if res is None else res))
@@ -708,7 +713,8 @@ class SongMixin:
     def machine_mode(self, k):
         """The play mode a track's machine wants."""
         mc = self.pm[self.lp_e().cur][k].get("machine", "chord") if self.lp_e() else "chord"
-        return {"drums": "Drums", "lead": "Lead", "bass": "Lead", "sample": "Lead", "drone": "Drone"}.get(mc, "Play")
+        return {"drums": "Drums", "lead": "Lead", "bass": "Lead", "sample": "Lead", "drone": "Drone",
+                "macro": "Play"}.get(mc, "Play")
 
     def set_kit(self, p, d):
         dr = self.pm[p][DT]["drum"]
@@ -974,6 +980,64 @@ class SongMixin:
         else:
             return False
         return True
+
+    # ------------------------------------------------------------ Settings > Macro page
+    MAC_ROWS = [("Harmonics", "harm"), ("Timbre", "timbre"), ("Morph", "morph"), ("Decay", "decay")]
+
+    def mac_track(self):
+        if self.lp_e() is None or not self.sel_key:
+            return None
+        p, k = self.sel_key
+        m = self.pm[p][k]
+        return (p, k, m) if m.get("machine") == "macro" else None
+
+    def mac_values(self, m):
+        bank = synth.MACRO_PATCHES
+        d = dict(bank[(m.get("patch") or 0) % len(bank)])
+        d.update(m.get("mac") or {})
+        return d
+
+    def mac_menu_items(self):
+        t = self.mac_track()
+        if t is None:
+            return [("No Macro track", "pick one first")]
+        d = self.mac_values(t[2])
+        model = int(d["macro"]) % len(synth.MACRO_MODELS)
+        rows = [("Preset", t[2]["name"] or d["name"]), ("Model", synth.MACRO_MODELS[model])]
+        for label, key in self.MAC_ROWS:
+            if key == "decay" and model < 6:
+                continue
+            rows.append((label, "%d%%" % round(float(d[key]) * 100)))
+        rows.append(("Reset to preset", "A"))
+        return rows
+
+    def mac_menu_change(self, name, d):
+        t = self.mac_track()
+        if t is None:
+            return
+        p, k, m = t
+        if name == "Preset":
+            m["mac"] = {}
+            self.set_track_sound(p, k, d)
+            return
+        mac = m.setdefault("mac", {})
+        if name == "Reset to preset":
+            m["mac"] = {}
+        elif name == "Model":
+            cur = int(self.mac_values(m)["macro"])
+            mac["macro"] = (cur + d) % len(synth.MACRO_MODELS)
+        else:
+            key = dict(self.MAC_ROWS).get(name)
+            if key is None:
+                return
+            v = float(self.mac_values(m)[key])
+            mac[key] = round(max(0.0, min(1.0, v + 0.05 * d)), 2)
+        m["pj"] = self.patch_json(m["patch"] or 0, m["tone"], m["res"], "macro")
+        self.patch_changed()
+        e = self.lp_e()
+        if e is not None and e.pats[p].tracks[k].ev:
+            self.lp_resolve_later(p, k, True, 0.3)
+        self.lp_dirty = True
 
     # ------------------------------------------------------------ Settings > Sample page
     SMP_ROWS = [("Start", "start", 0.05, 0.0, 0.95), ("End", "end", 0.05, 0.05, 1.0), ("Reverse", "rev", None, 0, 1),
