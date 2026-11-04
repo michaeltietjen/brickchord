@@ -346,7 +346,44 @@ def slow_light():
     return song("Slow Light", 64, k, s, [a, b, c, d], [[0, 1], [1, 2], [2, 2], [3, 1], [2, 1], [0, 1]], [4, 4, 4, 4])
 
 
-DEMOS = [analog_drift, slow_light, night_drive, tape_lofi, acid_room, cathedral]
+def patch_bay():
+    """Modular techno: the Modular kit in cross-rhythms (the zap runs in threes against
+    the four), Pulse Bass with slides and filter locks, FM Bell arpeggios, a Wire lead,
+    and a Dark Pad drone. A minor, 118 BPM."""
+    k, s = 9, "Minor"
+    three = "".join("x" if i % 3 == 0 else "." for i in range(32))
+    five = "".join("x" if i % 5 == 0 else "." for i in range(32))
+    d_a = beat({"kick": "x...x...x...x...", "shk": three, "hat": "..x...x...x...x."}, 2)
+    d_b = beat({"kick": "x...x...x...x..x", "snare": "....x.......x...", "shk": three, "rim": five,
+                "hat": "x.xxx.xxx.xxx.xx", "tom": "...............x"}, 2)
+    bass = line(k, s, [(i, d, 0.9) for i, d in enumerate([0, 0, 7, 0, 3, 0, 5, 3] * 4)], octave=1, gain=0.85, rel=0.05)
+    for e in bass[::4]:
+        e[3] = 1.0
+    arp = []
+    for n, dg in enumerate([0, 5, 3, 4]):
+        for i, off in enumerate((0, 2, 4, 7)):
+            arp.append([float(n * 8 + i * 2), "n", degree(k, s, dg + off, 4), 0.6, 0.0, 1.5, 0.4])
+    wire = line(k, s, [(0, 7, 6), (8, 9, 2), (10, 7, 6), (16, 4, 4), (20, 5, 4), (24, 4, 8)], octave=3, gain=0.7, rel=0.2)
+    pad = drone(k, s, 0, 31.5, octave=2)
+    t_drum = drum_track("Modular", swing=0.06)
+    t_drum["locks"] = {str(st): {"flt": [f, 0.4]} for st, f in ((12, 0.4), (13, 0.55), (14, 0.7), (15, 0.8))}
+    t_bass = synth_track("bass", "Pulse Bass", vol=0.8, rs=0.05, ds=0.1, fx=rack(Drive=0.3))
+    t_bass["locks"] = {str(st): {"slide": True} for st in (2, 6, 10, 15, 18, 22, 26, 31)}
+    for st, f in ((0, 0.5), (8, 0.3), (16, 0.6), (24, 0.15)):
+        t_bass["locks"].setdefault(str(st), {})["flt"] = [f, 0.6]
+    t_arp = synth_track("chord", "FM Bell", vol=0.5, pan=0.25, rs=0.35, ds=0.45, bus=1, fx=rack(Auto_Pan=(0.5, 4)))
+    t_wire = synth_track("lead", "Wire", vol=0.55, pan=-0.2, rs=0.3, ds=0.35, bus=1, fx=rack(Chorus=0.3))
+    t_pad = synth_track("drone", "Dark Pad", vol=0.45, rs=0.5, bus=1, fx=rack(Filter_LFO=(0.6, 6)))
+    a = [with_ev(t_drum, d_a), with_ev(t_bass, bass), dict(t_arp, ev=[]), with_ev(t_pad, pad), dict(t_wire, ev=[]),
+         empty()]
+    b = [with_ev(t_drum, d_b), with_ev(t_bass, bass), with_ev(t_arp, arp), with_ev(t_pad, pad), dict(t_wire, ev=[]),
+         empty()]
+    c = [with_ev(t_drum, d_b), with_ev(t_bass, bass), with_ev(t_arp, arp), with_ev(t_pad, pad), with_ev(t_wire, wire),
+         empty()]
+    return song("Patch Bay", 118, k, s, [a, b, c], [[0, 2], [1, 2], [2, 4], [0, 1], [2, 2]], [2, 2, 2])
+
+
+DEMOS = [analog_drift, slow_light, patch_bay, night_drive, tape_lofi, acid_room, cathedral]
 
 
 def main():

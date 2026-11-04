@@ -786,7 +786,7 @@ def drum_kit_style(style):
     return kit
 
 
-BUILTIN_KITS = ["Classic", "808", "909", "Lo-fi", "Acoustic"]
+BUILTIN_KITS = ["Classic", "808", "909", "Lo-fi", "Acoustic", "Modular", "Industrial", "Glitch"]
 DRUM_LANES = ["kick", "snare", "clap", "rim", "tom", "hat", "ohat", "shk"]
 # file names a sample kit may use for each lane (samples/<kit>/<name>.wav)
 LANE_ALIASES = {"kick": ("kick", "bd", "bassdrum", "kik"), "snare": ("snare", "sd", "snr"),

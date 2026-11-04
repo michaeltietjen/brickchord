@@ -301,7 +301,131 @@ def kit_acoustic():
     return k
 
 
-BUILD = {"Classic": kit_classic, "808": kit_808, "909": kit_909, "Lo-fi": kit_lofi, "Acoustic": kit_acoustic}
+# ---------------------------------------------------------------- modular kits
+def lpg(x, t, decay, lo=200.0, hi=9000.0, res=0.0):
+    """A low-pass gate: cutoff and level fall together (the vactrol sound of west-coast modular)."""
+    e = np.exp(-6.9 * t / decay)
+    fc = lo + (hi - lo) * e
+    g = 1.0 - np.exp(-2 * np.pi * fc / FS)
+    y = np.empty(len(x))
+    a = b = 0.0
+    for i, v in enumerate(x.tolist()):
+        fb = res * b
+        a += g[i] * (v - fb - a)
+        b += g[i] * (a - b)
+        y[i] = b
+    return y * e
+
+
+def ping(t, f, q_decay, f_drop=0.0, tau=0.03):
+    """A resonant filter 'ping': a damped sine with an optional pitch drop."""
+    fr = f * (1 + f_drop * np.exp(-t / tau))
+    return np.sin(2 * np.pi * np.cumsum(fr) / FS) * env(t, q_decay, att=0.0003)
+
+
+def fm(t, fc, ratio, index, decay, idecay=None):
+    """Two-operator FM: the index decays faster than the level (a bright attack that mellows)."""
+    idx = index * np.exp(-6.9 * t / (idecay or decay * 0.4))
+    return np.sin(2 * np.pi * fc * t + idx * np.sin(2 * np.pi * fc * ratio * t)) * env(t, decay)
+
+
+def ringmod(t, f1, f2):
+    return square(2 * np.pi * f1 * t) * square(2 * np.pi * f2 * t)
+
+
+def kit_modular():
+    """West-coast and Eurorack percussion: low-pass-gated pings, FM blips, ring-mod metal."""
+    k = {}
+    t = tt(0.9)
+    body = ping(t, 46, 0.75, f_drop=3.5, tau=0.025)
+    wob = 1 + 0.04 * np.sin(2 * np.pi * 7 * t) * np.exp(-t * 4)
+    k["kick"] = fin(sat(body * wob + lpg(noise(len(t), 51), t, 0.02, 300, 4000) * 0.4, 1.6))
+    t = tt(0.45)
+    k["snare"] = fin(sat(ping(t, 880, 0.18) * 0.5 + ping(t, 1360, 0.12) * 0.3 +
+                         lpg(noise(len(t), 52), t, 0.22, 500, 9000, 0.6) * 0.8, 1.4))
+    t = tt(0.4)
+    k["clap"] = fin(lpg(noise(len(t), 53), t, 0.16, 400, 7000, 1.2) * 1.6 +
+                    lpg(noise(len(t), 54), np.maximum(t - 0.012, 0), 0.12, 400, 6000, 1.2) * 0.8)
+    t = tt(0.16)
+    k["rim"] = fin(fm(t, 1180, 1.41, 6.0, 0.09, 0.02))
+    t = tt(0.8)
+    k["tom"] = fin(sat(ping(t, 150, 0.5, f_drop=0.6, tau=0.04) + ping(t, 231, 0.3, f_drop=0.4) * 0.4 +
+                       lpg(noise(len(t), 55), t, 0.03, 300, 3000) * 0.3, 1.2))
+    t = tt(0.12)
+    k["hat"] = fin(hp(ringmod(t, 1530, 2210) * 0.6 + noise(len(t), 56) * 0.2, 6000) * env(t, 0.07, att=0.0002))
+    t = tt(0.8)
+    k["ohat"] = fin(hp(lpg(ringmod(t, 1530, 2210) + noise(len(t), 57) * 0.3, t, 0.7, 3000, 11000, 0.3), 4500))
+    t = tt(0.18)
+    zap = np.sin(2 * np.pi * np.cumsum(180 + 3800 * np.exp(-t / 0.018)) / FS) * env(t, 0.14, att=0.0002)
+    k["shk"] = fin(zap)
+    return k
+
+
+def kit_industrial():
+    """Metal, distortion and weight: anvils, sheet metal, an overdriven kick."""
+    k = {}
+    t = tt(0.7)
+    body = np.sin(sweep(t, 44, 190, 0.012, 0.05, 40)) * env(t, 0.55)
+    k["kick"] = fin(lp(sat(body * 2.2 + hp(noise(len(t), 61), 1000) * env(t, 0.03) * 0.6, 3.0), 7000))
+    t = tt(0.5)
+    modes = sum(np.sin(2 * np.pi * f * t) * env(t, d) * a for f, d, a in
+                ((330, 0.3, 0.5), (517, 0.22, 0.4), (881, 0.18, 0.35), (1393, 0.12, 0.3), (2111, 0.08, 0.25)))
+    k["snare"] = fin(sat(modes + bp(noise(len(t), 62), 1500, 8000) * env(t, 0.2) * 0.6, 2.2))
+    t = tt(0.45)
+    k["clap"] = fin(crush(clap(seed=63, centre=(700, 2400), spacing=(0.0, 0.007, 0.015, 0.022), tail=0.25), 6))
+    t = tt(0.4)
+    k["rim"] = fin(sum(np.sin(2 * np.pi * f * t) * env(t, d) for f, d in ((1870, 0.3), (2973, 0.2), (4410, 0.12))) / 2)
+    t = tt(1.0)
+    k["tom"] = fin(sat(sum(np.sin(2 * np.pi * f * t) * env(t, d) * a for f, d, a in
+                           ((92, 0.8, 0.8), (151, 0.6, 0.5), (247, 0.4, 0.35), (403, 0.25, 0.2))), 1.8))
+    t = tt(0.1)
+    k["hat"] = fin(crush(hp(noise(len(t), 64), 7000) * env(t, 0.06), 4))
+    t = tt(1.1)
+    rng = np.random.default_rng(65)
+    sheet = sum(np.sin(2 * np.pi * f * t + rng.uniform(0, 6)) * env(t, rng.uniform(0.4, 1.0))
+                for f in rng.uniform(1200, 9000, 40)) / 10
+    k["ohat"] = fin(hp(sheet + noise(len(t), 66) * env(t, 0.5) * 0.3, 3000))
+    t = tt(0.2)
+    k["shk"] = fin(sat(hp(noise(len(t), 67), 5000) * (np.sin(2 * np.pi * 60 * t) > 0) * env(t, 0.15), 2.0))
+    return k
+
+
+def kit_glitch():
+    """Digital debris: clicks, stutters, chirps and crushed ticks."""
+    k = {}
+    t = tt(0.35)
+    k["kick"] = fin(sat(np.sin(sweep(t, 50, 400, 0.004)) * env(t, 0.25), 2.0))
+    t = tt(0.3)
+    nz = hp(noise(len(t), 71), 1200)
+    gate = ((t % 0.035) < 0.012) * env(t, 0.25)
+    k["snare"] = fin(crush(nz * gate, 5))
+    t = tt(0.2)
+    k["clap"] = fin(np.sin(2 * np.pi * np.cumsum(600 + 5000 * (t / 0.2) ** 2) / FS) * env(t, 0.15))
+    t = tt(0.05)
+    click = np.zeros(len(t))
+    click[:8] = [1, -0.8, 0.6, -0.4, 0.3, -0.2, 0.1, -0.05]
+    k["rim"] = fin(bp(click * 4, 1500, 9000) + np.sin(2 * np.pi * 3000 * t) * env(t, 0.02) * 0.4)
+    t = tt(0.5)
+    k["tom"] = fin(fm(t, 98, 2.0, 4.0, 0.4, 0.08))
+    t = tt(0.06)
+    k["hat"] = fin(crush(hp(noise(len(t), 72), 8000) * env(t, 0.03), 3))
+    t = tt(0.6)
+    x = hp(noise(len(t), 73), 4000) * env(t, 0.5)
+    hold = np.maximum(1, (1 + 30 * t / 0.6)).astype(int)        # the sample rate falls through the note
+    idx = np.minimum(len(x) - 1, (np.arange(len(x)) // hold) * hold)
+    k["ohat"] = fin(x[idx])
+    t = tt(0.3)
+    rng = np.random.default_rng(74)
+    g = np.zeros(len(t))
+    for _ in range(14):
+        a0 = int(rng.uniform(0, len(t) - 300))
+        g[a0:a0 + 220] += noise(220, int(rng.integers(1000))) * np.hanning(220)
+    k["shk"] = fin(hp(g, 3000) * env(t, 0.28))
+    return k
+
+
+BUILD = {"Classic": kit_classic, "808": kit_808, "909": kit_909, "Lo-fi": kit_lofi, "Acoustic": kit_acoustic,
+         "Modular": kit_modular, "Industrial": kit_industrial, "Glitch": kit_glitch}
 
 
 # ---------------------------------------------------------------- output

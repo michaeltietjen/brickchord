@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Three new drum kits: Modular (west-coast low-pass-gated pings, FM blips, ring-mod metal, a laser zap), Industrial (anvils, sheet metal, an overdriven kick, crushed claps) and Glitch (clicks, stutters, chirps, crushed ticks, a hat whose sample rate falls through the note). And a demo that uses the Modular kit: Patch Bay (modular techno, A minor, 118 BPM, cross-rhythms in threes and fives, Pulse Bass with slides, FM Bell arps, a Wire lead).
 - Parameter locks and slide (Bricklab): on the GRID page, hold L2 on a step: L2+UP/DOWN locks that step's filter cutoff, L2+LEFT/RIGHT sets its velocity, L2+A turns slide on, L2+B clears the step's locks. A track with any slide steps plays mono like a 303: a slide step glides the sounding note to the new pitch, and the note before it holds into the slide. Locked steps show a dot (filter) and a slash (slide). Acid Room and Analog Drift now use slides and filter locks.
 - Settings has a Songs tab (Bricklab) with Song and Demo song, so Global is back to settings.
 - Mixer (Bricklab): a MIX page in Song mode (L1/R1 to it) with the six tracks of the playing pattern as faders. LEFT/RIGHT picks a track, UP/DOWN sets its level, Y+LEFT/RIGHT pans, A mutes, X solos (X again restores the mutes), B copies every track's level and pan to all patterns.
