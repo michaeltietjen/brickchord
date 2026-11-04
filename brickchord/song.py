@@ -54,17 +54,31 @@ def song_path(slot):
     return SONG_FILE if slot == 1 else os.path.join(SONG_DIR, "song_%d.json" % slot)
 
 
+_SUMMARY = {}
+
+
 def song_summary(slot):
-    """'empty' or 'N patterns, BPM' for the Settings row, without loading it."""
+    """'empty' or 'N patterns, BPM' for the Settings row, without loading it.
+    Cached by file time: Settings draws every frame."""
+    path = song_path(slot)
     try:
-        with open(song_path(slot)) as f:
+        mt = os.path.getmtime(path)
+    except OSError:
+        return None
+    hit = _SUMMARY.get(slot)
+    if hit and hit[0] == mt:
+        return hit[1]
+    try:
+        with open(path) as f:
             d = json.load(f)
     except Exception:
         return None
     n = sum(1 for p in d.get("pats") or [] if any((t or {}).get("ev") for t in p.get("tracks") or []))
     name = d.get("demo")
-    return "%s%d pattern%s%s" % ((name + ", ") if name else "", n, "" if n == 1 else "s",
-                                  (", %d BPM" % d["bpm"]) if d.get("bpm") else "")
+    txt = "%s%d pattern%s%s" % ((name + ", ") if name else "", n, "" if n == 1 else "s",
+                                 (", %d BPM" % d["bpm"]) if d.get("bpm") else "")
+    _SUMMARY[slot] = (mt, txt)
+    return txt
 
 
 def M():
@@ -220,9 +234,15 @@ class SongMixin:
     DEMO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demos")
 
     def demo_names(self):
+        """The demo list, read once (Settings draws every frame; reading eight JSON
+        files each time stalled the UI for seconds on the Brick)."""
+        cache = getattr(self, "_demo_cache", None)
+        if cache is not None:
+            return cache
         try:
             files = sorted(f for f in os.listdir(self.DEMO_DIR) if f.endswith(".json"))
         except OSError:
+            self._demo_cache = []
             return []
         out = []
         for f in files:
@@ -231,6 +251,7 @@ class SongMixin:
                     out.append((json.load(fh).get("demo") or f[:-5], f))
             except Exception:
                 pass
+        self._demo_cache = out
         return out
 
     def load_demo(self, fname):

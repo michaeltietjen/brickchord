@@ -1871,6 +1871,21 @@ class Engine:
             seg = self._take(v, n)
             if seg is None:
                 continue
+            if v.tag != "drone" and (v.rel_at is None or v.rel_at >= t + N):
+                # the common case, no release in this block: gain and pan in one multiply
+                seg *= np.array((v.gain * v.lg, v.gain * v.rg), np.float32)
+                if v.trk is not None:
+                    b = tb.get(v.trk)
+                    if b is None:
+                        b = tb[v.trk] = np.zeros((N, 2), np.float32)
+                    b[o:] += seg
+                elif v.tag in ("drum", "bass"):
+                    dmix[o:] += seg
+                else:
+                    mix[o:] += seg
+                if not v.done:
+                    live.append(v)
+                continue
             g = np.full(n, v.gain, np.float32)
             if v.rel_at is not None and v.rel_at < t + N:
                 x = (T[o:] - v.rel_at) / max(1, v.rel_len)
@@ -2027,10 +2042,14 @@ class Engine:
                 out[k:] = 0
                 v.done = True
             else:
+                # the loop: copy in slices and wrap, instead of building an index array
                 ll = len(l)
-                start = pos + k - la
-                ii = (np.arange(start, start + n - k)) % ll
-                out[k:] = l[ii]
+                st = (pos + k - la) % ll
+                while k < n:
+                    c = min(n - k, ll - st)
+                    out[k:k + c] = l[st:st + c]
+                    k += c
+                    st = 0
         v.pos = pos + n
         return out
 
