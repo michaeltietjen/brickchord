@@ -49,6 +49,14 @@ An ambient machine on the same engine. Six drone voices (D-pad, X, Y) fade in an
 
 **Tested firmware:** `knulli-a133-trimui-brick-pro-beta-20260921`. KNULLI for the Brick Pro is still in beta. Get it from the [KNULLI project](https://knulli.org) (public builds are on [their GitHub releases](https://github.com/knulli-cfw/distribution/releases)); Brickchord doesn't host or support the firmware itself.
 
+## Install (PortMaster: NextUI / NX Redux, muOS, ROCKNIX, ArkOS, KNULLI and more)
+1. Make sure PortMaster is installed on the device (on NextUI and NX Redux it comes from the Pak Store / Xtras Store).
+2. Download `brickchord-*-portmaster.zip`, `bricklab-*-portmaster.zip` or `brickglide-*-portmaster.zip` from **[Releases](https://github.com/michaeltietjen/brickchord/releases)**.
+3. Unzip it into the ports folder PortMaster uses on your firmware: the launcher (`Brickchord.sh`, `Bricklab.sh` or `Brickglide.sh`) and its folder side by side.
+4. Launch it from Ports. The first launch fetches PortMaster's Python 3.11 runtime if it isn't there yet, then asks you to press each button once. Quit from Settings > Quit.
+
+Each port bundles NumPy and a pygame built against the device's own SDL2, so it uses your firmware's screen and audio drivers. Logs: `log.txt` in the app folder. Tested so far on the TrimUI Brick Pro (KNULLI); reports from other devices are welcome. Build the zips with `tools/build_portmaster.sh` (screenshots for a PortMaster store listing go in `portmaster/screenshots/`).
+
 ## Install (R36Max, R36S and other ArkOS-family handhelds)
 1. Download `brickchord-r36max-*.zip` from **[Releases](https://github.com/michaeltietjen/brickchord/releases)**.
 2. Copy `Brickchord.sh` and the `brickchord/` folder from its `ports/` folder into `ports/` on the SD card.

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- PortMaster ports for Brickchord, Bricklab and Brickglide (`tools/build_portmaster.sh`): one zip each that runs on PortMaster's Python 3.11 runtime with NumPy and a pygame built against the device's own SDL2 bundled, so they work on firmwares without Python, like NextUI and NX Redux on the TrimUI Brick, as well as muOS, ROCKNIX, ArkOS and KNULLI.
 - Brickglide: Moves (R2 + chord: Bloom, Cascade up/down, Spiral, Swoop, Scatter, Converge, Fall), a sub voice an octave under the bass, Saw Bass and Square Bass as voice sounds, the bass kept in C2..B2, a smooth bloom that converges before it fans, a crisp line spectrogram, an FX page, text that fits, flat keys spelled with flats, and a site page at /brickglide/.
 - Bricklab: Preview notes toggle in Settings > Global, for quiet editing while recording dawless.
 
