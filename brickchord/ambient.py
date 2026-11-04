@@ -3,7 +3,9 @@
 # notes, long glides between pitches drawn as guides on screen, scenes that
 # morph the whole texture, and the sticks for spread, movement and Cloud.
 #
-#   UP RIGHT DOWN LEFT X Y   drone voices 1-6 on/off (they fade)
+#   UP RIGHT DOWN LEFT X Y   drone voices 1-6: press starts one, tap a sounding one to stop it;
+#                            hold one (or several) and the left stick bends and swells only
+#                            those voices, MPE-style; let go and they settle on the scale
 #   A B                      melodic voices 1-2: start / stop their steps
 #   L1 + a voice button      select that voice (Settings opens on it)
 #   R1 + a drone button      recall scene 1-6 (the voices glide there)
@@ -46,6 +48,8 @@ PATHS = ["Smooth", "Linear", "Ease", "Swell", "Steps"]       # Steps walks the s
 ORDERS = ["Together", "Low first", "High first", "Outside in", "Random"]
 STAGGERS = [0, 0.5, 1, 2, 3, 5, 8]
 CHORD_TIMES = [1, 2, 4, 6, 8, 12, 20, 30, 60]
+BEND_RANGES = [1, 2, 3, 5, 7, 12, 24]                   # semitones at full stick
+SNAPS = ["Scale", "Semitone", "Free"]                    # where a bent voice settles when you let go
 
 
 def M():
@@ -114,6 +118,8 @@ class AmbientMixin:
         self.amorph = st.get("morph", 8)
         self.achord = dict({"type": 2, "path": 2, "time": 8, "stagger": 1, "order": 1}, **(st.get("chord") or {}))
         self.r2_used = False
+        self.aexp = {}            # voices held for expression: i -> {"bend", "press", "moved", "was_on", "sent"}
+        self.aexpr = dict({"range": 7, "snap": 0}, **(st.get("expr") or {}))
         self.asel = 0
         self.afreeze = False
         self.ahist = [[] for _ in range(NV)]
@@ -128,7 +134,7 @@ class AmbientMixin:
         keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
         return {"voices": [{k: v[k] for k in keys} for v in self.av],
                 "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
-                "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord}
+                "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord, "expr": self.aexpr}
 
     # ------------------------------------------------------------ talking to the engine
     def amb_patch(self, i):
@@ -207,6 +213,14 @@ class AmbientMixin:
                 self.amb_evolve()                       # a tap: evolve
             return True
         if not down:
+            if name in DRONE_BTNS:
+                i = DRONE_BTNS.index(name)
+                e = self.aexp.pop(i, None)
+                if e is not None:
+                    if e["moved"]:
+                        self.amb_commit_bend(i, e)       # a bend: the voice settles where you left it
+                    elif e["was_on"]:
+                        self.amb_toggle(i)               # a plain tap on a sounding voice: off
             return name in DRONE_BTNS + MEL_BTNS + ["START", "L3"]
         if name in DRONE_BTNS or name in MEL_BTNS:
             i = (DRONE_BTNS + MEL_BTNS).index(name)
@@ -225,7 +239,15 @@ class AmbientMixin:
                 self.sel_combo = True                    # SELECT was part of a combo: no menu on release
                 self.amb_save_scene(i)
                 return True
-            self.amb_toggle(i)
+            if i < 6:
+                # press: an off voice starts now; hold it and the left stick bends and swells
+                # just this voice (MPE-style); a plain tap on a sounding voice turns it off
+                was_on = self.av[i]["on"]
+                if not was_on:
+                    self.amb_toggle(i)
+                self.aexp[i] = {"bend": 0.0, "press": 0.0, "moved": False, "was_on": was_on, "sent": None}
+            else:
+                self.amb_toggle(i)
             self.asel = i
             return True
         if name == "START":
@@ -247,6 +269,9 @@ class AmbientMixin:
             self.l2_moved = getattr(self, "l2_moved", False) or math.hypot(x, y) > 0.3
             self.drone_cloud(x, y)
             return
+        if self.aexp:
+            self.amb_express(x, y)
+            return
         dz = 0.15
         sx = 0.0 if abs(x) < dz else x
         sy = 0.0 if abs(y) < dz else y
@@ -255,6 +280,51 @@ class AmbientMixin:
         if (spread, move) != (self.aspread, self.amove):
             self.aspread, self.amove = spread, move
             self.eng.post("amb_global", spread, max(0.0, move))
+
+    # ------------------------------------------------------------ per-voice expression
+    def amb_express(self, x, y):
+        """While drone buttons are held: X bends each held voice (up to the bend
+        range at full stick), Y is pressure (up swells it and deepens its vibrato,
+        down softens it). Like MPE, only the held voices move."""
+        dz = 0.08
+        bx = 0.0 if abs(x) < dz else (x - math.copysign(dz, x)) / (1 - dz)
+        py = 0.0 if abs(y) < dz else (y - math.copysign(dz, y)) / (1 - dz)
+        bend = bx * self.aexpr["range"] * 100.0
+        for i, e in self.aexp.items():
+            e["bend"], e["press"] = bend, py
+            if abs(bx) > 0.12 or abs(py) > 0.12:
+                e["moved"] = True
+            v = self.av[i]
+            if v["base"] is None:
+                continue
+            tgt = self.amb_tgt(i) + bend
+            lvl = max(0.0, min(1.0, v["level"] * (1.0 + 0.6 * py)))
+            vib = v["vib"] * (1.0 + 3.0 * max(0.0, py))
+            sent = (round(tgt / 3), round(lvl * 50), round(vib))
+            if sent == e["sent"]:
+                continue
+            e["sent"] = sent
+            self.eng.post("amb", i, {"tgt": tgt, "level": lvl, "on": True, "glide": 0.08, "shape": 1, "vib": vib})
+        if self.aexp and abs(bend) > 1:
+            self.flash("BEND %+d CENTS%s" % (round(bend), "   PRESSURE %+d%%" % round(py * 100) if abs(py) > 0.12 else ""))
+
+    def amb_commit_bend(self, i, e):
+        """Let go of a bent voice: it settles on the nearest note of the scale (or
+        semitone, or exactly where it is), and its level and vibrato come back."""
+        v = self.av[i]
+        total = v["note"] * 100.0 + v["cents"] + e["bend"]
+        snap = self.aexpr["snap"]
+        if snap == 0:
+            sc = M().SCALES[self.scale]
+            cands = [n for n in range(int(total // 100) - 3, int(total // 100) + 4) if (n - self.key) % 12 in sc]
+            v["note"], v["cents"] = min(cands, key=lambda n: abs(n * 100 - total)), 0
+        elif snap == 1:
+            v["note"], v["cents"] = int(round(total / 100.0)), 0
+        else:
+            n = int(round(total / 100.0))
+            v["note"], v["cents"] = n, int(round(total - n * 100))
+        self.aui[i]["cur"] = total
+        self.amb_push(i, glide=0.6, shape=2)
 
     # ------------------------------------------------------------ scenes and evolve
     def amb_save_scene(self, s):
@@ -412,10 +482,13 @@ class AmbientMixin:
         # the screen's model of every voice: same glide and fade as the engine
         for i, v in enumerate(self.av):
             u = self.aui[i]
-            tgt = v["note"] * 100.0 + v["cents"]
+            tgt = v["note"] * 100.0 + v["cents"] + (self.aexp[i]["bend"] if i in self.aexp else 0.0)
             if u["cur"] is None:
                 u["cur"] = tgt
-            if u.get("path"):
+            if i in self.aexp:
+                u["cur"] = tgt + (u["cur"] - tgt) * math.exp(-dt / 0.03)
+                u["path"] = None
+            elif u.get("path"):
                 el = now - u["t0"] - u["delay"]
                 u["cur"] = engine.Engine.amb_path_at(u["path"], el, u["dur"], u["shape"])
                 if el >= u["dur"]:
@@ -457,7 +530,8 @@ class AmbientMixin:
                     ("Tremolo", "%d%%" % round(v["trem"] * 100)), ("Drift", "%d cents" % v["drift"])]
         if pg == "Chords":
             ch = self.achord
-            return [("Chord", CHORDS[ch["type"] % len(CHORDS)][0]), ("Path", PATHS[ch["path"]]),
+            return [("Bend range", "%d semitones" % self.aexpr["range"]), ("Bend settles on", SNAPS[self.aexpr["snap"]]),
+                    ("Chord", CHORDS[ch["type"] % len(CHORDS)][0]), ("Path", PATHS[ch["path"]]),
                     ("Glide time", "%d s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
                     ("Order", ORDERS[ch["order"]]),
                     ("Play", "R2 + ^ > v < X Y = degree I to VI"), ("Evolve", "tap R2")]
@@ -552,7 +626,11 @@ class AmbientMixin:
             return
         if pg == "Chords":
             ch = self.achord
-            if name == "Chord":
+            if name == "Bend range":
+                self.aexpr["range"] = self._amb_step(BEND_RANGES, self.aexpr["range"], d)
+            elif name == "Bend settles on":
+                self.aexpr["snap"] = (self.aexpr["snap"] + d) % len(SNAPS)
+            elif name == "Chord":
                 ch["type"] = (ch["type"] + d) % len(CHORDS)
             elif name == "Path":
                 ch["path"] = (ch["path"] + d) % len(PATHS)
