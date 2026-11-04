@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: modes, engines, effects rack, Bricklab
+## v0.3.0 (Nov 3, 2026): Bricklab, machines, Macro, Cloud, demo songs
 - Drone mode: hold L2 and the left stick plays Cloud on the drone. The direction picks one of the eight textures like a compass (up Shimmer, up-right Bloom, right Drift, down-right Haze, down Grit, down-left Dust, left Smear, up-left Freeze) and the distance from centre sets the amount. Let go of L2 and the cloud stays; tap L2 without moving the stick to turn it off. Without L2 the stick still pulses, swells, thins and blooms the drone. Both editions.
 - Fix: changing Cloud's texture while grains were sounding crashed the audio (a grain kept its old length but got the new window).
 - Cloud: Grit sounded like Dust, so it now earns its name: short dense grains, half of them reversed, wide in the stereo field, and the cloud bit-crushed and sample-held. Haze, Drift and Freeze also mix in some reversed grains.
