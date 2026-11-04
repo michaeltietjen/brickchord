@@ -380,6 +380,7 @@ def _convolve(x, ir, out_len):
 SAMPLE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
 SAMPLE_PATCH = {"sample": None, "root": 60, "tune": 0, "start": 0.0, "end": 1.0, "rev": False, "loop": False,
                 "grain": False, "gsize": 80, "gdens": 40, "gpos": 0.3, "gspray": 0.3, "gpitch": 0.0,
+                "slices": 0,
                 "a": 0.0, "d": 0.0, "s": 0.0, "r": 0.25, "fa": 0.0, "fd": 0.0, "fs": 1.0, "fenv": 0.0,
                 "cutoff": 9000.0, "res": 0.5, "name": "", "oscs": []}
 
@@ -444,6 +445,13 @@ def render_sample(midi, p, arrays=False):
     x = x[a:b]
     if p.get("rev"):
         x = x[::-1]
+    sl = int(p.get("slices", 0) or 0)
+    if sl:
+        # slice mode: the note picks a slice (root = slice 1), played at its own pitch
+        idx = (midi - p.get("root", 60)) % sl
+        n = len(x)
+        x = x[idx * n // sl:(idx + 1) * n // sl]
+        midi = p.get("root", 60)
     r = 2.0 ** ((midi - p.get("root", 60) + p.get("tune", 0)) / 12.0)
     if p.get("grain"):
         y = _grain_cloud(x, r, p)

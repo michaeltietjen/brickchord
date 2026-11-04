@@ -1367,6 +1367,14 @@ class App(modes.ModesMixin):
         if "SELECT" in held and "START" in held:
             self.running = False
             return
+        if getattr(self, "welcome", False):
+            if down and name in ("A", "B", "START"):
+                self.welcome = False
+                self.cfg["welcomed"] = True
+                self.save_cfg()
+                if name in ("A", "START"):
+                    self.welcome_demo()
+            return
         if self.editor:
             if down:
                 self.editor_input(name)
@@ -1716,7 +1724,44 @@ class App(modes.ModesMixin):
         ea = self.sm("editor", 1.0 if self.editor else 0.0, 16)
         if ea > 0.01:
             self.draw_editor(c, ea)
+        wa = self.sm("welcome", 1.0 if getattr(self, "welcome", False) else 0.0, 12)
+        if wa > 0.01:
+            self.draw_welcome(c, wa)
         self.present()
+
+    def welcome_demo(self):
+        """First launch: Analog Drift in an empty song slot, playing."""
+        names = self.demo_names()
+        f = next((f for n, f in names if n == "Analog Drift"), names[0][1] if names else None)
+        if f is None:
+            return
+        empty = next((s for s in range(1, song.SLOTS + 1) if song.song_summary(s) is None), None)
+        if empty and empty != self.song_slot and song.song_summary(self.song_slot) is not None:
+            self.switch_song(empty)
+        self.load_demo(f)
+        if not self.lp_e().lp_on:
+            self.lp_toggle_play()
+
+    def draw_welcome(self, c, a):
+        shade = pygame.Surface((BASE_W, BASE_H), pygame.SRCALPHA)
+        shade.fill(BG + (int(252 * a),))
+        c.blit(shade, (0, 0))
+        y = 60 + int((1 - a) ** 2 * 40)
+        self.draw_mark(c, BASE_W // 2, y + 10, 12)
+        self.text(c, "Welcome to Bricklab", self.f_big, self.mix(BG, INK, a), (BASE_W // 2, y + 70), center=True)
+        lines = [("R2", "record a layer (press again for the next)"), ("START", "play / stop"),
+                 ("L3", "click left stick: the mode wheel"),
+                 ("SELECT", "settings (hold: song, grid, mixer)"),
+                 ("Effects", "the track page: machine, sound, rack")]
+        yy = y + 108
+        for k, v in lines:
+            self.text(c, k, self.f_med, self.mix(BG, ACCENT, a), (200, yy), right=True)
+            self.text(c, v, self.f_small, self.mix(BG, INK, a), (216, yy + 3))
+            yy += 28
+        self.text(c, "A  play the demo song, Analog Drift", self.f_med, self.mix(BG, ACCENT, a),
+                  (BASE_W // 2, yy + 18), center=True)
+        self.text(c, "B  start with an empty song", self.f_med, self.mix(BG, DIM, a), (BASE_W // 2, yy + 46),
+                  center=True)
 
     # ---------------- bricks: a self-playing Tetris well and exploding blocks
     PIECES = [
@@ -2142,6 +2187,7 @@ class App(modes.ModesMixin):
         last_hb = last_poll = time.perf_counter()
         self.ui_beat = time.perf_counter()
         self.booted = True
+        self.welcome = bool(edition.LAB and not self.cfg.get("welcomed") and self.lp_e() is not None)
         threading.Thread(target=self.watchdog, daemon=True).start()
         while self.running:
             self.ui_beat = time.perf_counter()

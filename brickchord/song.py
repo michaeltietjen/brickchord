@@ -11,6 +11,7 @@
 #   Hold SELECT anywhere: +A record, +B undo/redo, +X play/stop, +Y mute,
 #   +UP/DOWN track, +LEFT/RIGHT pattern.
 import json
+import math
 import os
 import random
 import sys
@@ -34,7 +35,7 @@ NO_RATE = ("Drive", "Lo-fi", "Wide")
 TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), (120, 200, 110), (255, 120, 160)]
 DRUM_ROW = {"kick": 0.85, "snare": 0.6, "clap": 0.55, "tom": 0.7, "rim": 0.45, "hat": 0.25, "ohat": 0.2, "shk": 0.35}
 DRUM_ABBR = {"kick": "BD", "snare": "SD", "clap": "CP", "tom": "LT", "rim": "RS", "hat": "CH", "ohat": "OH", "shk": "SH"}
-PAGES = ["pattern", "grid", "song"]
+PAGES = ["pattern", "grid", "mix", "song"]
 DT = 0                      # track 1 is the drum track
 LANES = engine.DRUM_ORDER   # kick snare clap rim tom hat ohat shk
 LANE_NAME = {"kick": "Kick", "snare": "Snare", "clap": "Clap", "rim": "Rim", "tom": "Tom", "hat": "Hat",
@@ -310,6 +311,12 @@ class SongMixin:
         if not self.lp_loaded or self.lp_e() is None:
             return
         try:
+            e = self.lp_e()
+            if not getattr(self, "song_name", None) and e is not None and any(
+                    t.ev for pat in e.pats for t in pat.tracks):
+                # a song gets a name the first time it has notes: key, scale, day
+                self.song_name = "%s %s, %s" % (M().NOTE_NAMES[self.key % 12], self.scale,
+                                                time.strftime("%b %d").replace(" 0", " "))
             path = song_path(self.song_slot)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp = path + ".tmp"
@@ -927,7 +934,8 @@ class SongMixin:
                 ("Loop", "loop", None, 0, 1), ("Tune", "tune", 1, -24, 24), ("Grain", "grain", None, 0, 1),
                 ("Grain size", "gsize", 10, 20, 400), ("Density", "gdens", 10, 10, 200),
                 ("Position", "gpos", 0.05, 0.0, 1.0), ("Spray", "gspray", 0.05, 0.0, 1.0),
-                ("Pitch spray", "gpitch", 0.5, 0.0, 12.0)]
+                ("Pitch spray", "gpitch", 0.5, 0.0, 12.0), ("Slices", "slices", "slices", 0, 32)]
+    SLICE_OPTS = [0, 8, 16, 32]
 
     def smp_track(self):
         e = self.lp_e()
@@ -947,7 +955,9 @@ class SongMixin:
         rows = [("Sample", m["name"] or "")]
         for label, key, step, lo, hi in self.SMP_ROWS:
             v = d[key]
-            if step is None:
+            if step == "slices":
+                txt = ("%d" % v) if v else "Off"
+            elif step is None:
                 txt = "On" if v else "Off"
             elif key in ("start", "end", "gpos", "gspray"):
                 txt = "%d%%" % round(v * 100)
@@ -960,6 +970,8 @@ class SongMixin:
             else:
                 txt = "%.1f st" % v
             rows.append((label, txt))
+        if d.get("slices"):
+            rows.append(("Slice to grid", "A fills this pattern"))
         return rows
 
     def smp_menu_change(self, name, d):
@@ -970,12 +982,18 @@ class SongMixin:
         if name == "Sample":
             self.set_track_sound(p, k, d)
             return
+        if name == "Slice to grid":
+            self.slice_to_grid(p, k)
+            return
         smp = m.setdefault("smp", {})
         for label, key, step, lo, hi in self.SMP_ROWS:
             if label != name:
                 continue
             cur = smp.get(key, synth.SAMPLE_PATCH[key])
-            if step is None:
+            if step == "slices":
+                o = self.SLICE_OPTS
+                smp[key] = o[(o.index(cur) + d) % len(o)] if cur in o else 16
+            elif step is None:
                 smp[key] = not cur
             else:
                 v = round(cur + step * d, 3)
@@ -991,6 +1009,24 @@ class SongMixin:
         if e is not None and e.pats[p].tracks[k].ev:
             self.lp_resolve(p, k, replace=True)
         self.lp_dirty = True
+
+    def slice_to_grid(self, p, k):
+        """One step per slice across the pattern, so the loop plays in time at any tempo."""
+        e = self.lp_e()
+        m = self.pm[p][k]
+        sl = int((m.get("smp") or {}).get("slices") or 0)
+        if not sl:
+            return
+        L = e.pats[p].len
+        root = synth.SAMPLE_PATCH["root"]
+        span = L / float(sl)
+        ev = [[round(i * span, 3), "n", root + i, 0.9, 0.0, round(span, 3), 0.02] for i in range(sl)]
+        tracks = [[list(x[:7]) for x in t.ev] for t in e.pats[p].tracks]
+        tracks[k] = ev
+        self.eng.post("lp", "load", p, L, tracks)
+        self.lp_resolve_later(p, k, True, 0.3)
+        self.lp_dirty = True
+        self.flash("%d SLICES ON TRACK %d   START PLAYS IN TIME" % (sl, k + 1))
 
     # ------------------------------------------------------------ Settings > Drums page
     DRUM_MENU_HINT = "A select   X hear   lanes: A mute, Y+LEFT/RIGHT tune   L1/R1 page   B close"
@@ -1215,6 +1251,102 @@ class SongMixin:
             if ev[1] == "d":
                 self.eng.post("hit", ev[2], 0.8)
 
+    def input_mix(self, name, e, y):
+        """The mixer: six tracks of the playing pattern side by side."""
+        p, k = e.cur, self.lp_sel
+        m = self.pm[p][k]
+        if name in ("LEFT", "RIGHT") and not y:
+            self.lp_select((k + (1 if name == "RIGHT" else -1)) % NT)
+            return True
+        if name in ("LEFT", "RIGHT"):
+            m["pan"] = round(max(-1.0, min(1.0, m["pan"] + (0.1 if name == "RIGHT" else -0.1))), 2)
+        elif name in ("UP", "DOWN"):
+            m["vol"] = round(max(0.0, min(1.0, m["vol"] + (0.05 if name == "UP" else -0.05))), 2)
+            self.nudge = (time.perf_counter(), 1 if name == "UP" else -1)
+        elif name == "A":
+            self.solo = None
+            self.lp_mute(p, k)
+            return True
+        elif name == "X":
+            if getattr(self, "solo", None) == (p, k):          # solo off: restore the mutes
+                for j, was in enumerate(self.solo_prev):
+                    self.pm[p][j]["mute"] = was
+                    self.lp_push_track(p, j)
+                self.solo = None
+                self.flash("SOLO OFF")
+            else:
+                if getattr(self, "solo", None) is None or self.solo[0] != p:
+                    self.solo_prev = [self.pm[p][j]["mute"] for j in range(NT)]
+                for j in range(NT):
+                    self.pm[p][j]["mute"] = j != k
+                    self.lp_push_track(p, j)
+                self.solo = (p, k)
+                self.flash("TRACK %d SOLO   X AGAIN TO RELEASE" % (k + 1))
+            self.lp_dirty = True
+            return True
+        elif name == "B":
+            for q in range(NP):
+                if q != p:
+                    for j in range(NT):
+                        for f in ("vol", "pan"):
+                            self.pm[q][j][f] = self.pm[p][j][f]
+                        self.lp_push_track(q, j)
+            self.flash("LEVELS AND PANS COPIED TO ALL PATTERNS")
+            self.lp_dirty = True
+            return True
+        else:
+            return False
+        self.lp_push_track(p, k)
+        self.lp_dirty = True
+        return True
+
+    def draw_mix_page(self, c, e):
+        mm = M()
+        p = e.cur
+        top = 80
+        bottom = mm.L["tiles_y"] + mm.L["tile_h"] - 6
+        cw = (mm.BASE_W - 40) // NT
+        now = time.perf_counter()
+        for k in range(NT):
+            m = self.pm[p][k]
+            x = 20 + k * cw
+            sel = k == self.lp_sel
+            col = TRACK_COLS[k % len(TRACK_COLS)]
+            tr = e.pats[p].tracks[k]
+            if sel:
+                pygame.draw.rect(c, mm.PANEL, (x + 2, top - 6, cw - 4, bottom - top + 12), border_radius=8)
+            self.text(c, "T%d" % (k + 1), self.f_med, col if not m["mute"] else mm.DIM, (x + cw // 2, top + 6), center=True)
+            mc = "Drums" if self.is_drum(k) else synth.MACHINE_NAME.get(m.get("machine", "chord"), "")
+            self.text(c, mc, self.f_small, mm.INK if sel else mm.DIM, (x + cw // 2, top + 26), center=True)
+            nm = (m["drum"]["kit"] if self.is_drum(k) else (m["name"] or "")) or ""
+            self.text(c, nm[:9], self.f_small, mm.DIM, (x + cw // 2, top + 42), center=True)
+            # fader
+            fy0, fy1 = top + 60, bottom - 46
+            fx = x + cw // 2
+            pygame.draw.rect(c, mm.BG, (fx - 5, fy0, 10, fy1 - fy0), border_radius=5)
+            lv = self.sm("mix_%d_%d" % (p, k), m["vol"], 18)
+            h = int((fy1 - fy0) * lv)
+            # a lamp pulses while the track has notes and the transport runs
+            live = e.lp_on and tr.ev and not m["mute"]
+            fc = col if not m["mute"] else mm.DIM
+            if live:
+                fc = self.mix(fc, mm.INK, 0.25 * (0.5 + 0.5 * math.sin(now * 8 + k)))
+            if h:
+                pygame.draw.rect(c, fc, (fx - 5, fy1 - h, 10, h), border_radius=5)
+            pygame.draw.rect(c, mm.INK if sel else mm.DIM, (fx - 14, fy1 - h - 3, 28, 6), border_radius=3)
+            self.text(c, "%d%%" % round(m["vol"] * 100), self.f_small, mm.INK if sel else mm.DIM,
+                      (fx, fy1 + 12), center=True)
+            pan = m["pan"]
+            ptxt = "C" if abs(pan) < 0.05 else ("L%d" % round(-pan * 100) if pan < 0 else "R%d" % round(pan * 100))
+            self.text(c, ptxt, self.f_small, mm.DIM, (fx, fy1 + 28), center=True)
+            solo = getattr(self, "solo", None) == (p, k)
+            if m["mute"] or solo:
+                tag = "SOLO" if solo else "MUTE"
+                pill = pygame.Rect(0, 0, 46, 16)
+                pill.center = (fx, fy0 - 10)
+                pygame.draw.rect(c, mm.MOD_ON if solo else REC, pill, border_radius=8)
+                self.text(c, tag, self.f_small, mm.BG, pill.center, center=True)
+
     def input_song(self, name, e, y):
         rows = self.song_rows
         i = self.song_sel % len(rows)
@@ -1436,6 +1568,8 @@ class SongMixin:
             return "A add  B del  UP/DOWN pitch  X quantize  Y+<> length  Y+A kick  L1/R1 page"
         if pg == "song":
             return "<> pattern  X repeats  A add  B del  Y song on/off  START play  L1/R1 page"
+        if pg == "mix":
+            return "<> track  ^v level  Y+<> pan  A mute  X solo  B to all patterns  L1/R1 page"
         return "A play  SELECT+A rec  B clear  Y mute  X track  <> pattern  Y+<> length  Y+A copy"
 
     def playpos(self, e):
