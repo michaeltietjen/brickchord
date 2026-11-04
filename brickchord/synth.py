@@ -734,10 +734,30 @@ MACRO_PATCHES = [
 ]
 
 
+_WAV_CACHE = {}
+
+
+def _sample_audio(name):
+    """A sample file decoded once (mono, at SR, at most 12 s), kept for the next notes:
+    decoding a long 24-bit WAV for every pitch made renders slow and missed notes."""
+    path = os.path.join(SAMPLE_DIR, name)
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return None
+    x = _WAV_CACHE.get(key)
+    if x is None:
+        x = read_wav(path, SR, max_sec=12.0)
+        if len(_WAV_CACHE) > 6:
+            _WAV_CACHE.clear()
+        _WAV_CACHE[key] = x
+    return x
+
+
 def render_sample(midi, p, arrays=False):
     """A Sample track's note: the WAV pitched from its root to midi (plus tune),
     trimmed to start..end, optionally reversed; loop=True sustains it."""
-    x = read_wav(os.path.join(SAMPLE_DIR, p["sample"]), SR, max_sec=12.0) if p.get("sample") else None
+    x = _sample_audio(p["sample"]) if p.get("sample") else None
     if x is None or len(x) < 16:
         x = np.zeros(int(0.05 * SR), np.float32)
     n = len(x)
@@ -764,8 +784,17 @@ def render_sample(midi, p, arrays=False):
     if fade:
         y[:fade] *= np.linspace(0, 1, fade)
         y[-fade:] *= np.linspace(1, 0, fade)
+    if len(y) > int(14 * SR):                          # a pitched-down note is capped, it only grows memory
+        y = y[:int(14 * SR)]
+        y[-int(0.01 * SR):] *= np.linspace(1, 0, int(0.01 * SR))
     st = np.repeat(y[:, None], 2, axis=1) * (GAIN * 2.5)
-    loop = st.copy() if p.get("loop") else None
+    loop = None
+    if p.get("loop"):
+        # the loop is the sample from a few samples in, wrapped: the same audio once,
+        # not an attack copy plus a loop copy
+        k = min(64, len(st) // 2)
+        loop = np.concatenate([st[k:], st[:k]])
+        st = st[:k]
     if arrays:
         return np.ascontiguousarray(st, np.float32), (np.ascontiguousarray(loop, np.float32) if loop is not None else None)
     return _to_bytes(st), (_to_bytes(loop) if loop is not None else None), len(y) / SR

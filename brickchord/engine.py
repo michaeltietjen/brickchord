@@ -854,6 +854,36 @@ class Engine:
     def c_lead_mod(self, bend, vib):
         self.lead_bend, self.lead_vib = float(bend), float(vib)
 
+    def _lead_window(self, v, lo, hi):
+        """Samples lo..hi (inclusive) of a voice's sound: the attack, then the loop
+        repeated (or silence after a one-shot), copied as slices."""
+        a, l = v.a, v.l
+        na = len(a)
+        n = hi - lo + 1
+        out = np.zeros((n, 2), np.float32)
+        k = 0
+        if lo < na:
+            k = min(n, na - lo)
+            out[:k] = a[lo:lo + k]
+        if k < n and l is not None:
+            ll = len(l)
+            st = (lo + k - na) % ll
+            while k < n:
+                c = min(n - k, ll - st)
+                out[k:k + c] = l[st:st + c]
+                k += c
+                st = 0
+        return out
+
+    def _lead_interp(self, v, pos):
+        """Resample a voice at fractional positions: one window copy, two takes."""
+        i0 = pos.astype(np.int64)
+        lo = int(i0[0])
+        w = self._lead_window(v, lo, int(i0[-1]) + 1)
+        j = i0 - lo
+        fr = (pos - i0).astype(np.float32)[:, None]
+        return w[j] * (1 - fr) + w[j + 1] * fr
+
     def _lead_fetch(self, v, idx):
         a, l = v.a, v.l
         na = len(a)
@@ -882,9 +912,7 @@ class Engine:
             v.ratio = float(r[-1])
             pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
             v.pos = float(pos[-1] + r[-1])
-            i0 = pos.astype(np.int64)
-            fr = (pos - i0).astype(np.float32)[:, None]
-            seg = self._lead_fetch(v, i0) * (1 - fr) + self._lead_fetch(v, i0 + 1) * fr
+            seg = self._lead_interp(v, pos)
             if v.fade_in > 0:
                 env = v.env + np.arange(1, N + 1, dtype=np.float32) / v.fade_in
                 env = np.clip(env, 0, 1)
@@ -934,9 +962,7 @@ class Engine:
             r = r * vib * bend
             pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
             v.pos = float(pos[-1] + r[-1])
-            i0 = pos.astype(np.int64)
-            fr = (pos - i0).astype(np.float32)[:, None]
-            seg = self._lead_fetch(v, i0) * (1 - fr) + self._lead_fetch(v, i0 + 1) * fr
+            seg = self._lead_interp(v, pos)
             if v.rel:
                 env = v.env - np.arange(1, N + 1, dtype=np.float32) / max(1, v.rel_n)
                 env = np.clip(env, 0, 1)
@@ -1500,9 +1526,7 @@ class Engine:
             v.ratio = float(r[-1])
             pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
             v.pos = float(pos[-1] + r[-1])
-            i0 = pos.astype(np.int64)
-            fr = (pos - i0).astype(np.float32)[:, None]
-            seg = self._lead_fetch(v, i0) * (1 - fr) + self._lead_fetch(v, i0 + 1) * fr
+            seg = self._lead_interp(v, pos)
             if v.rel:
                 env = v.env - np.arange(1, n + 1, dtype=np.float32) / v.rel_n
             else:
@@ -1922,6 +1946,7 @@ class Engine:
             if not v.done:
                 live.append(v)
         self.voices = live
+        t1b = time.perf_counter()
         if self.leads:
             if self.route and not self._seltr().drum:
                 key = (self.cur, self.sel)
@@ -2013,7 +2038,8 @@ class Engine:
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)
         el = time.perf_counter() - t0
         nt = max(1, getattr(self, "_ntracks", 0))
-        st = (("cmds+clock", t1 - t0), ("voices", t2 - t1), ("live fx", t3 - t2), ("tracks", t4 - t3),
+        st = (("cmds+clock", t1 - t0), ("voices", t1b - t1), ("resampled", t2 - t1b), ("live fx", t3 - t2),
+              ("tracks", t4 - t3),
               ("per_track", (t4 - t3) / nt), ("delay", t5 - t4), ("reverb", t6 - t5), ("total", el))
         pa = getattr(self, "_pacc", None)
         self._pacc = [(k, v * 1000 if pa is None else pa[i][1] * 0.97 + v * 1000 * 0.03) for i, (k, v) in enumerate(st)]
