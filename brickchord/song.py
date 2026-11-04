@@ -164,6 +164,8 @@ class SongMixin:
         self.sg_page = "pattern"
         self.lp_sel = 0
         self.grid_x = 0
+        self.grid_follow = True     # while playing, the grid cursor rides the playhead
+        self.grid_moved_t = 0.0     # ... except for a moment after you move it yourself
         self.tfx_i = 0
         self.y_used = False
         self.lp_loaded = False
@@ -383,6 +385,8 @@ class SongMixin:
         """L2 held on the grid: parameter locks on the step under the cursor.
         L2+UP/DOWN filter cutoff, L2+LEFT/RIGHT velocity, L2+A slide, L2+B clears."""
         m = self.pm[p][k]
+        self.l2_used = True
+        self.grid_moved_t = time.perf_counter()
         locks = m.setdefault("locks", {})
         lk = locks.setdefault(str(x), {})
         msg = None
@@ -907,7 +911,9 @@ class SongMixin:
                 self.eng.post("lp", "ed", "len", p, k, x, d)
             else:
                 self.grid_x = (x + d) % n
+                self.grid_moved_t = time.perf_counter()
         elif name in ("UP", "DOWN"):
+            self.grid_moved_t = time.perf_counter()
             if here:
                 d = (12 if y else 1) * (1 if name == "UP" else -1)
                 self.eng.post("lp", "ed", "shift", p, k, x, d)
@@ -922,6 +928,7 @@ class SongMixin:
             self.lp_resolve_later(p, k)
             self.grid_preview(evs, 0)
             self.grid_x = (x + 1) % n
+            self.grid_moved_t = time.perf_counter()
         elif name == "B":
             if here:
                 self.eng.post("lp", "ed", "del", p, k, x)
@@ -960,7 +967,9 @@ class SongMixin:
                 self.flash("SWING %d%%" % round(dr["swing"] * 200))
             else:
                 self.grid_x = (x + d) % n
+                self.grid_moved_t = time.perf_counter()
         elif name in ("UP", "DOWN"):
+            self.grid_moved_t = time.perf_counter()
             d = 1 if name == "DOWN" else -1
             if y:
                 lv[0] = round(max(0.0, min(1.5, lv[0] - 0.1 * d)), 2)
@@ -1305,7 +1314,8 @@ class SongMixin:
         beat = synth.BEATS[dr.get("beat", 0)][0] if dr.get("beat") else "your own"
         self.text(c, "P%02d  DRUMS   kit %s   swing %d%%   from %s" % (p + 1, dr["kit"], round(dr["swing"] * 200), beat),
                   self.f_small, col, (20, 74))
-        self.text(c, "page %d/%d" % (page + 1, L // 16), self.f_small, mm.DIM, (mm.BASE_W - 20, 74), right=True)
+        self.text(c, ("FOLLOW   " if self.grid_follow else "") + "page %d/%d" % (page + 1, L // 16), self.f_small,
+                  mm.ACCENT if (self.grid_follow and e.lp_on) else mm.DIM, (mm.BASE_W - 20, 74), right=True)
         top, bottom = 94, mm.L["tiles_y"] + mm.L["tile_h"] - 22
         rh = (bottom - top) // len(LANES)
         gx0 = 132
@@ -1639,6 +1649,11 @@ class SongMixin:
             self.sync_sel(preload=not e.lp_on)
         else:
             self.pull_live()
+        if (self.grid_follow and self.imode == "Song" and self.sg_page == "grid" and e.lp_on
+                and now - self.grid_moved_t > 1.5):
+            pos = self.playpos(e)
+            if pos is not None:
+                self.grid_x = int(pos) % max(1, e.pats[e.cur].len)
         for pk, (t, rep) in list(self.lp_resolve_q.items()):
             if now >= t:
                 del self.lp_resolve_q[pk]
@@ -1734,7 +1749,7 @@ class SongMixin:
         if pg == "grid" and self.is_drum(self.lp_sel):
             return "A step  B accent/ghost  X beat  Y+X kit  Y+^v lane level  Y+A mute  Y+B clear  Y+<> swing"
         if pg == "grid":
-            return "A add  B del  ^v pitch  Y+<> length  X quantize   L2+: ^v filter  <> velocity  A slide  B clear"
+            return "A add  B del  ^v pitch  Y+<> length  X quantize  L2 tap follow  L2+: ^v filter <> vel A slide"
         if pg == "song":
             return "<> pattern  X repeats  A add  B del  Y song on/off  START play  L1/R1 page"
         if pg == "mix":
@@ -1889,7 +1904,8 @@ class SongMixin:
         page = x // 16
         self.text(c, "P%02d  TRACK %d  %s" % (p + 1, k + 1, (self.pm[p][k]["name"] or "").upper()), self.f_small,
                   col, (20, 74))
-        self.text(c, "page %d/%d" % (page + 1, L // 16), self.f_small, mm.DIM, (mm.BASE_W - 20, 74), right=True)
+        self.text(c, ("FOLLOW   " if self.grid_follow else "") + "page %d/%d" % (page + 1, L // 16), self.f_small,
+                  mm.ACCENT if (self.grid_follow and e.lp_on) else mm.DIM, (mm.BASE_W - 20, 74), right=True)
         # piano roll of this page
         top, bottom = 96, mm.L["tiles_y"] - 4
         roll = pygame.Rect(20, top, mm.BASE_W - 40, bottom - top)

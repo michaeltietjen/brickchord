@@ -1516,6 +1516,14 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         if edition.LAB and "SELECT" in held and self.looper_combo(name, down):
             self.sel_combo = True
             return
+        if name == "L2" and edition.LAB and self.imode == "Song" and self.sg_page == "grid":
+            # L2 tap on the grid: the cursor follows the playhead, or stays where you put it
+            if down:
+                self.l2_used = False
+            elif not getattr(self, "l2_used", False):
+                self.grid_follow = not self.grid_follow
+                self.flash("FOLLOW PLAYHEAD " + ("ON" if self.grid_follow else "OFF"))
+            return
         if self.imode != "Play" and self.mode_input(name, down):
             return
         if name == "R2" and edition.LAB:
