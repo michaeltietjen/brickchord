@@ -928,15 +928,20 @@ class Engine:
         n = max(1, len(self.drone["notes"]) if self.drone else 1)
         for idx, v in enumerate(self.dvoices):
             rt = 2.0 ** ((v.target - v.base) / 12.0)
-            if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
-                c = math.exp(-1.0 / (v.glide * 0.35 * sr))
-                r = rt + (v.ratio - rt) * c ** (i + 1)
+            if v.target == v.base and v.ratio == 1.0 and float(v.pos).is_integer():
+                p0 = int(v.pos)                            # at its own pitch: a plain slice
+                seg = self._lead_window(v, p0, p0 + N - 1)
+                v.pos = float(p0 + N)
             else:
-                r = np.full(N, rt)
-            v.ratio = float(r[-1])
-            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
-            v.pos = float(pos[-1] + r[-1])
-            seg = self._lead_interp(v, pos)
+                if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
+                    c = math.exp(-1.0 / (v.glide * 0.35 * sr))
+                    r = rt + (v.ratio - rt) * c ** (i + 1)
+                else:
+                    r = np.full(N, rt)
+                v.ratio = float(r[-1])
+                pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
+                v.pos = float(pos[-1] + r[-1])
+                seg = self._lead_interp(v, pos)
             if v.fade_in > 0:
                 env = v.env + np.arange(1, N + 1, dtype=np.float32) / v.fade_in
                 env = np.clip(env, 0, 1)
@@ -975,8 +980,27 @@ class Engine:
         self.vib_ph = (self.vib_ph + 2 * np.pi * 5.5 * N / sr) % (2 * np.pi)
         bend = 2.0 ** (self.lead_bend / 12.0)
         keep = []
+        still = not isinstance(vib, np.ndarray) and bend == 1.0
         for v in self.leads:
             rt = 2.0 ** ((v.target - v.base) / 12.0)
+            if still and v.target == v.base and v.ratio == 1.0 and float(v.pos).is_integer():
+                # at its own pitch, no bend or vibrato: the same samples, copied as a slice
+                p0 = int(v.pos)
+                seg = self._lead_window(v, p0, p0 + N - 1)
+                v.pos = float(p0 + N)
+                if v.rel:
+                    env = v.env - np.arange(1, N + 1, dtype=np.float32) / max(1, v.rel_n)
+                    env = np.clip(env, 0, 1)
+                    v.env = float(env[-1])
+                    seg *= (env * env)[:, None]
+                seg *= 0.95
+                mix += seg
+                if v.l is None and v.pos >= len(v.a):
+                    continue
+                if v.rel and v.env <= 0.0:
+                    continue
+                keep.append(v)
+                continue
             if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
                 c = math.exp(-1.0 / (v.glide * 0.35 * sr))
                 r = rt + (v.ratio - rt) * c ** (i + 1)
@@ -1540,17 +1564,22 @@ class Engine:
                 v.rel = True
             off = max(0, v.start - T0)
             n = N - off
-            i = np.arange(n, dtype=np.float64)
             rt = 2.0 ** ((v.target - v.base) / 12.0)
-            if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
-                cc = math.exp(-1.0 / (v.glide * 0.35 * sr))
-                r = rt + (v.ratio - rt) * cc ** (i + 1)
+            if v.target == v.base and v.ratio == 1.0 and float(v.pos).is_integer():
+                p0 = int(v.pos)                            # not sliding: a plain slice
+                seg = self._lead_window(v, p0, p0 + n - 1)
+                v.pos = float(p0 + n)
             else:
-                r = np.full(n, rt)
-            v.ratio = float(r[-1])
-            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
-            v.pos = float(pos[-1] + r[-1])
-            seg = self._lead_interp(v, pos)
+                i = np.arange(n, dtype=np.float64)
+                if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
+                    cc = math.exp(-1.0 / (v.glide * 0.35 * sr))
+                    r = rt + (v.ratio - rt) * cc ** (i + 1)
+                else:
+                    r = np.full(n, rt)
+                v.ratio = float(r[-1])
+                pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
+                v.pos = float(pos[-1] + r[-1])
+                seg = self._lead_interp(v, pos)
             if v.rel:
                 env = v.env - np.arange(1, n + 1, dtype=np.float32) / v.rel_n
             else:
@@ -2041,6 +2070,7 @@ class Engine:
         t4 = time.perf_counter()
         # delay (type chosen in Settings), tempo synced except Slapback
         t5 = t4
+        rin = [None, None]
         for bi, b in enumerate(self.buses):
             fed = bool(np.any(rsend[bi]) or np.any(dsend[bi]))
             if fed:
@@ -2051,8 +2081,22 @@ class Engine:
                 b.tail -= 1
             y = self._delay(b, dsend[bi], N, sr)
             out += y
-            t5 = time.perf_counter()
-            out += self._reverb(b, rsend[bi] + y * 0.35) * 1.1
+            rin[bi] = rsend[bi] + y * 0.35
+        t5 = time.perf_counter()
+        b0, b1 = self.buses[0], self.buses[1]
+        if b0.rev_name and b0.rev_name == b1.rev_name and rin[1] is not None:
+            # both buses use the same reverb: one reverb hears both sends (same sound,
+            # half the work); bus B's own reverb only rings out what it already held
+            out += self._reverb(b0, rin[1] if rin[0] is None else rin[0] + rin[1]) * 1.1
+            b0.tail = max(b0.tail, b1.tail)
+            if getattr(b1, "rv_drain", 0) > 0:
+                b1.rv_drain -= 1
+                out += self._reverb(b1, np.zeros((N, 2), np.float32)) * 1.1
+        else:
+            for bi, b in enumerate(self.buses):
+                if rin[bi] is not None:
+                    out += self._reverb(b, rin[bi]) * 1.1
+                    b.rv_drain = int(6.0 * sr / N)
         t6 = time.perf_counter()
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]
