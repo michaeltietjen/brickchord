@@ -117,7 +117,9 @@ class ModesMixin(song.SongMixin):
                 m = self.pm[e.cur][k]
                 want = "lead" if new == "Lead" else "drone"
                 ok = ("lead", "bass", "sample") if new == "Lead" else ("drone",)
-                if k != song.DT and m.get("machine", "chord") not in ok:
+                # only a Chord track converts: a Sample, Macro or other machine keeps its sound
+                # (a Sample track drones its sample, a Bass track plays Lead mode, and so on)
+                if k != song.DT and m.get("machine", "chord") == "chord":
                     if not e.pats[e.cur].tracks[k].ev:
                         opts = [x for x in synth.MACHINES if x != "drums"]
                         cur = opts.index(m.get("machine", "chord"))
