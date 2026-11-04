@@ -278,6 +278,18 @@ class Engine:
 
     _CL_WIN = {}
 
+    def _cloud_alive(self, ch):
+        """Keep a silent track's chain running only while its Cloud still has
+        something to play: Freeze holds forever; the others for the two seconds
+        their buffer reaches back. (A silent chain with a full rack costs real CPU.)"""
+        c = ch.rack.get("Cloud")
+        if not c or not c[0]:
+            return False
+        tex = self.CLOUD_TEX[int(c[2]) % len(self.CLOUD_TEX)]
+        if tex[5]:
+            return True
+        return bool(getattr(ch, "cl_grains", None)) or getattr(ch, "cl_quiet", 0) < 2 * self.sr
+
     def _cloud(self, ch, x, N, sr, a, ti):
         """Granular texture: the track's last two seconds sit in a mono buffer; grains
         are read back from it (behind the write head, scattered), at the same pitch or
@@ -291,7 +303,9 @@ class Engine:
             ch.cl_grains = []
             ch.cl_rng = np.random.default_rng(1234)
         mono = (x[:, 0] + x[:, 1]) * 0.5
-        if not freeze or float(np.abs(mono).max()) > 1e-3:   # Freeze keeps the last thing played
+        loud = float(np.abs(mono).max()) > 1e-3
+        ch.cl_quiet = 0 if loud else getattr(ch, "cl_quiet", 0) + N
+        if not freeze or loud:                              # Freeze keeps the last thing played
             w = ch.cl_w
             e = w + N
             if e <= B:
@@ -1992,7 +2006,7 @@ class Engine:
             b = tb.get(key)
             if b is None:
                 tr.idle += 1
-                if tr.idle > 2 and key != selkey and not (tr.ch.rack.get("Cloud") or (False,))[0]:
+                if tr.idle > 2 and key != selkey and not self._cloud_alive(tr.ch):
                     self._tails.discard(key)
                     continue
                 b = np.zeros((N, 2), np.float32)
