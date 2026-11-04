@@ -14,6 +14,7 @@
 #                            picks the chord, the path shape, the time and the order)
 #   R2 (tap)                 evolve: every voice glides to a new note of the scale
 #   R2 + A                   run / stop the chord progression (Settings > Chords)
+#   R2 + B                   bloom: every voice from one note, fanning out, the filter opening
 #   START                    freeze: the cloud holds what is sounding
 #   left stick               X spreads the voices apart, Y deepens their movement
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
@@ -245,6 +246,10 @@ class AmbientMixin:
                 self.r2_used = True
                 self.amb_prog_toggle()                  # R2 + A: the progression runs (or stops)
                 return True
+            if "R2" in held and name == "B":
+                self.r2_used = True
+                self.amb_bloom()                        # R2 + B: every voice from one note, fanning out
+                return True
             if "R1" in held and i < 6:
                 self.amb_recall(i)
                 return True
@@ -448,6 +453,64 @@ class AmbientMixin:
         self.amb_glide_all(moves, "%s %s   %s PATH   %ds" % (roman, name.upper(),
                                                             PATHS[self.achord["path"]].upper(), self.achord["time"]))
 
+    def amb_bloom(self, secs=None, swell=True):
+        """Unison bloom: every sounding drone jumps to one note (the lowest voice's)
+        and fans out to its own pitch along an S-curve, while the filter opens.
+        The classic cinema swell."""
+        on = [i for i in range(6) if self.av[i]["on"]]
+        if len(on) < 2:
+            self.flash("TURN ON TWO OR MORE VOICES FIRST")
+            return
+        secs = float(secs or max(3.0, self.achord["time"] * 3))
+        low = min(self.av[i]["note"] for i in on)
+        for i in on:
+            v = self.av[i]
+            if v["base"] is None:
+                self.amb_render(i)
+            self.eng.post("amb", i, {"tgt": (low - v["base"]) * 100.0, "jump": True})
+            self.aui[i]["cur"] = low * 100.0
+            self.aui[i]["path"] = None
+            self.amb_push(i, glide=secs, shape=2)
+        if swell:
+            self.amb_swell(min(30.0, secs * 4))
+        self.flash("BLOOM   %d VOICES FANNING OUT OVER %gs" % (len(on), secs))
+
+    def amb_swell(self, secs, start=0.7):
+        """The filter starts closed and opens over secs (the right stick still overrides)."""
+        self.aswell = (time.perf_counter(), float(secs), float(start))
+
+    def amb_deep_bloom(self):
+        """Deep Bloom: five brassy voices bloom out of one low note into a minor chord,
+        the filter slowly opening, then move i, V, VI, IV, V on long S-curve glides."""
+        names = [p["name"] for p in self.amb_sounds]
+
+        def ix(n):
+            return names.index(n) if n in names else 0
+        if self.scale not in ("Minor", "Dorian", "Phrygian"):
+            self.scale = "Minor"
+        sc = M().SCALES[self.scale]
+        k = self.key
+        chord = [12 * 3 + k, 12 * 3 + k + 7, 12 * 4 + k + sc[2], 12 * 4 + k + 7, 12 * 5 + k]
+        snds = ["Prophet Brass", "Supersaw", "Juno Strings", "Supersaw", "Prophet Brass"]
+        pans = [0.0, -0.5, 0.5, -0.25, 0.25]
+        self.aprog["run"] = False
+        for i in range(6):
+            v = self.av[i]
+            if i >= 5:
+                if v["on"]:
+                    self.amb_toggle(i)
+                continue
+            v.update(snd=ix(snds[i]), note=chord[i], cents=0, level=0.6 if i == 0 else 0.48, pan=pans[i], glide=1.2,
+                     fade=2.0, vib=4, rate=0.25, trem=0.0, drift=4, base=None, on=True)
+            self.amb_render(i)
+            self.amb_push(i, jump=True)
+        self.achord.update(type=0, path=2, time=1.2, stagger=0, order=0, root=True)
+        self.aprog.update(steps=[0, 4, 5, 3, 4, None, None, None], time=5, run=False, i=0, next=0.0)
+        self.amb_bloom(secs=3.5)
+        self.aprog["run"] = True
+        self.aprog["next"] = time.perf_counter() + 6.0          # let the bloom finish first
+        self.flash("DEEP BLOOM   %s %s   i V VI IV V   R2+A STOPS IT" % (M().NOTE_NAMES[k], self.scale))
+
     def amb_starter(self):
         """Glide Chords: five bright saw voices sliding through vi, I, V, IV in your
         key, a chord every four seconds, every voice gliding at once."""
@@ -513,6 +576,17 @@ class AmbientMixin:
     def amb_tick(self, now):
         dt = min(0.25, now - self.alast)
         self.alast = now
+        sw = getattr(self, "aswell", None)
+        if sw:
+            t0, dur, f0 = sw
+            p = min(1.0, (now - t0) / dur)
+            f = round(f0 * (1 - p) ** 2, 3)
+            if abs(f - getattr(self, "aswell_sent", -1)) > 0.004 or p >= 1:
+                self.aswell_sent = f
+                if not (getattr(self, "rx", 0.0) or 0.0):            # the right stick wins while it is pushed
+                    self.eng.post("filter", f, 0.0)
+            if p >= 1:
+                self.aswell = None
         # the progression steps through its chords
         pr = self.aprog
         if pr["run"] and now >= pr["next"]:
@@ -605,6 +679,7 @@ class AmbientMixin:
                     ("Order", ORDERS[ch["order"]]),
                     ("Bass on root", "On" if ch.get("root") else "Off"),
                     ("Play", "R2 + ^ > v < X Y = degree I to VI"), ("Evolve", "tap R2"),
+                    ("Bloom", "R2 + B: all voices from one note, fanning out"),
                     ("Progression", ("running   R2+A stops" if self.aprog["run"] else "stopped   R2+A runs it")),
                     ("Chord time", "%g s each" % self.aprog["time"])] + [
                 ("Chord %d" % (s + 1), "-" if self.aprog["steps"][s] is None else ROMAN[self.aprog["steps"][s] % 7])
@@ -624,7 +699,8 @@ class AmbientMixin:
             rows.append(("Glide", ("%g s" % self.av[6 + j]["glide"]) if self.av[6 + j]["glide"] else "Off"))
             return rows
         if pg == "Scenes":
-            rows = [("Starter", "Glide Chords   A loads it"), ("Morph time", "%d s" % self.amorph)]
+            rows = [("Starter", "Glide Chords   A loads it"), ("Starter 2", "Deep Bloom   A loads it"),
+                    ("Morph time", "%d s" % self.amorph)]
             for s in range(6):
                 sc = self.ascenes[s] if s < len(self.ascenes) else None
                 rows.append(("Scene %d  %s" % (s + 1, GLYPH[DRONE_BTNS[s]]),
@@ -739,6 +815,9 @@ class AmbientMixin:
         elif pg == "Scenes" and name == "Starter":
             self.menu = False
             self.amb_starter()
+        elif pg == "Scenes" and name == "Starter 2":
+            self.menu = False
+            self.amb_deep_bloom()
         elif pg == "Scenes" and name.startswith("Scene "):
             self.menu = False
             self.amb_recall(int(name.split()[1]) - 1)
