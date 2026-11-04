@@ -502,7 +502,8 @@ class App(modes.ModesMixin):
         order = sorted(notes, key=lambda m: abs(m - 66 - o))
         self.eng.request("reset", [])
         self.eng.request("lo", [self.ckey(m) for m in order])
-        if hasattr(self.eng, "preload") and hasattr(self, "canvas"):
+        # the loading screen only at launch; later sound changes render in the background
+        if hasattr(self.eng, "preload") and hasattr(self, "canvas") and not getattr(self, "booted", False):
             self.eng.preload(self.loading)
 
     # ---------------- logo
@@ -2073,7 +2074,12 @@ class App(modes.ModesMixin):
             self.mode()), flush=True)
         prof = getattr(e, "prof", None)
         if prof:
-            print("profile ms/block: " + "  ".join("%s %.1f" % kv for kv in prof), flush=True)
+            try:
+                import resource
+                rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+                print("profile ms/block: " + "  ".join("%s %.1f" % kv for kv in prof) + "  ui_rss_mb %d" % rss, flush=True)
+            except Exception:
+                print("profile ms/block: " + "  ".join("%s %.1f" % kv for kv in prof), flush=True)
 
     def frame_interval(self, now):
         """30 fps while something is moving, 15 fps at rest, and back off
@@ -2111,6 +2117,7 @@ class App(modes.ModesMixin):
         last_draw = 0
         last_hb = last_poll = time.perf_counter()
         self.ui_beat = time.perf_counter()
+        self.booted = True
         threading.Thread(target=self.watchdog, daemon=True).start()
         while self.running:
             self.ui_beat = time.perf_counter()

@@ -97,6 +97,13 @@ def main():
                 h.poll()
                 if os.getppid() != parent:
                     break
+                if now - globals().get("_last_rss", 0) > 20:
+                    globals()["_last_rss"] = now
+                    try:
+                        import resource
+                        print("audio rss_mb %d" % (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024), flush=True)
+                    except Exception:
+                        pass
             if now - last_snap > 0.033:
                 last_snap = now
                 conn.send(("state", snapshot(h, sent)))

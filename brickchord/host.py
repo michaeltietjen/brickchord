@@ -611,6 +611,12 @@ class SplitHost:
             self.conn.send(msg)
         except (BrokenPipeError, OSError) as e:
             _log("audio process gone:", e)
+            try:                                   # why? the kernel usually says (OOM kill, segfault)
+                import subprocess
+                out = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=3).stdout.splitlines()[-12:]
+                _log("dmesg tail:\n" + "\n".join(out))
+            except Exception:
+                pass
 
     def pump(self):
         """Read the audio process's snapshots. Call every loop iteration."""
