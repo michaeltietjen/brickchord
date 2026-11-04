@@ -109,6 +109,22 @@ class ModesMixin(song.SongMixin):
                 back = getattr(self, "pre_drum_sel", None)
                 ks = [k for k in range(1, song.NT) if self.pm[e.cur][k].get("machine", "chord") in want]
                 self.lp_select(back if back else (ks[0] if ks else 1))
+            if new in ("Lead", "Drone"):
+                # a Lead (or Drone) mode on a Chord track: an empty track becomes that
+                # machine; one with notes stays as it is, and says so
+                e = self.lp_e()
+                k = self.lp_sel
+                m = self.pm[e.cur][k]
+                want = "lead" if new == "Lead" else "drone"
+                ok = ("lead", "bass", "sample") if new == "Lead" else ("drone",)
+                if k != song.DT and m.get("machine", "chord") not in ok:
+                    if not e.pats[e.cur].tracks[k].ev:
+                        opts = [x for x in synth.MACHINES if x != "drums"]
+                        cur = opts.index(m.get("machine", "chord"))
+                        self.set_machine(e.cur, k, (opts.index(want) - cur) % len(opts))
+                    else:
+                        self.flash("TRACK %d IS A %s TRACK   SET MACHINE ON THE TRACK PAGE" % (
+                            k + 1, synth.MACHINE_NAME[m.get("machine", "chord")].upper()))
         if new == "Song" and self.imode != "Song":
             self.lp_return = self.imode
             if self.sg_page == "fx":

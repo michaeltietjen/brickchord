@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Fix: drones record again. With Drone slide on, the sliding voices bypassed the recorder; while a layer records, the drone now plays struck notes so every degree lands on the track (playback slides as before when you are not recording).
+- Lead and Drone mode on an empty Chord track turn it into a Lead or Drone track; on a Chord track with notes they say so instead. Playing chords, leads or drones never sits on the drum track.
 - Length quantize: with Rec quantize on, a held note's length snaps to the grid too, so recorded leads and bass end on a step. The profile line now has a per_track cost. Brickchord's sound list grows to 41: the 23 originals plus the Lead and Drone banks. New Bricklab artwork for the site and the KNULLI menu (tools/bricklab_art.py), and the site and README describe Bricklab as it is now.
 - Sample page (Bricklab): with a Sample track selected, Settings opens on a Sample page: Start, End, Reverse, Loop, Tune, and a Grain section (Grain on/off, Grain size, Density, Position, Spray, Pitch spray). Grain renders a granular cloud into each note offline, so a one-second vocal becomes a pad or a texture that costs the same to play as a chord note. Change a setting and the next note has it.
 - Drone slide (both editions): Settings > Chords > Drone slide (Off, 0.5 s, 1 s, 2 s, 4 s; default 1 s). With it on, tapping a new degree slides every drone voice to the new pitch instead of restriking, the upper voices arriving a little after the root. Adding or removing the 3rd fades voices in and out. Off gives the old restrike.

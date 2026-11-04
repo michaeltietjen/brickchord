@@ -636,7 +636,9 @@ class Engine:
         """Sustained notes on their own layer: they keep going while you play
         chords or lead on top. Sounds that don't sustain are re-struck. With
         drone_slide set, a new degree is reached by sliding every voice there."""
-        if self.drone_slide > 0 and notes and all(snd.get(m) is not None and snd[m][1] is not None for m in notes):
+        recording = bool(self.lp_state) and not self._nocap
+        if self.drone_slide > 0 and not recording and notes and \
+                all(snd.get(m) is not None and snd[m][1] is not None for m in notes):
             self._release(("drone",), self.t, int(0.8 * self.sr))      # any old struck drone fades
             self.drone = {"notes": list(notes), "snd": snd, "restrike": False}
             live = [v for v in self.dvoices if not v.rel]
