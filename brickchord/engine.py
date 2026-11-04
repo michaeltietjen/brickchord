@@ -764,6 +764,8 @@ class Engine:
             v.ph = k * 1.7
             v.dr, v.dr_t, v.dr_n = 0.0, 0.0, 0
             v.retrig = False
+            v.path = None              # a shaped glide: [cents...], from v.p_t0, delay, duration, shape
+            v.p_t0, v.p_delay, v.p_dur, v.p_shape = 0, 0.0, 0.0, 0
         return v
 
     def c_amb_snd(self, k, snd, base_restart=True):
@@ -774,18 +776,58 @@ class Engine:
         if base_restart or v.pos >= len(v.a) + (len(v.l) if v.l is not None else 0):
             v.pos = 0.0
 
+    @staticmethod
+    def amb_shape(p, shape):
+        """Glide shapes, 0..1 -> 0..1 (the UI draws the same curves):
+        0 smooth (fast then settling), 1 linear, 2 ease (S-curve), 3 swell (slight
+        overshoot, then settle)."""
+        p = 0.0 if p < 0 else (1.0 if p > 1 else p)
+        if shape == 1:
+            return p
+        if shape == 2:
+            return p * p * (3 - 2 * p)
+        if shape == 3:
+            e = p * p * (3 - 2 * p)
+            return e + 0.45 * math.sin(math.pi * p) * p
+        return (1 - math.exp(-5 * p)) / (1 - math.exp(-5))
+
+    @classmethod
+    def amb_path_at(cls, path, el, dur, shape):
+        """Where a shaped glide is el seconds after it starts (its delay already
+        taken off). A path of several points walks them in equal steps, easing
+        into each one."""
+        if el <= 0:
+            return path[0]
+        if dur <= 0.02 or el >= dur:
+            return path[-1]
+        n = len(path) - 1
+        if n == 1:
+            return path[0] + (path[1] - path[0]) * cls.amb_shape(el / dur, shape)
+        q = el / dur * n
+        i = min(n - 1, int(q))
+        return path[i] + (path[i + 1] - path[i]) * cls.amb_shape(q - i, 2)
+
     def c_amb(self, k, d):
         """Update a voice: tgt (cents from its base note), level, on, pan, glide,
-        fade, vib (cents), rate (Hz), trem (0..1), drift (cents)."""
+        fade, vib (cents), rate (Hz), trem (0..1), drift (cents). A new tgt starts a
+        shaped glide from where the voice is now: shape, delay (s) and path (the
+        cents to pass through) shape it; glide is its length."""
         v = self._amb_slot(int(k))
+        old_tgt = v.tgt
         for name in ("tgt", "pan", "glide", "fade", "vib", "rate", "trem", "drift", "retrig"):
             if name in d:
                 setattr(v, name, d[name])
+        if "tgt" in d and (abs(v.tgt - old_tgt) > 0.5 or d.get("path")):
+            via = [float(c) for c in (d.get("path") or [])]
+            v.path = [v.cur] + via + [v.tgt]
+            v.p_t0, v.p_delay = self.t, float(d.get("delay", 0.0))
+            v.p_dur, v.p_shape = float(v.glide), int(d.get("shape", 0))
         if "level" in d or "on" in d:
             v.lvl_t = float(d.get("level", getattr(v, "level", 0.7))) if d.get("on", v.lvl_t > 0) else 0.0
             v.level = float(d.get("level", getattr(v, "level", 0.7)))
         if d.get("jump"):
             v.cur = v.tgt
+            v.path = None
 
     def c_amb_trig(self, k, cents):
         """Melodic voice step on a struck sound: start the sound again at this pitch."""
@@ -805,7 +847,12 @@ class Engine:
                 continue
             # pitch: glide toward the target (about 98% of the way in `glide` seconds)
             c0 = v.cur
-            if v.glide > 0.02:
+            if v.path is not None:
+                el = (self.t + N - v.p_t0) / sr - v.p_delay
+                v.cur = self.amb_path_at(v.path, el, v.p_dur, v.p_shape)
+                if el >= v.p_dur:
+                    v.path = None
+            elif v.glide > 0.02:
                 v.cur = v.tgt + (v.cur - v.tgt) * math.exp(-4.0 * dt / v.glide)
             else:
                 v.cur = v.tgt

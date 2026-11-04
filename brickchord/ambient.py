@@ -8,7 +8,9 @@
 #   L1 + a voice button      select that voice (Settings opens on it)
 #   R1 + a drone button      recall scene 1-6 (the voices glide there)
 #   SELECT + a drone button  save the current sound as that scene
-#   R2                       evolve: every voice glides to a new note of the scale
+#   R2 + a drone button      glide the drones into a chord on degree I-VI (Settings > Chords
+#                            picks the chord, the path shape, the time and the order)
+#   R2 (tap)                 evolve: every voice glides to a new note of the scale
 #   START                    freeze: the cloud holds what is sounding
 #   left stick               X spreads the voices apart, Y deepens their movement
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
@@ -18,6 +20,7 @@ import time
 
 import pygame
 
+import engine
 import synth
 
 DRONE_BTNS = ["UP", "RIGHT", "DOWN", "LEFT", "X", "Y"]
@@ -31,6 +34,18 @@ FADES = [0.2, 0.5, 1, 2, 4, 8, 15]
 STEP_TIMES = [0.5, 1, 2, 3, 4, 6, 8, 12, 16]
 MORPHS = [1, 2, 4, 8, 15, 30, 60]
 HIST_SECS = 24.0
+# chords the drones can glide into: ("name", kind, steps). "deg" steps are scale
+# degrees stacked on the chosen degree (they follow the key and scale); "semi"
+# steps are fixed intervals in semitones from it.
+CHORDS = [("Triad", "deg", [0, 2, 4]), ("Seventh", "deg", [0, 2, 4, 6]), ("Ninth", "deg", [0, 2, 4, 6, 8]),
+          ("Eleventh", "deg", [0, 2, 4, 6, 8, 10]), ("Sus2", "semi", [0, 2, 7, 14]), ("Sus4", "semi", [0, 5, 7, 12, 17]),
+          ("Quartal", "semi", [0, 5, 10, 15, 20]), ("Lydian", "semi", [0, 4, 6, 11, 14, 18]),
+          ("Minor 11", "semi", [0, 3, 7, 10, 14, 17]), ("Major 9", "semi", [0, 4, 7, 11, 14]),
+          ("Fifths", "semi", [0, 7, 14, 21]), ("Cluster", "semi", [0, 2, 3, 5, 7]), ("Open", "semi", [0, 7, 16, 19, 26])]
+PATHS = ["Smooth", "Linear", "Ease", "Swell", "Steps"]       # Steps walks the scale notes on the way
+ORDERS = ["Together", "Low first", "High first", "Outside in", "Random"]
+STAGGERS = [0, 0.5, 1, 2, 3, 5, 8]
+CHORD_TIMES = [1, 2, 4, 6, 8, 12, 20, 30, 60]
 
 
 def M():
@@ -97,6 +112,8 @@ class AmbientMixin:
             m["next"] = 0.0
         self.ascenes = st.get("scenes") or [None] * 6
         self.amorph = st.get("morph", 8)
+        self.achord = dict({"type": 2, "path": 2, "time": 8, "stagger": 1, "order": 1}, **(st.get("chord") or {}))
+        self.r2_used = False
         self.asel = 0
         self.afreeze = False
         self.ahist = [[] for _ in range(NV)]
@@ -111,7 +128,7 @@ class AmbientMixin:
         keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
         return {"voices": [{k: v[k] for k in keys} for v in self.av],
                 "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
-                "scenes": self.ascenes, "morph": self.amorph}
+                "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord}
 
     # ------------------------------------------------------------ talking to the engine
     def amb_patch(self, i):
@@ -134,21 +151,33 @@ class AmbientMixin:
             return 0.0
         return (v["note"] - v["base"]) * 100.0 + v["cents"]
 
-    def amb_push(self, i, jump=False, glide=None):
+    def amb_push(self, i, jump=False, glide=None, shape=0, delay=0.0, via=None):
+        """Send voice i to the engine. A new pitch is reached along a shaped glide:
+        shape (Smooth, Linear, Ease, Swell), after delay seconds, through via (the
+        notes to pass on the way, as absolute cents)."""
         v = self.av[i]
         if v["base"] is None or abs(v["note"] - v["base"]) > 24:
             self.amb_render(i)
             jump = True
+        g = float(v["glide"] if glide is None else glide)
         d = {"tgt": self.amb_tgt(i), "on": v["on"], "level": v["level"], "pan": v["pan"],
-             "glide": float(v["glide"] if glide is None else glide), "fade": float(v["fade"]),
-             "vib": float(v["vib"]), "rate": float(v["rate"]), "trem": float(v["trem"]), "drift": float(v["drift"])}
+             "glide": g, "fade": float(v["fade"]),
+             "vib": float(v["vib"]), "rate": float(v["rate"]), "trem": float(v["trem"]), "drift": float(v["drift"]),
+             "shape": int(shape), "delay": float(delay)}
+        base = v["base"] * 100.0
+        if via:
+            d["path"] = [c - base for c in via]
         if jump:
             d["jump"] = True
         self.eng.post("amb", i, d)
-        if jump or self.aui[i]["cur"] is None:
-            self.aui[i]["cur"] = v["note"] * 100.0 + v["cents"]
-        if glide is not None:
-            self.aui[i]["glide"] = glide
+        u = self.aui[i]
+        tgt = v["note"] * 100.0 + v["cents"]
+        if jump or u["cur"] is None:
+            u["cur"] = tgt
+            u["path"] = None
+        elif abs(tgt - (u["path"][-1] if u.get("path") else u["cur"])) > 0.5 or via:
+            u["path"] = [u["cur"]] + list(via or []) + [tgt]
+            u["t0"], u["delay"], u["dur"], u["shape"] = time.perf_counter(), float(delay), g, int(shape)
 
     def amb_toggle(self, i):
         v = self.av[i]
@@ -171,13 +200,23 @@ class AmbientMixin:
     # ------------------------------------------------------------ input
     def amb_handle(self, name, down):
         held = self.inp.held
+        if name == "R2":
+            if down:
+                self.r2_used = False
+            elif not self.r2_used:
+                self.amb_evolve()                       # a tap: evolve
+            return True
         if not down:
-            return name in DRONE_BTNS + MEL_BTNS + ["R2", "START", "L3"]
+            return name in DRONE_BTNS + MEL_BTNS + ["START", "L3"]
         if name in DRONE_BTNS or name in MEL_BTNS:
             i = (DRONE_BTNS + MEL_BTNS).index(name)
             if "L1" in held:
                 self.asel = i
                 self.flash("SELECTED %s   SELECT EDITS IT" % (("VOICE %d" % (i + 1)) if i < 6 else "MELODY %s" % "AB"[i - 6]))
+                return True
+            if "R2" in held and i < 6:
+                self.r2_used = True
+                self.amb_chord(i)                       # R2 + a drone button: glide into a chord on that degree
                 return True
             if "R1" in held and i < 6:
                 self.amb_recall(i)
@@ -188,9 +227,6 @@ class AmbientMixin:
                 return True
             self.amb_toggle(i)
             self.asel = i
-            return True
-        if name == "R2":
-            self.amb_evolve()
             return True
         if name == "START":
             self.afreeze = not self.afreeze
@@ -243,6 +279,85 @@ class AmbientMixin:
             self.amb_push(i, glide=self.amorph)
         self.flash("SCENE %d   MORPHING OVER %ds" % (s + 1, self.amorph))
 
+    def amb_route(self, order, items):
+        """Delays for voices moving together, by the chosen order. items: (i, pitch)."""
+        st = float(self.achord["stagger"])
+        rank = sorted(items, key=lambda t: t[1])
+        n = len(rank)
+        if order == 0 or st <= 0 or n < 2:
+            return {i: 0.0 for i, _ in items}
+        if order == 1:
+            seq = [i for i, _ in rank]
+        elif order == 2:
+            seq = [i for i, _ in reversed(rank)]
+        elif order == 3:
+            seq = []
+            lo, hi = 0, n - 1
+            while lo <= hi:
+                seq.append(rank[lo][0])
+                if hi != lo:
+                    seq.append(rank[hi][0])
+                lo, hi = lo + 1, hi - 1
+        else:
+            import random
+            seq = [i for i, _ in rank]
+            random.shuffle(seq)
+        return {i: k * st for k, i in enumerate(seq)}
+
+    def amb_steps_via(self, frm, to):
+        """The notes of the scale between two pitches (in cents), for the Steps path."""
+        sc = M().SCALES[self.scale]
+        lo, hi = sorted((frm / 100.0, to / 100.0))
+        notes = [n * 100.0 for n in range(int(math.ceil(lo)) + 0, int(hi) + 1)
+                 if (n - self.key) % 12 in sc and lo + 0.3 < n < hi - 0.3]
+        if frm > to:
+            notes.reverse()
+        return notes[:10]
+
+    def amb_glide_all(self, moves, label):
+        """moves: {voice: new midi}. Every voice glides there along the chord path."""
+        ch = self.achord
+        shape = min(3, ch["path"])
+        items = [(i, self.aui[i]["cur"] or self.av[i]["note"] * 100.0) for i in moves]
+        delays = self.amb_route(ch["order"], items)
+        for i, note in moves.items():
+            v = self.av[i]
+            frm = self.aui[i]["cur"] or v["note"] * 100.0
+            v["note"], v["cents"] = int(note), 0
+            via = self.amb_steps_via(frm, note * 100.0) if ch["path"] == 4 else None
+            self.amb_push(i, glide=ch["time"], shape=shape, delay=delays.get(i, 0.0), via=via)
+        self.flash(label)
+
+    def amb_chord(self, deg):
+        """Glide the sounding drones into a chord on scale degree deg (0..5), each
+        voice to the nearest chord tone so the voices lead smoothly."""
+        on = [i for i in range(6) if self.av[i]["on"]]
+        if not on:
+            self.flash("TURN SOME VOICES ON FIRST")
+            return
+        name, kind, steps = CHORDS[self.achord["type"] % len(CHORDS)]
+        sc = M().SCALES[self.scale]
+        if kind == "deg":
+            pcs = {(self.key + sc[(deg + s) % 7]) % 12 for s in steps}
+        else:
+            root = (self.key + sc[deg % 7]) % 12
+            pcs = {(root + s) % 12 for s in steps}
+        cand = [n for n in range(24, 97) if n % 12 in pcs]
+        cur = sorted(((self.aui[i]["cur"] or self.av[i]["note"] * 100.0) / 100.0, i) for i in on)
+        # each voice, low to high, takes the nearest chord tone above the one below it,
+        # preferring chord tones not used yet so the chord is complete
+        best, used, prev = [], set(), 0
+        for c, _ in cur:
+            opts = [n for n in cand if n > prev] or [cand[-1]]
+            n = min(opts, key=lambda n: abs(n - c) + (2.5 if n % 12 in used and len(used) < len(pcs) else 0))
+            best.append(n)
+            used.add(n % 12)
+            prev = n
+        moves = {i: n for n, (_, i) in zip(best, cur)}
+        roman = ["I", "II", "III", "IV", "V", "VI", "VII"][deg % 7]
+        self.amb_glide_all(moves, "%s %s   %s PATH   %ds" % (roman, name.upper(),
+                                                            PATHS[self.achord["path"]].upper(), self.achord["time"]))
+
     def amb_evolve(self):
         """Every sounding drone glides to a nearby note of the scale: the slow
         harmonic turn of a film cue."""
@@ -255,11 +370,15 @@ class AmbientMixin:
             sc = M().SCALES[self.scale]
             cands = [n for n in range(v["note"] - 5, v["note"] + 6) if (n - self.key) % 12 in sc and n != v["note"]]
             if cands:
-                v["note"] = random.choice(cands)
-                v["cents"] = 0
-                self.amb_push(i, glide=max(v["glide"], self.amorph))
+                moves = getattr(self, "_ev_moves", {})
+                moves[i] = random.choice(cands)
+                self._ev_moves = moves
                 moved += 1
-        self.flash("EVOLVE   %d VOICES GLIDING" % moved if moved else "TURN SOME VOICES ON FIRST")
+        if moved:
+            self.amb_glide_all(self._ev_moves, "EVOLVE   %d VOICES GLIDING" % moved)
+        else:
+            self.flash("TURN SOME VOICES ON FIRST")
+        self._ev_moves = {}
 
     # ------------------------------------------------------------ time
     def amb_tick(self, now):
@@ -296,13 +415,15 @@ class AmbientMixin:
             tgt = v["note"] * 100.0 + v["cents"]
             if u["cur"] is None:
                 u["cur"] = tgt
-            g = u.get("glide", v["glide"])
-            if g and g > 0.02:
-                u["cur"] = tgt + (u["cur"] - tgt) * math.exp(-4.0 * dt / g)
+            if u.get("path"):
+                el = now - u["t0"] - u["delay"]
+                u["cur"] = engine.Engine.amb_path_at(u["path"], el, u["dur"], u["shape"])
+                if el >= u["dur"]:
+                    u["path"] = None
+            elif v["glide"] and v["glide"] > 0.02:
+                u["cur"] = tgt + (u["cur"] - tgt) * math.exp(-4.0 * dt / v["glide"])
             else:
                 u["cur"] = tgt
-            if abs(u["cur"] - tgt) < 2:
-                u.pop("glide", None)
             lt = v["level"] if v["on"] else 0.0
             step = dt / max(0.05, float(v["fade"]))
             u["lvl"] = min(lt, u["lvl"] + step) if lt > u["lvl"] else max(lt, u["lvl"] - step)
@@ -318,7 +439,7 @@ class AmbientMixin:
 
     # ------------------------------------------------------------ settings pages
     def amb_menu_pages(self):
-        return ["Voice", "Melody", "Scenes", "Global", "FX"]
+        return ["Voice", "Chords", "Melody", "Scenes", "Global", "FX"]
 
     def amb_menu_items(self, pg):
         mm = M()
@@ -334,6 +455,12 @@ class AmbientMixin:
                     ("Glide", ("%g s" % v["glide"]) if v["glide"] else "Off"), ("Fade", "%g s" % v["fade"]),
                     ("Vibrato", "%d cents" % v["vib"]), ("Rate", "%.2f Hz" % v["rate"]),
                     ("Tremolo", "%d%%" % round(v["trem"] * 100)), ("Drift", "%d cents" % v["drift"])]
+        if pg == "Chords":
+            ch = self.achord
+            return [("Chord", CHORDS[ch["type"] % len(CHORDS)][0]), ("Path", PATHS[ch["path"]]),
+                    ("Glide time", "%d s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
+                    ("Order", ORDERS[ch["order"]]),
+                    ("Play", "R2 + ^ > v < X Y = degree I to VI"), ("Evolve", "tap R2")]
         if pg == "Melody":
             j = max(0, self.asel - 6) if self.asel >= 6 else getattr(self, "amel_sel", 0)
             self.amel_sel = j
@@ -423,6 +550,19 @@ class AmbientMixin:
                 v["glide"] = self._amb_step(GLIDES, v["glide"], d)
                 self.amb_push(6 + j)
             return
+        if pg == "Chords":
+            ch = self.achord
+            if name == "Chord":
+                ch["type"] = (ch["type"] + d) % len(CHORDS)
+            elif name == "Path":
+                ch["path"] = (ch["path"] + d) % len(PATHS)
+            elif name == "Glide time":
+                ch["time"] = self._amb_step(CHORD_TIMES, ch["time"], d)
+            elif name == "Stagger":
+                ch["stagger"] = self._amb_step(STAGGERS, ch["stagger"], d)
+            elif name == "Order":
+                ch["order"] = (ch["order"] + d) % len(ORDERS)
+            return
         if pg == "Scenes" and name == "Morph time":
             self.amorph = self._amb_step(MORPHS, self.amorph, d)
 
@@ -454,13 +594,23 @@ class AmbientMixin:
         gy0, gy1 = 46, L["tiles_y"] - 12
         pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.55), (gx0 - 8, gy0 - 4, gx1 - gx0 + 16, gy1 - gy0 + 8),
                          border_radius=10)
-        lo, hi = (self.key + 36) * 100.0, (self.key + 84) * 100.0      # four octaves
+        # the range follows the voices (at least three octaves), easing as they move
+        ps = [p for i in range(NV) if self.aui[i]["lvl"] > 0.01 or self.av[i]["on"]
+              for p in (self.aui[i]["cur"] or 0, self.av[i]["note"] * 100.0) if p]
+        if ps:
+            mid = (min(ps) + max(ps)) / 2.0
+            span = max(3600.0, max(ps) - min(ps) + 900.0)
+        else:
+            mid, span = (self.key + 60) * 100.0, 4800.0
+        mid = self.sm("amb_mid", mid, 2.5)
+        span = self.sm("amb_span", span, 2.5)
+        lo, hi = mid - span / 2.0, mid + span / 2.0
 
         def ypos(cents):
             return gy1 - (cents - lo) / (hi - lo) * (gy1 - gy0)
         # guides: every note of the scale, roots and fifths brighter and labelled
         sc = mm.SCALES[self.scale]
-        for n in range(self.key + 36, self.key + 85):
+        for n in range(int(lo // 100), int(hi // 100) + 1):
             if (n - self.key) % 12 not in sc:
                 continue
             y = int(ypos(n * 100))

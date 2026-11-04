@@ -1094,7 +1094,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn", "Learn sticks", "Quit"]
 
     def menu_items(self):
-        if edition.AMBIENT and self.menu_pg in ("Voice", "Melody", "Scenes"):
+        if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg == "Global":
             rows = dict(self.all_menu_items())
@@ -1170,7 +1170,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
-        if edition.AMBIENT and self.menu_pg in ("Voice", "Melody", "Scenes"):
+        if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_change(self.menu_pg, name, d)
             return
         if name == "Machine" and edition.LAB:
@@ -1305,7 +1305,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
-        if edition.AMBIENT and self.menu_pg in ("Voice", "Melody", "Scenes"):
+        if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_activate(self.menu_pg, name)
             return
         if self.menu_pg == "Drums":
@@ -1807,7 +1807,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2 if self.eng.load <= 0.8 else (230, 90, 80),
                        (20, L["status_y"]))
-        hint = ("^>v<XY drones   AB melody   R1+ scene   R2 evolve   START freeze"
+        hint = ("^>v<XY drones   AB melody   R2+ chord   R1+ scene   START freeze"
                 if edition.AMBIENT else None) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
