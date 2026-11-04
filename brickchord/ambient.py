@@ -82,6 +82,26 @@ def struck(p):
     return p.get("macro") is not None and int(p.get("macro", 0)) in synth.MACRO_STRUCK
 
 
+# The guided demo: one move at a time, each waiting until you have done it.
+# (instruction, the chord tile to point at or None, check)
+TUTORIAL = [
+    ("Press  <  to play the first chord of your key", 0, lambda s: s.acur_deg == 0 and s.amb_sounding()),
+    ("Press  A  for the sixth chord.  Watch every voice glide", 5, lambda s: s.acur_deg == 5),
+    ("Press  v  for the fourth chord, then  X  for the fifth", 4, lambda s: s.acur_deg == 4 and 3 in s.atut_seen),
+    ("Hold  L1  and press  X :  the fifth chord with a 7th", 4, lambda s: s.acur_deg == 4 and "seventh" in (s.acur_key or (0, ()))[1]),
+    ("Hold  Y  and press  ^ :  Y flips major and minor", 1,
+     lambda s: s.acur_deg == 1 and "flip" in (s.acur_key or (0, ()))[1]),
+    ("Push the LEFT STICK sideways to bend the chord, up to swell it", None,
+     lambda s: abs(getattr(s, "abend", 0.0)) > 150),
+    ("Press  R2 :  bloom, every voice from one note", None, lambda s: s.atut_flags.get("bloom")),
+    ("Press  START :  the chords play by themselves", None, lambda s: s.aprog.get("run")),
+    ("Click  L3  (press the left stick in):  see the real sound", None,
+     lambda s: getattr(s, "aview", "guides") == "spectrum"),
+    ("Press  START  to stop.  SELECT opens Settings.  You know it all now", None,
+     lambda s: not s.aprog.get("run")),
+]
+
+
 class AmbientMixin:
     # ------------------------------------------------------------ state
     def amb_init(self):
@@ -133,7 +153,56 @@ class AmbientMixin:
         self.ahist_t = 0.0
         self.aspread = self.amove = 0.0
         self.amb_pending = {}
+        self.atut = 0 if not self.cfg.get("glide_tutorial_done") else None   # the guided demo, on first launch
+        self.atut_seen, self.atut_flags, self.atut_t = set(), {}, time.perf_counter()
+        self.acur_deg = self.acur_key = None
+        self.acur_name = ""
         self.eng.post("amb_global", 0.0, 1.0)
+
+    def amb_sounding(self):
+        return any(self.av[i]["on"] for i in range(6))
+
+    def amb_tutorial_start(self):
+        self.atut, self.atut_seen, self.atut_flags = 0, set(), {}
+        self.atut_t = time.perf_counter()
+        self.aview = "guides"
+        self.flash("GUIDED DEMO   ONE MOVE AT A TIME")
+
+    def amb_tutorial_tick(self, now):
+        if self.atut is None:
+            return
+        if getattr(self, "acur_deg", None) is not None:
+            self.atut_seen.add(self.acur_deg)
+        if now - self.atut_t < 1.2:                          # a beat between steps
+            return
+        if TUTORIAL[self.atut][2](self):
+            self.atut += 1
+            self.atut_t = now
+            if self.atut >= len(TUTORIAL):
+                self.atut = None
+                self.cfg["glide_tutorial_done"] = True
+                self.save_cfg()
+                self.flash("DEMO DONE   SETTINGS > SCENES > GUIDED DEMO RUNS IT AGAIN")
+
+    def draw_amb_tutorial(self, c, now):
+        if self.atut is None:
+            return
+        mm = M()
+        W = mm.BASE_W
+        text, tile, _ = TUTORIAL[self.atut]
+        k = self.since(self.atut_t, 0.35)
+        r = pygame.Rect(30, 52 + int((1 - k) * 10), W - 60, 62)
+        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.95), r, border_radius=12)
+        pygame.draw.rect(c, mm.ACCENT, r, 2, border_radius=12)
+        self.text(c, "STEP %d OF %d" % (self.atut + 1, len(TUTORIAL)), self.f_small, mm.ACCENT, (r.x + 16, r.y + 8))
+        self.text(c, "SELECT skips", self.f_small, mm.DIM, (r.right - 16, r.y + 8), right=True)
+        self.text(c, text, self.f_med, mm.INK, (r.centerx, r.y + 40), center=True)
+        if tile is not None:                                 # point at the button to press
+            tw, gap = 82, 6
+            x0 = (W - (7 * tw + 6 * gap)) // 2
+            b = 0.5 + 0.5 * math.sin(now * 6)
+            tr = pygame.Rect(x0 + tile * (tw + gap), mm.L["tiles_y"], tw, mm.L["tile_h"]).inflate(6, 6)
+            pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT2, 0.4 + 0.6 * b), tr, 3, border_radius=12)
 
     def amb_state(self):
         keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
@@ -512,6 +581,7 @@ class AmbientMixin:
             self.amb_push(i, glide=secs, shape=2)
         if swell:
             self.amb_swell(min(30.0, secs * 4))
+        self.atut_flags["bloom"] = True
         self.flash("BLOOM   %d VOICES FANNING OUT OVER %gs" % (len(on), secs))
 
     def amb_swell(self, secs, start=0.7):
@@ -613,6 +683,7 @@ class AmbientMixin:
 
     # ------------------------------------------------------------ time
     def amb_tick(self, now):
+        self.amb_tutorial_tick(now)
         dt = min(0.25, now - self.alast)
         self.alast = now
         sw = getattr(self, "aswell", None)
@@ -738,7 +809,8 @@ class AmbientMixin:
             rows.append(("Glide", ("%g s" % self.av[6 + j]["glide"]) if self.av[6 + j]["glide"] else "Off"))
             return rows
         if pg == "Scenes":
-            rows = [("Starter", "Glide Chords   A loads it"), ("Starter 2", "Deep Bloom   A loads it"),
+            rows = [("Guided demo", "the controls, one move at a time   A"),
+                    ("Starter", "Glide Chords   A loads it"), ("Starter 2", "Deep Bloom   A loads it"),
                     ("Morph time", "%d s" % self.amorph)]
             for s in range(6):
                 sc = self.ascenes[s] if s < len(self.ascenes) else None
@@ -851,6 +923,9 @@ class AmbientMixin:
             self.amb_toggle(6 + getattr(self, "amel_sel", 0))
         elif pg == "Chords" and name == "Progression":
             self.amb_prog_toggle()
+        elif pg == "Scenes" and name == "Guided demo":
+            self.menu = False
+            self.amb_tutorial_start()
         elif pg == "Scenes" and name == "Starter":
             self.menu = False
             self.amb_starter()
@@ -944,6 +1019,7 @@ class AmbientMixin:
             self.text(c, "SPECTROGRAM   L3 GUIDES", self.f_small, self.mix(mm.BG, mm.DIM, 0.8), (gx1 - 4, gy0 + 2),
                       right=True)
             self.draw_amb_tiles(c, now)
+            self.draw_amb_tutorial(c, now)
             return
         # the range follows the voices (at least three octaves), easing as they move
         ps = [p for i in range(NV) if self.aui[i]["lvl"] > 0.01 or self.av[i]["on"]
@@ -1016,6 +1092,7 @@ class AmbientMixin:
             sx = gx0 + s * 14
             full = s < len(self.ascenes) and self.ascenes[s]
             pygame.draw.circle(c, mm.ACCENT if full else self.mix(mm.BG, mm.DIM, 0.5), (sx + 4, gy1 + 2), 3)
+        self.draw_amb_tutorial(c, now)
 
     def draw_amb_tiles(self, c, now):
         """Seven chord tiles, like Brickchord's: the chord you are on lit."""

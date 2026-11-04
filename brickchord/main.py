@@ -1078,6 +1078,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         return "Chords"
 
     def open_menu(self):
+        if edition.AMBIENT and getattr(self, "atut", None) is not None:
+            self.atut = None                    # SELECT skips the guided demo
+            self.cfg["glide_tutorial_done"] = True
         self.menu = True
         self.menu_set_page(self.menu_context_page())
 
