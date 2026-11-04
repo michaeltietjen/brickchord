@@ -43,7 +43,27 @@ ACCENT_G, GHOST_G = 1.35, 0.4
 SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
 BARS = [1, 2, 4, 8]
 REC = (230, 70, 70)
-SONG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brickchord_song.json")
+SONG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brickchord_song.json")    # song 1
+SONG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "songs")                   # songs 2..8
+SLOTS = 8
+
+
+def song_path(slot):
+    """Song 1 keeps the original file (so existing songs carry over); 2..8 live in songs/."""
+    return SONG_FILE if slot == 1 else os.path.join(SONG_DIR, "song_%d.json" % slot)
+
+
+def song_summary(slot):
+    """'empty' or 'N patterns, BPM' for the Settings row, without loading it."""
+    try:
+        with open(song_path(slot)) as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    n = sum(1 for p in d.get("pats") or [] if any((t or {}).get("ev") for t in p.get("tracks") or []))
+    name = d.get("demo")
+    return "%s%d pattern%s%s" % ((name + ", ") if name else "", n, "" if n == 1 else "s",
+                                  (", %d BPM" % d["bpm"]) if d.get("bpm") else "")
 
 
 def M():
@@ -142,9 +162,13 @@ class SongMixin:
         self.sel_key = None
         self.start_p = 0
         self._saved_ev = None
+        self.song_slot = int(self.cfg.get("settings", {}).get("song_slot", 1) or 1)
+        if not 1 <= self.song_slot <= SLOTS:
+            self.song_slot = 1
+        self.slot_pick = self.song_slot
         data = None
         try:
-            with open(SONG_FILE) as f:
+            with open(song_path(self.song_slot)) as f:
                 data = json.load(f)
         except Exception:
             data = None
@@ -159,6 +183,7 @@ class SongMixin:
         self.pm = [[new_track(k) for k in range(NT)] for _ in range(NP)]
         self.pbars = [2] * NP
         self.song_rows, self.song_on, self.start_p = [[0, 1]], False, 0
+        self.song_name = (data or {}).get("demo")
         self._saved = data or {}
         for p, b in enumerate((data or {}).get("bars") or []):
             if p < NP and b in BARS:
@@ -207,7 +232,8 @@ class SongMixin:
         return out
 
     def load_demo(self, fname):
-        """Load a demo song. The current song is kept in brickchord_song.backup.json."""
+        """Load a demo song into the current song slot. What was there is kept in
+        brickchord_song.backup.json (pick another slot first to keep both)."""
         e = self.lp_e()
         if e is None:
             return
@@ -223,16 +249,38 @@ class SongMixin:
                 json.dump(self.song_snapshot(), f, separators=(",", ":"))
         except Exception:
             pass
+        self.song_replace(data)
+        self.flash("DEMO: %s IN SONG %d   START PLAYS" % ((data.get("demo") or fname).upper(), self.song_slot))
+
+    def switch_song(self, slot):
+        """Settings > Global > Song: save this song, open another (an empty slot is a new song)."""
+        if self.lp_e() is None or slot == self.song_slot:
+            return
+        self.song_save()
+        try:
+            with open(song_path(slot)) as f:
+                data = json.load(f)
+        except Exception:
+            data = None
+        self.song_slot = slot
+        self.song_replace(data, tempo=bool(data))
+        self.save_cfg()
+        self.flash("SONG %d%s" % (slot, "" if data else "   NEW, EMPTY"))
+
+    def song_replace(self, data, tempo=True):
+        """Stop, clear the engine's patterns and load data (or nothing) as the song."""
+        e = self.lp_e()
         if e.lp_on:
             self.lp_toggle_play()
         self.eng.post("lp", "arm", None)
         for p in range(NP):
             self.eng.post("lp", "clearpat", p)
-        if data.get("bpm"):
+        data = data or {}
+        if tempo and data.get("bpm"):
             self.bpm = int(data["bpm"])
-        if "key" in data:
+        if tempo and "key" in data:
             self.key = int(data["key"]) % 12
-        if data.get("scale") in M().SCALES:
+        if tempo and data.get("scale") in M().SCALES:
             self.scale = data["scale"]
         self.song_apply(data)
         self.lp_sel = 1
@@ -242,7 +290,6 @@ class SongMixin:
         self.lp_load()
         self.lp_select(1)
         self.lp_dirty = True
-        self.flash("DEMO: %s   START PLAYS   (YOUR SONG IS BACKED UP)" % (data.get("demo") or fname).upper())
 
     def song_snapshot(self):
         e = self.lp_e()
@@ -255,16 +302,20 @@ class SongMixin:
                 tr.append(t)
             pats.append({"tracks": tr})
         return {"v": 1, "bars": self.pbars, "pats": pats, "song": self.song_rows, "song_on": self.song_on,
-                "cur": e.cur if e else 0, "kit_all": self.kit_all}
+                "cur": e.cur if e else 0, "kit_all": self.kit_all,
+                "bpm": self.bpm, "key": self.key, "scale": self.scale,
+                "demo": getattr(self, "song_name", None)}
 
     def song_save(self):
         if not self.lp_loaded or self.lp_e() is None:
             return
         try:
-            tmp = SONG_FILE + ".tmp"
+            path = song_path(self.song_slot)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(self.song_snapshot(), f, separators=(",", ":"))
-            os.replace(tmp, SONG_FILE)
+            os.replace(tmp, path)
         except Exception as ex:
             print("song save failed", ex, flush=True)
 

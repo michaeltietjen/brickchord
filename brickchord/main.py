@@ -16,6 +16,7 @@ import pygame
 import edition
 import host
 import modes
+import song
 import synth
 from synth import SR
 
@@ -64,7 +65,7 @@ DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0),
                ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
 # Settings pages (L1/R1 flips between them). Drums is Bricklab only.
 MENU_PAGES = {
-    "Global": ["Demo song", "Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome",
+    "Global": ["Song", "Demo song", "Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome",
                "Click sound",
                "Click level",
                "Volume", "Latency",
@@ -812,7 +813,7 @@ class App(modes.ModesMixin):
                                     bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
                                     imode=getattr(self, "imode", "Play"), countin=getattr(self, "countin", 1),
                                     metro=self.metro, metro_snd=self.metro_snd, metro_lvl=self.metro_lvl,
-                                    drone_slide=self.drone_slide)
+                                    drone_slide=self.drone_slide, song_slot=getattr(self, "song_slot", 1))
         if hasattr(self, "rack"):
             self.cfg["rack"] = self.rack
             self.cfg.pop("seq", None)
@@ -1080,6 +1081,10 @@ class App(modes.ModesMixin):
         ] + ([("Count-in", ("%d bar%s" % (self.countin, "" if self.countin == 1 else "s")) if self.countin
                             else "Off, starts on first note"),
              ("Rec quantize", REC_QUANT[self.rec_quant]),
+             ("Song", "Song %d   %s%s" % (self.slot_pick,
+                                        ("(this one)" if self.slot_pick == self.song_slot else
+                                         (song.song_summary(self.slot_pick) or "empty")),
+                                        "" if self.slot_pick == self.song_slot else "   A opens")),
              ("Demo song", (self.demo_names()[self.demo_pick % max(1, len(self.demo_names()))][0] + "   A loads")
               if self.demo_names() else "none installed"),
              ("Metronome", METRO_MODES[self.metro]),
@@ -1187,6 +1192,8 @@ class App(modes.ModesMixin):
             self.countin = (self.countin + d) % 3
         elif name == "Demo song":
             self.demo_pick = (self.demo_pick + d) % max(1, len(self.demo_names()))
+        elif name == "Song":
+            self.slot_pick = (self.slot_pick - 1 + d) % song.SLOTS + 1
         elif name == "Rec quantize":
             ks = list(REC_QUANT)
             self.rec_quant = ks[(ks.index(self.rec_quant) + d) % len(ks)]
@@ -1223,6 +1230,11 @@ class App(modes.ModesMixin):
             return
         if self.menu_pg == "Sample":
             self.smp_menu_change(name, 1)
+            return
+        if name == "Song" and edition.LAB:
+            if self.slot_pick != self.song_slot:
+                self.menu = False
+                self.switch_song(self.slot_pick)
             return
         if name == "Demo song" and edition.LAB:
             names = self.demo_names()
