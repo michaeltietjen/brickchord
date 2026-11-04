@@ -101,8 +101,14 @@ class ModesMixin(song.SongMixin):
             if new == "Drums" and self.lp_sel != song.DT:
                 self.pre_drum_sel = self.lp_sel
                 self.lp_select(song.DT)         # pads play (and record into) the drum track
-            elif self.imode == "Drums" and new in ("Play", "Lead", "Drone") and self.lp_sel == song.DT:
-                self.lp_select(getattr(self, "pre_drum_sel", 1) or 1)
+            elif new in ("Play", "Lead", "Drone") and self.lp_sel == song.DT:
+                # playing chords, leads or drones never goes through the drum track:
+                # move to the track you were on, or the first track with this kind of machine
+                want = {"Play": ("chord",), "Lead": ("lead", "bass", "sample"), "Drone": ("drone",)}[new]
+                e = self.lp_e()
+                back = getattr(self, "pre_drum_sel", None)
+                ks = [k for k in range(1, song.NT) if self.pm[e.cur][k].get("machine", "chord") in want]
+                self.lp_select(back if back else (ks[0] if ks else 1))
         if new == "Song" and self.imode != "Song":
             self.lp_return = self.imode
             if self.sg_page == "fx":
