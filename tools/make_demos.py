@@ -304,7 +304,49 @@ def analog_drift():
                 [[0, 2], [1, 2], [2, 4], [3, 2], [2, 2], [0, 1]], [2, 2, 2, 2])
 
 
-DEMOS = [analog_drift, night_drive, tape_lofi, acid_room, cathedral]
+def slow_light():
+    """Ambient: four-bar patterns at 64 BPM in D Dorian. A sliding Tape Choir drone and a
+    Sub Drone underneath, the choir sample turned into a slow granular cloud, a vox
+    sample scattered high as glitter, sparse Glass Bells in long delays, a Flute line,
+    and only a shaker and rim for time."""
+    k, s = 2, "Dorian"
+    L = 64
+    prog = [0, 3, 5, 4]                                    # i IV vi(b) V-ish, one per bar
+    drone, sub, cloud = [], [], []
+    for n, dg in enumerate(prog):
+        at = float(n * 16)
+        drone += [[at, "n", m, 0.75, 0.0, 15.8, 2.0] for m in (degree(k, s, dg, 3), degree(k, s, dg + 4, 3))]
+        cloud += [[at, "n", m, 0.7, 0.0, 15.8, 1.5] for m in (degree(k, s, dg + 2, 3), degree(k, s, dg + 6, 3))]
+    sub = [[0.0, "n", degree(k, s, 0, 1), 0.8, 0.0, 31.8, 2.0], [32.0, "n", degree(k, s, 3, 1), 0.8, 0.0, 31.8, 2.0]]
+    glitter = [[float(at), "n", degree(k, s, dg, 5), 0.5, 0.0, 2.0, 0.6]
+               for at, dg in ((3, 4), (11, 6), (22, 2), (29, 4), (38, 7), (45, 6), (54, 4), (61, 2))]
+    bells = line(k, s, [(0, 7, 4), (10, 9, 4), (24, 11, 6), (34, 9, 4), (48, 7, 8), (58, 4, 4)],
+                 octave=4, gain=0.55, rel=1.5)
+    flute = line(k, s, [(4, 4, 10), (16, 6, 8), (26, 5, 6), (36, 4, 12), (52, 2, 10)], octave=4, gain=0.6, rel=0.8)
+    perc = beat({"shk": "..x...x...x...x." * 4, "rim": "........x......." * 4}, 1, ghosts=())
+    perc = [[e[0], e[1], e[2], round(e[3] * 0.85, 3), e[4], e[5], e[6]] for e in perc]
+    t_perc = dict(drum_track("Acoustic", human=0.5), vol=0.85, rs=0.45)
+    t_drone = synth_track("drone", "Tape Choir", vol=0.6, rs=0.6, ds=0.2, bus=1,
+                          fx=rack(Filter_LFO=(0.5, 7), Chorus=0.4, Wide=0.7))
+    t_sub = synth_track("drone", "Sub Drone", vol=0.65, rs=0.2)
+    t_cloud = sample_track("drift_choir.wav", vol=0.55, rs=0.65, ds=0.3, bus=1, fx=rack(Wide=0.8),
+                           grain=True, loop=True, gsize=300, gdens=25, gpos=0.5, gspray=0.8, gpitch=0.5)
+    t_glit = sample_track("drift_vox.wav", vol=0.7, pan=0.3, rs=0.6, ds=0.6, bus=1, fx=rack(Auto_Pan=(0.7, 5)),
+                          grain=True, loop=False, gsize=60, gdens=40, gpos=0.2, gspray=0.4, gpitch=2.0)
+    t_bell = synth_track("chord", "Glass Bells", vol=0.4, pan=-0.25, rs=0.55, ds=0.55, bus=1)
+    t_flute = synth_track("lead", "Flute", vol=0.8, pan=0.15, rs=0.5, ds=0.4, bus=1, fx=rack(Vibrato=(0.25, 0)))
+    a = [dict(t_perc, ev=[]), with_ev(t_drone, drone), with_ev(t_sub, sub), dict(t_cloud, ev=[]),
+         dict(t_glit, ev=[]), dict(t_bell, ev=[])]
+    b = [with_ev(t_perc, perc), with_ev(t_drone, drone), with_ev(t_sub, sub), with_ev(t_cloud, cloud),
+         dict(t_glit, ev=[]), with_ev(t_bell, bells)]
+    c = [with_ev(t_perc, perc), with_ev(t_drone, drone), with_ev(t_sub, sub), with_ev(t_cloud, cloud),
+         with_ev(t_glit, glitter), with_ev(t_flute, flute)]
+    d = [dict(t_perc, ev=[]), dict(t_drone, ev=[]), with_ev(t_sub, sub), with_ev(t_cloud, cloud),
+         with_ev(t_glit, glitter), with_ev(t_bell, bells)]
+    return song("Slow Light", 64, k, s, [a, b, c, d], [[0, 1], [1, 2], [2, 2], [3, 1], [2, 1], [0, 1]], [4, 4, 4, 4])
+
+
+DEMOS = [analog_drift, slow_light, night_drive, tape_lofi, acid_room, cathedral]
 
 
 def main():
