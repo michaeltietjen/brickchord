@@ -97,8 +97,31 @@ def _harm_amps(wave, k, duty):
     if wave == "tri":
         a = np.where(k % 2 == 1, 1.0 / (k * k), 0.0) * np.where(((k - 1) // 2) % 2 == 0, 1, -1)
         return np.broadcast_to(a * 1.6, (len(duty), len(k)))
+    if wave.startswith("sync"):
+        # a hard-synced saw: the slave resets every master cycle; its spectrum, per
+        # master harmonic, from one period (cached per ratio)
+        r = float(wave.split(":")[1]) if ":" in wave else 2.0
+        a = _sync_amps(r)[:len(k)]
+        return np.broadcast_to(a, (len(duty), len(k)))
     # pulse with time-varying duty
     return (2.0 / (np.pi * k))[None, :] * np.sin(np.pi * k[None, :] * duty[:, None])
+
+
+_SYNC_CACHE = {}
+
+
+def _sync_amps(r):
+    key = round(r, 2)
+    a = _SYNC_CACHE.get(key)
+    if a is None:
+        th = np.arange(4096) / 4096.0
+        y = ((th * key) % 1.0) * 2.0 - 1.0
+        c = np.fft.rfft(y) / 2048.0
+        a = np.abs(c[1:NH + 1]).astype(np.float32)
+        if len(a) < NH:
+            a = np.pad(a, (0, NH - len(a)))
+        _SYNC_CACHE[key] = a
+    return a
 
 
 WAVES = ["saw", "square", "pulse", "tri", "sine", "vox"]
@@ -439,9 +462,11 @@ def _grain_cloud(x, r, p, secs=2.5, seed=11):
 # model, each driven by the same three controls, HARMONICS, TIMBRE and MORPH
 # (0..1). Sustaining models render a seamless, period-locked loop; String and
 # Modal are struck and ring out.
-MACRO_MODELS = ["Analog", "Fold", "FM", "Vowel", "Additive", "Table", "String", "Modal", "Bowed", "Blown"]
+MACRO_MODELS = ["Analog", "Fold", "Sync", "Vowel", "Additive", "Table", "String", "Modal", "Bowed", "Blown"]
+MACRO_VA = (0, 2)          # these run on the full analog engine: detuned oscillators, ladder filter, envelopes
 MACRO_STRUCK = (6, 7)
-MACRO_PATCH = {"macro": 0, "harm": 0.5, "timbre": 0.5, "morph": 0.5, "decay": 0.5,
+MACRO_PATCH = {"macro": 0, "harm": 0.5, "timbre": 0.5, "morph": 0.5, "decay": 0.5, "sub": 0.25, "fenv": 2.0,
+               "fa": 0.005, "fd": 0.45, "fs": 0.35, "drive": 0.25,
                "a": 0.005, "d": 0.3, "s": 0.7, "r": 0.3, "cutoff": 9000.0, "res": 0.5, "oscs": [], "name": ""}
 _FORMANTS = [(730, 1090, 2440), (530, 1840, 2480), (270, 2290, 3010), (570, 840, 2410), (300, 870, 2240)]   # a e i o u
 _FM_RATIOS = [0.5, 1.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 7.0]
@@ -462,10 +487,6 @@ def _macro_wave(model, ph, h, t, m, f):
         g = 1 + t * 7
         y = np.sin(x * g)
         return y
-    if model == 2:                                     # FM: two operators, ratio from HARMONICS
-        r = _FM_RATIOS[int(h * (len(_FM_RATIOS) - 1) + 0.5)]
-        mod = np.sin(ph * r + m * 2.5 * np.sin(ph * r))
-        return np.sin(ph + t * 6 * mod)
     if model == 3:                                     # Vowel: a pulse train through three formants
         k = np.arange(1, int(min(60, 9000 / max(f, 30))) + 1)
         pos = m * (len(_FORMANTS) - 1)
@@ -583,8 +604,42 @@ def _resonator_drive(f, secs, h, t, m, model, seed):
     return y
 
 
+def macro_va_patch(p):
+    """Analog and Sync on the analog engine. HARMONICS spreads voices (one oscillator
+    up to five detuned, plus the sub); TIMBRE is the ladder cutoff; MORPH moves the
+    wave from saw to pulse with PWM (Analog) or the sync ratio's second oscillator (Sync)."""
+    model = int(p.get("macro", 0))
+    h, t, m = (float(p.get(k, 0.5)) for k in ("harm", "timbre", "morph"))
+    oscs = []
+    if model == 0:
+        nv = 1 + int(round(h * 4))
+        spread = 3 + 22 * h
+        for i in range(nv):
+            c = 0.0 if nv == 1 else (i / (nv - 1) - 0.5) * 2 * spread
+            pan = 0.0 if nv == 1 else (i / (nv - 1) - 0.5) * 1.2
+            wv = "saw" if m < 0.34 else ("pulse" if m > 0.66 or i % 2 else "saw")
+            oscs.append((wv, c, 0.75 / max(1.0, nv ** 0.5), pan, 0))
+        pwm = max(0.0, (m - 0.34) / 0.66) * 0.8
+    else:
+        r = 1.5 + h * 5.0
+        oscs.append(("sync:%.2f" % r, 0, 0.7, -0.25 * m, 0))
+        if m > 0.05:
+            oscs.append(("sync:%.2f" % (r * (1 + 0.5 * m)), 7 * m, 0.55 * m, 0.25 * m, 0))
+        pwm = 0.0
+    sub = float(p.get("sub", 0.25))
+    if sub > 0:
+        oscs.append(("square" if model == 0 and m > 0.5 else "sine", 0, sub, 0, -1))
+    return dict(name=p.get("name", ""), oscs=oscs, ladder=True, pwm=pwm,
+                cutoff=110.0 * 2 ** (t * 6.3), res=float(p.get("res", 1.6)), fenv=float(p.get("fenv", 2.0)),
+                fa=float(p.get("fa", 0.005)), fd=float(p.get("fd", 0.45)), fs=float(p.get("fs", 0.35)),
+                a=float(p.get("a", 0.005)), d=float(p.get("d", 0.3)), s=float(p.get("s", 0.75)),
+                r=float(p.get("r", 0.3)), drive=float(p.get("drive", 0.25)), gain=float(p.get("gain", 1.0)) * 2.0)
+
+
 def render_macro(midi, p, arrays=False):
     model = int(p.get("macro", 0)) % len(MACRO_MODELS)
+    if model in MACRO_VA:
+        return render_note(midi, macro_va_patch(p), arrays=arrays)
     h, t, m = (float(p.get(k, 0.5)) for k in ("harm", "timbre", "morph"))
     f = 440.0 * 2 ** ((midi - 69) / 12.0)
     if model >= 8:                                     # bowed / blown: sustaining resonator, crossfaded loop
@@ -601,7 +656,7 @@ def render_macro(midi, p, arrays=False):
         env = _adsr(att_n, float(p.get("a", 0.1)), float(p.get("d", 0.3)), float(p.get("s", 0.85)), SR)
         att = y[:att_n] * env[:att_n]
         loop = loop * float(p.get("s", 0.85))
-        g = GAIN * 2.2
+        g = GAIN * 1.4
         a_st = np.repeat(att[:, None], 2, axis=1).astype(np.float32) * g
         l_st = np.repeat(loop[:, None], 2, axis=1).astype(np.float32) * g
         if arrays:
@@ -632,7 +687,7 @@ def render_macro(midi, p, arrays=False):
     env = _adsr(att_n, float(p.get("a", 0.005)), float(p.get("d", 0.3)), float(p.get("s", 0.7)), SR)
     att = x[:att_n] * env[:att_n]
     loop = x[att_n:] * float(p.get("s", 0.7))
-    g = GAIN * 2.2
+    g = GAIN * 1.1
     a_st = np.repeat(att[:, None], 2, axis=1).astype(np.float32) * g
     l_st = np.repeat(loop[:, None], 2, axis=1).astype(np.float32) * g
     if arrays:
@@ -647,22 +702,35 @@ def _mc(name, model, harm, timbre, morph, **kw):
 
 
 MACRO_PATCHES = [
-    _mc("Analog Saw", 0, 0.6, 0.5, 0.0, d=0.4, s=0.75),
+    # analog: the full engine, voices and ladder from the three controls
+    _mc("Prophet Brass", 0, 0.5, 0.45, 0.1, fa=0.08, fd=0.5, fs=0.55, fenv=2.4, a=0.04, d=0.4, s=0.8, r=0.35,
+        res=1.4, sub=0.2),
+    _mc("Juno Strings", 0, 0.65, 0.55, 0.85, fa=0.3, fd=1.0, fs=0.7, fenv=0.8, a=0.35, d=0.6, s=0.85, r=0.8,
+        res=0.9, sub=0.0, drive=0.1),
+    _mc("Mono Lead", 0, 0.3, 0.5, 0.0, fd=0.35, fs=0.4, fenv=2.6, a=0.005, d=0.3, s=0.75, r=0.25, res=2.6, drive=0.4),
+    _mc("Supersaw", 0, 1.0, 0.7, 0.0, fenv=1.0, fd=0.6, fs=0.6, a=0.01, d=0.4, s=0.85, r=0.4, res=1.0, sub=0.15),
+    _mc("Square Bass", 0, 0.15, 0.28, 0.9, fenv=3.0, fd=0.2, fs=0.15, a=0.002, d=0.25, s=0.6, r=0.15, res=1.8,
+        sub=0.6, drive=0.35),
+    _mc("Saw Bass", 0, 0.3, 0.3, 0.0, fenv=3.2, fd=0.22, fs=0.2, a=0.002, d=0.3, s=0.6, r=0.15, res=2.2,
+        sub=0.45, drive=0.45),
+    _mc("Poly Pad", 0, 0.8, 0.42, 0.55, fa=0.6, fd=1.5, fs=0.6, fenv=1.4, a=0.6, d=0.8, s=0.85, r=1.2, res=1.2,
+        sub=0.1),
+    _mc("Sync Scream", 2, 0.7, 0.6, 0.4, fenv=1.6, fd=0.5, fs=0.5, a=0.005, d=0.3, s=0.8, r=0.3, res=1.3,
+        drive=0.5, sub=0.15),
+    _mc("Sync Bass", 2, 0.3, 0.32, 0.15, fenv=2.6, fd=0.25, fs=0.25, a=0.002, d=0.3, s=0.6, r=0.15, res=1.6,
+        sub=0.5, drive=0.4),
+    # the rest of the macro: folds, vowels, organs, tables, strings and resonators
     _mc("Folded Sine", 1, 0.3, 0.55, 0.3, d=0.5, s=0.7),
-    _mc("FM Glass", 2, 0.6, 0.45, 0.2, a=0.002, d=0.8, s=0.4, r=0.6),
     _mc("Vowel Choir", 3, 0.5, 0.5, 0.3, a=0.25, d=0.6, s=0.85, r=0.8),
     _mc("Organ Pipes", 4, 0.15, 0.3, 0.0, a=0.02, d=0.2, s=0.9, r=0.25),
-    _mc("Wave Scan", 5, 0.3, 0.6, 0.5, d=0.4, s=0.7),
     _mc("Plucked String", 6, 0.3, 0.7, 0.6, decay=0.5),
     _mc("Twin Strings", 6, 0.8, 0.5, 0.8, decay=0.7),
     _mc("Marimba", 7, 0.45, 0.4, 0.25, decay=0.3),
     _mc("Bell Bowl", 7, 0.8, 0.6, 0.85, decay=0.9),
-    _mc("Steel Drum", 7, 0.55, 0.65, 0.45, decay=0.45),
     _mc("Kalimba", 7, 0.2, 0.55, 0.35, decay=0.35),
     _mc("Bowed String", 8, 0.1, 0.5, 0.7, a=0.25, d=0.3, s=0.85, r=0.6),
     _mc("Bowed Glass", 8, 0.75, 0.6, 0.85, a=0.4, d=0.4, s=0.8, r=1.0),
     _mc("Blown Pipe", 9, 0.05, 0.35, 0.8, a=0.15, d=0.3, s=0.85, r=0.4),
-    _mc("Blown Bottle", 9, 0.6, 0.2, 0.9, a=0.1, d=0.2, s=0.8, r=0.5),
 ]
 
 
