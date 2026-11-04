@@ -276,63 +276,73 @@ class Engine:
         """The Effects page: the selected track's rack."""
         self._sel_chain().rack = {k: tuple(v) for k, v in rack.items()}
 
+    _CL_WIN = {}
+
     def _cloud(self, ch, x, N, sr, a, ti):
-        """Granular texture: the track's last two seconds sit in a buffer; grains are
-        read back from it (a little behind the write head, scattered), pitched and
-        windowed, and mixed in. Freeze stops writing, so the texture holds."""
+        """Granular texture: the track's last two seconds sit in a mono buffer; grains
+        are read back from it (behind the write head, scattered), at the same pitch or
+        an octave up, windowed, panned and mixed in. Freeze keeps the last thing played.
+        Cheap on purpose: grains are plain slices of the buffer, at most six at once."""
         name, gms, dens, spread, octup, freeze = self.CLOUD_TEX[ti % len(self.CLOUD_TEX)]
         B = 2 * sr
         if getattr(ch, "cl_buf", None) is None:
-            ch.cl_buf = np.zeros((B, 2), np.float32)
+            ch.cl_buf = np.zeros(2 * B, np.float32)         # the ring, written twice, so reads never wrap
             ch.cl_w = 0
             ch.cl_grains = []
             ch.cl_rng = np.random.default_rng(1234)
-        if not freeze or float(np.abs(x).max()) > 1e-3:   # Freeze keeps the last thing played
+        mono = (x[:, 0] + x[:, 1]) * 0.5
+        if not freeze or float(np.abs(mono).max()) > 1e-3:   # Freeze keeps the last thing played
             w = ch.cl_w
-            idx = (w + np.arange(N)) % B
-            ch.cl_buf[idx] = x
-            ch.cl_w = (w + N) % B
+            e = w + N
+            if e <= B:
+                ch.cl_buf[w:e] = mono
+                ch.cl_buf[B + w:B + e] = mono
+            else:
+                k = B - w
+                ch.cl_buf[w:B] = mono[:k]
+                ch.cl_buf[B + w:2 * B] = mono[:k]
+                ch.cl_buf[:N - k] = mono[k:]
+                ch.cl_buf[B:B + N - k] = mono[k:]
+            ch.cl_w = e % B
         rng = ch.cl_rng
         gl = max(64, int(gms * sr / 1000))
         expect = dens * (0.4 + 0.8 * a) * N / sr
-        n_new = rng.poisson(expect)
-        for _ in range(min(n_new, 12)):
+        n_new = min(rng.poisson(expect), 6 - len(ch.cl_grains))
+        for _ in range(max(0, n_new)):
+            up = rng.random() < octup
             back = rng.uniform(0.05, 1.6) * sr if not freeze else rng.uniform(0.0, 1.9) * sr
-            start = (ch.cl_w - back - gl) % B
-            st = 2.0 ** (rng.uniform(-spread, spread) / 12.0) * (2.0 if rng.random() < octup else 1.0)
-            pan = rng.uniform(-0.7, 0.7)
-            ch.cl_grains.append([start, 0, gl, st, pan, int(rng.integers(0, N))])
-        wet = np.zeros((N, 2), np.float32)
+            back += gl * (2 if up else 1)
+            start = int(ch.cl_w - back) % B
+            pan = float(rng.uniform(-0.7, 0.7) * (0.4 + spread))
+            ch.cl_grains.append([start, 0, gl, 2 if up else 1, pan, int(rng.integers(0, N))])
+        wv = self._CL_WIN.get(gl)
+        if wv is None:
+            wv = self._CL_WIN[gl] = np.hanning(gl).astype(np.float32)
+        wl = np.zeros(N, np.float32)
+        wr = np.zeros(N, np.float32)
         keep = []
-        win_cache = {}
         for g in ch.cl_grains:
-            start, done, L, st, pan, off = g
+            start, done, L, step, pan, off = g
             o = off if done == 0 else 0
             n = min(N - o, L - done)
-            if n <= 0:
-                keep.append(g)
-                g[5] = 0
-                continue
-            k = np.arange(done, done + n)
-            pos = (start + k * st) % B
-            i0 = pos.astype(np.int64)
-            fr = (pos - i0)[:, None].astype(np.float32)
-            seg = ch.cl_buf[i0] * (1 - fr) + ch.cl_buf[(i0 + 1) % B] * fr
-            wv = win_cache.get(L)
-            if wv is None:
-                wv = win_cache[L] = np.hanning(L).astype(np.float32)
-            seg = seg * wv[done:done + n, None]
-            seg[:, 0] *= 1.0 - max(0.0, pan)
-            seg[:, 1] *= 1.0 + min(0.0, pan)
-            wet[o:o + n] += seg
-            g[1] = done + n
+            if n > 0:
+                p0 = start + done * step
+                seg = ch.cl_buf[p0:p0 + n * step:step][:n] * wv[done:done + n]
+                if len(seg) == n:
+                    wl[o:o + n] += seg * (1.0 - max(0.0, pan))
+                    wr[o:o + n] += seg * (1.0 + min(0.0, pan))
+                g[1] = done + n
             g[5] = 0
             if g[1] < L:
                 keep.append(g)
-        ch.cl_grains = keep[-48:]
+        ch.cl_grains = keep
         norm = 1.0 / max(1.0, math.sqrt(dens * gms / 1000.0))
         mix = min(1.0, a * 1.2)
-        return (x * (1.0 - 0.6 * mix) + wet * norm * (0.4 + 1.2 * mix)).astype(np.float32)
+        g_wet = norm * (0.4 + 1.2 * mix)
+        out = x * (1.0 - 0.6 * mix)
+        out[:, 0] += wl * g_wet
+        out[:, 1] += wr * g_wet
+        return out.astype(np.float32)
 
     def _lfo_phase(self, N, sr, beats):
         bps = self.bpm / 60.0 / sr
