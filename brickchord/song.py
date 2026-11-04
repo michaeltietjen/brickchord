@@ -1383,7 +1383,11 @@ class SongMixin:
         root = 60 + self.key - (12 if self.key >= 7 else 0) + 12 * self.octave
         return [[x, "n", root, 0.9, 0.0, 1.0, 0.3]]
 
-    def grid_preview(self, evs, d):
+    def grid_preview(self, evs, d, explicit=False):
+        """Hear a step as you edit it. Off in Settings > Global > Preview notes (for
+        recording without the clicks); A on a track's Sound row still auditions."""
+        if not explicit and not getattr(self, "preview_notes", True):
+            return
         notes = sorted(ev[2] + d for ev in evs if ev[1] == "n")
         if notes:
             self.eng.post("lead_on", notes[0], self._snd([notes[0]]).get(notes[0]), 0.0)
@@ -1613,7 +1617,7 @@ class SongMixin:
     def audition_track(self, p, k):
         """A on the Sound row: hear the track's sound (root and fifth) through its chain."""
         root = 60 + self.key - (12 if self.key >= 7 else 0) + 12 * self.octave
-        self.grid_preview([[0, "n", root, 0.9, 0.0, 1.0, 0.3], [0, "n", root + 7, 0.8, 0.0, 1.0, 0.3]], 0)
+        self.grid_preview([[0, "n", root, 0.9, 0.0, 1.0, 0.3], [0, "n", root + 7, 0.8, 0.0, 1.0, 0.3]], 0, explicit=True)
 
     def track_copy_all(self):
         """Y tap on the track page: this track's sound, mix, sends, filter, effects

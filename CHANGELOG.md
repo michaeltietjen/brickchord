@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Brickglide: Moves (R2 + chord: Bloom, Cascade up/down, Spiral, Swoop, Scatter, Converge, Fall), a sub voice an octave under the bass, Saw Bass and Square Bass as voice sounds, the bass kept in C2..B2, a smooth bloom that converges before it fans, a crisp line spectrogram, an FX page, text that fits, flat keys spelled with flats, and a site page at /brickglide/.
+- Bricklab: Preview notes toggle in Settings > Global, for quiet editing while recording dawless.
+
 ## Unreleased: Brickglide
 - **Brickglide**, a third app on the same engine: an ambient machine. Six drone voices on the D-pad, X and Y that fade in and out and can glide between notes over up to a minute; two melodic voices on A and B that step through five notes each (struck sounds like Kalimba restrike, sustained ones glide). The screen draws every voice's pitch over the last 24 seconds against guide lines for the scale, with a dashed guide showing where a gliding voice is headed. Each voice has its own sound (drones, bowed and blown resonators, bells, pads), note and cents, level, pan, glide, fade, vibrato, tremolo and random drift. Six scenes (SELECT + a drone button saves, R1 + it recalls, morphing over 1 to 60 s), R2 evolves every voice to a nearby note of the scale, START freezes the cloud, the left stick spreads the voices apart and deepens their movement, L2 + left stick plays Cloud. Installs as roms/ports/brickglide with Brickglide.sh.
 

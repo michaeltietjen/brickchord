@@ -7,10 +7,13 @@
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
 #   right stick              filter and space, as in Brickchord
 #   R2                       bloom: every voice from one note, fanning out into the chord
+#   R2 + chord               that chord with the chosen Move (Settings > Chords): Bloom, Cascade,
+#                            Spiral, Swoop, Scatter, Swap, Rise
+#   L2 + chord button        recall a scene (SELECT + chord button saves one)
 #   START                    the progression plays by itself (Settings > Chords)
 #   L3                       glide guides / spectrogram
 #   SELECT                   Settings (sounds, glide time and path, the progression, scenes)
-#   SELECT + chord button    save a scene; R2 + chord button recalls it
+#   SELECT + chord button    save a scene
 import json
 import math
 import time
@@ -41,6 +44,8 @@ CHORDS = [("Triad", "deg", [0, 2, 4]), ("Seventh", "deg", [0, 2, 4, 6]), ("Ninth
           ("Minor 11", "semi", [0, 3, 7, 10, 14, 17]), ("Major 9", "semi", [0, 4, 7, 11, 14]),
           ("Fifths", "semi", [0, 7, 14, 21]), ("Cluster", "semi", [0, 2, 3, 5, 7]), ("Open", "semi", [0, 7, 16, 19, 26])]
 PATHS = ["Smooth", "Linear", "Ease", "Swell", "Steps"]       # Steps walks the scale notes on the way
+# Moves: how the voices travel into the next chord when you ask for more than a plain glide
+MOVES = ["Bloom", "Cascade up", "Cascade down", "Spiral", "Swoop", "Scatter", "Converge", "Fall"]
 ORDERS = ["Together", "Low first", "High first", "Outside in", "Random"]
 STAGGERS = [0, 0.5, 1, 2, 3, 5, 8]
 CHORD_TIMES = [0.25, 0.4, 0.6, 1, 2, 4, 6, 8, 12, 20, 30, 60]
@@ -63,7 +68,8 @@ def amb_bank():
     """The sounds a voice can be: sustaining drones and pads first, struck and
     plucked ones (for the melodic voices) after."""
     out = list(synth.DRONE_PATCHES)
-    for n in ("Supersaw", "Juno Strings", "Poly Pad", "Prophet Brass", "Bowed String", "Bowed Glass", "Blown Pipe",
+    for n in ("Saw Bass", "Square Bass", "Supersaw", "Juno Strings", "Poly Pad", "Prophet Brass", "Bowed String",
+              "Bowed Glass", "Blown Pipe",
               "Vowel Choir", "Organ Pipes",
               "Folded Sine", "Bell Bowl", "Marimba", "Kalimba", "Plucked String", "Twin Strings"):
         try:
@@ -113,13 +119,13 @@ class AmbientMixin:
         st = self.cfg.get("amb") or {}
         k = self.key
         default_notes = [36, 43, 48, 55, 60, 64]           # root, fifth, octave, fifth, two octaves, tenth
-        default_snd = [ix("Sub Drone"), ix("Deep Space"), ix("Tape Choir"), ix("Bowed Glass"), ix("Shimmer"),
-                       ix("Breath")]
+        default_snd = [ix("Saw Bass"), ix("Deep Space"), ix("Tape Choir"), ix("Bowed Glass"), ix("Shimmer"),
+                       ix("Sub Drone")]
         self.av = []
         for i in range(NV):
             d = {"on": False, "snd": default_snd[i] if i < 6 else ix("Kalimba" if i == 6 else "Bowed String"),
                  "note": (default_notes[i] + k) if i < 6 else 60 + k, "cents": 0,
-                 "level": 0.6 if i < 6 else 0.5, "pan": [0.0, -0.4, 0.4, -0.2, 0.2, 0.0, -0.3, 0.3][i],
+                 "level": 0.7 if i == 0 else (0.6 if i < 6 else 0.5), "pan": [0.0, -0.4, 0.4, -0.2, 0.2, 0.0, -0.3, 0.3][i],
                  "glide": 4 if i < 6 else 2, "fade": 4 if i < 6 else 1, "vib": 4, "rate": 0.15 + 0.05 * i,
                  "trem": 0.0, "drift": 8 if i < 6 else 0, "base": None}
             if i < len(st.get("voices", [])):
@@ -139,6 +145,8 @@ class AmbientMixin:
                            **(st.get("chord") or {}))
         if not self.achord.get("v2"):            # played like Brickchord now: chords glide in about a second
             self.achord.update(time=1.5, stagger=0, order=0, path=2, v2=True)
+        self.achord.setdefault("move", 0)
+        self.achord.setdefault("sub", True)      # a sub voice an octave under the bass
         # a chord progression that steps by itself: every voice glides into each chord
         self.aprog = dict({"steps": [5, 0, 4, 3, None, None, None, None], "time": 4}, **(st.get("prog") or {}))
         self.aprog.update(run=False, i=-1, next=0.0)
@@ -376,11 +384,15 @@ class AmbientMixin:
                     self.sel_combo = True
                     self.amb_save_scene(s)
                 return True
-            if "R2" in self.inp.held:
+            if "L2" in self.inp.held:
                 s = mm.CHORD_BUTTONS.index(name)
-                self.r2_used = True
+                self.l2_moved = True
                 if s < 6:
                     self.amb_recall(s)
+                return True
+            if "R2" in self.inp.held:
+                self.r2_used = True
+                self.amb_press_chord(name, with_move=True)   # R2 + chord: travel there with the chosen Move
                 return True
             self.amb_press_chord(name)
             return True
@@ -464,7 +476,7 @@ class AmbientMixin:
         keys = ("on", "snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
         self.ascenes[s] = [{k: v[k] for k in keys} for v in self.av[:6]]
         self.save_cfg()
-        self.flash("SCENE %d SAVED   R2 + %s RECALLS IT" % (s + 1, M().BUTTON_GLYPH[M().CHORD_BUTTONS[s]]))
+        self.flash("SCENE %d SAVED   L2 + %s RECALLS IT" % (s + 1, M().BUTTON_GLYPH[M().CHORD_BUTTONS[s]]))
 
     def amb_recall(self, s):
         sc = self.ascenes[s] if s < len(self.ascenes) else None
@@ -517,22 +529,78 @@ class AmbientMixin:
             notes.reverse()
         return notes[:10]
 
-    def amb_glide_all(self, moves, label):
-        """moves: {voice: new midi}. Every voice glides there along the chord path."""
+    def amb_glide_all(self, moves, label, move=None):
+        """moves: {voice: new midi}. Every voice glides there along the chord path.
+        With a move (see MOVES), the voices travel a longer way: through one note
+        (Bloom), one after another (Cascade), round an octave (Spiral), dipping
+        (Swoop), via random scale notes (Scatter), meeting in the middle (Converge),
+        or from an octave above (Fall)."""
+        import random
         ch = self.achord
         shape = min(3, ch["path"])
+        secs = float(ch["time"])
         items = [(i, self.aui[i]["cur"] or self.av[i]["note"] * 100.0) for i in moves]
         delays = self.amb_route(ch["order"], items)
+        vias = {}
+        if move is not None:
+            name = MOVES[move % len(MOVES)]
+            rank = sorted(moves, key=lambda i: moves[i])
+            n = max(1, len(rank))
+            secs = max(secs, 2.5) * (2.0 if name in ("Bloom", "Spiral", "Swoop", "Rise", "Scatter") else 1.0)
+            if name == "Bloom":
+                low = min(moves.values()) * 100.0
+                vias = {i: [low] for i in moves}
+            elif name == "Cascade up":
+                delays = {i: k * secs * 0.6 / n for k, i in enumerate(rank)}
+            elif name == "Cascade down":
+                delays = {i: k * secs * 0.6 / n for k, i in enumerate(reversed(rank))}
+            elif name == "Spiral":
+                vias = {i: [moves[i] * 100.0 + (1200.0 if k % 2 else -1200.0)] for k, i in enumerate(rank)}
+            elif name == "Swoop":
+                vias = {i: [moves[i] * 100.0 - 1200.0] for i in moves}
+            elif name == "Scatter":
+                sc = M().SCALES[self.scale]
+                for i in moves:
+                    c = int(moves[i])
+                    opts = [m for m in range(c - 7, c + 8) if (m - self.key) % 12 in sc and m != c]
+                    vias[i] = [random.choice(opts) * 100.0] if opts else []
+            elif name == "Converge":
+                mid = (min(moves.values()) + max(moves.values())) * 50.0
+                vias = {i: [mid] for i in moves}
+            elif name == "Fall":
+                vias = {i: [moves[i] * 100.0 + 1200.0] for i in moves}
+            shape = 2
         for i, note in moves.items():
             v = self.av[i]
             frm = self.aui[i]["cur"] or v["note"] * 100.0
             v["note"], v["cents"] = int(note), 0
-            via = self.amb_steps_via(frm, note * 100.0) if ch["path"] == 4 else None
-            self.amb_push(i, glide=ch["time"], shape=shape, delay=delays.get(i, 0.0), via=via)
+            via = vias.get(i) or (self.amb_steps_via(frm, note * 100.0) if ch["path"] == 4 else None)
+            self.amb_push(i, glide=secs, shape=shape, delay=delays.get(i, 0.0), via=via)
+        self.amb_sub_follow(moves, secs)
         if label:
             self.flash(label)
 
-    def amb_chord(self, deg):
+    def amb_sub_follow(self, moves, secs):
+        """The sub voice (voice 6) sits an octave under the bass when Sub bass is on."""
+        v = self.av[5]
+        if not self.achord.get("sub") or not moves:
+            if v["on"]:
+                v["on"] = False
+                self.amb_push(5)
+            return
+        bass = min(moves.values())
+        names = [p["name"] for p in self.amb_sounds]
+        if names[v["snd"] % len(names)] != "Sub Drone" and not v.get("sub_set"):
+            v["snd"], v["sub_set"] = names.index("Sub Drone") if "Sub Drone" in names else v["snd"], True
+            v["base"] = None
+            v["level"], v["pan"], v["vib"], v["drift"], v["fade"] = 0.6, 0.0, 0, 0, 1.0
+        was_on = v["on"]
+        v["note"], v["cents"], v["on"] = int(bass) - 12, 0, True
+        if v["base"] is None:
+            self.amb_render(5)
+        self.amb_push(5, jump=not was_on, glide=secs, shape=2)
+
+    def amb_chord(self, deg, with_move=False):
         """Glide the sounding drones into a chord on scale degree deg (0..5), each
         voice to the nearest chord tone so the voices lead smoothly."""
         on = [i for i in range(6) if self.av[i]["on"]]
@@ -552,8 +620,9 @@ class AmbientMixin:
         self.acur_deg = deg % 7
         self.acur_name = "%s  %s" % (roman, cname)
         self.amb_glide_all(self.amb_voicelead(on, pcs, (self.key + sc[deg % 7]) % 12),
-                           "%s %s   %s PATH   %gs" % (roman, name.upper(), PATHS[self.achord["path"]].upper(),
-                                                     self.achord["time"]))
+                           "%s %s   %s" % (roman, name.upper(), MOVES[self.achord["move"] % len(MOVES)].upper()
+                                           if with_move else PATHS[self.achord["path"]].upper() + " PATH"),
+                           move=self.achord["move"] if with_move else None)
 
     def amb_voicelead(self, on, pcs, root_pc):
         """Each sounding voice to a tone of the chord (pcs): the lowest to the root, as
@@ -568,7 +637,7 @@ class AmbientMixin:
         rest = cur
         if self.achord.get("root") and len(cur) > 1:
             c0 = cur[0][0]
-            b = min((n for n in range(24, 97) if n % 12 == root_pc), key=lambda n: abs(n - c0))
+            b = min((n for n in range(36, 48) if n % 12 == root_pc), key=lambda n: abs(n - c0))   # bass stays C2..B2
             best, used, prev, rest = [b], {root_pc}, b, cur[1:]
         for c, _ in rest:
             opts = [n for n in cand if n > prev] or [cand[-1]]
@@ -581,7 +650,7 @@ class AmbientMixin:
     # ------------------------------------------------------------ playing chords, Brickchord-style
     NCH = 5                     # how many drone voices a chord button plays
 
-    def amb_press_chord(self, btn):
+    def amb_press_chord(self, btn, with_move=False):
         """A chord button: the voices glide into that chord (Brickchord's chord, with
         its L1 / R1 / Y modifiers) and hold it. The same chord again lets it fade."""
         mm = M()
@@ -590,8 +659,8 @@ class AmbientMixin:
         pc, iv, name = mm.build_chord(self.key, self.scale, deg, m)
         key = (deg, tuple(sorted(k for k, v in m.items() if v)))
         sounding = [i for i in range(self.NCH) if self.av[i]["on"]]
-        if sounding and getattr(self, "acur_key", None) == key:
-            for i in sounding:                       # the same chord again: let it go
+        if sounding and getattr(self, "acur_key", None) == key and not with_move:
+            for i in sounding + ([5] if self.av[5]["on"] else []):       # the same chord again: let it go
                 self.av[i]["on"] = False
                 self.amb_push(i)
             self.acur_key = self.acur_deg = None
@@ -610,13 +679,16 @@ class AmbientMixin:
                 if v["base"] is None or abs(v["note"] - v["base"]) > 24:
                     self.amb_render(i)
                 self.amb_push(i, jump=True)
+            self.amb_sub_follow(notes, 0.5)
+            if with_move:
+                self.amb_bloom(secs=max(3.0, self.achord["time"] * 2))
         else:
             for i in fresh:
                 self.av[i]["on"] = True
                 self.amb_push(i, jump=True)
-            ch = self.achord
             moves = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
-            self.amb_glide_all(moves, "")
+            self.amb_glide_all(moves, MOVES[self.achord["move"] % len(MOVES)].upper() if with_move else "",
+                               move=self.achord["move"] if with_move else None)
         self.acur_key, self.acur_deg = key, deg
         self.acur_name = mm.roman_for(deg, iv) + "  " + name
         self.hit_t, self.hit_big = time.perf_counter(), True
@@ -650,15 +722,15 @@ class AmbientMixin:
             self.flash("TURN ON TWO OR MORE VOICES FIRST")
             return
         secs = float(secs or max(3.0, self.achord["time"] * 3))
-        low = min(self.av[i]["note"] for i in on)
+        low = min(self.av[i]["note"] for i in on if i != 5) * 100.0
         for i in on:
+            if i == 5:
+                continue
             v = self.av[i]
             if v["base"] is None:
                 self.amb_render(i)
-            self.eng.post("amb", i, {"tgt": (low - v["base"]) * 100.0, "jump": True})
-            self.aui[i]["cur"] = low * 100.0
-            self.aui[i]["path"] = None
-            self.amb_push(i, glide=secs, shape=2)
+            # draw the voices together first, then fan out: no jump, one smooth gesture
+            self.amb_push(i, glide=secs * 1.5, shape=2, via=[low])
         if swell:
             self.amb_swell(min(30.0, secs * 4))
         self.atut_flags["bloom"] = True
@@ -680,7 +752,7 @@ class AmbientMixin:
         sc = M().SCALES[self.scale]
         k = self.key
         chord = [12 * 3 + k, 12 * 3 + k + 7, 12 * 4 + k + sc[2], 12 * 4 + k + 7, 12 * 5 + k]
-        snds = ["Prophet Brass", "Supersaw", "Juno Strings", "Supersaw", "Prophet Brass"]
+        snds = ["Saw Bass", "Supersaw", "Juno Strings", "Supersaw", "Prophet Brass"]
         pans = [0.0, -0.5, 0.5, -0.25, 0.25]
         self.aprog["run"] = False
         for i in range(6):
@@ -693,6 +765,7 @@ class AmbientMixin:
                      fade=2.0, vib=4, rate=0.25, trem=0.0, drift=4, base=None, on=True)
             self.amb_render(i)
             self.amb_push(i, jump=True)
+        self.amb_sub_follow({i: chord[i] for i in range(5)}, 0.5)
         self.achord.update(type=0, path=2, time=1.2, stagger=0, order=0, root=True)
         self.aprog.update(steps=[0, 4, 5, 3, 4, None, None, None], time=5, run=False, i=0, next=0.0)
         self.amb_bloom(secs=3.5)
@@ -710,7 +783,7 @@ class AmbientMixin:
         sc = M().SCALES[self.scale]
         k = self.key
         start = [12 * 3 + k + sc[5], 12 * 4 + k, 12 * 4 + k + sc[2], 12 * 5 + k, 12 * 5 + k + sc[2]]   # vi in five voices
-        snds = ["Juno Strings", "Supersaw", "Juno Strings", "Supersaw", "Juno Strings"]
+        snds = ["Saw Bass", "Supersaw", "Juno Strings", "Supersaw", "Juno Strings"]
         pans = [0.0, -0.5, 0.5, -0.25, 0.25]
         for i in range(6):
             v = self.av[i]
@@ -724,6 +797,7 @@ class AmbientMixin:
                 v["on"] = True
             self.amb_render(i)
             self.amb_push(i, jump=True)
+        self.amb_sub_follow({i: start[i] for i in range(5)}, 0.5)
         self.achord.update(type=0, path=1, time=0.4, stagger=0, order=0, root=True)
         self.aprog.update(steps=[5, 0, 4, 3, None, None, None, None], time=4, run=False)
         self.amb_prog_toggle()
@@ -786,7 +860,7 @@ class AmbientMixin:
                     break
             pr["next"] = now + float(pr["time"])
             if pr["steps"][pr["i"]] is not None:
-                self.amb_chord(pr["steps"][pr["i"]])
+                self.amb_chord(pr["steps"][pr["i"]], with_move=self.achord.get("prog_move", False))
         # the melodic voices step through their notes
         for j, m in enumerate(self.amel):
             i = 6 + j
@@ -868,6 +942,9 @@ class AmbientMixin:
                     ("Glide time", "%g s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
                     ("Order", ORDERS[ch["order"]]),
                     ("Bass on root", "On" if ch.get("root") else "Off"),
+                    ("Sub bass", "On" if ch.get("sub") else "Off"),
+                    ("Move", "%s   (R2 + chord)" % MOVES[ch["move"] % len(MOVES)]),
+                    ("Progression moves", "On" if ch.get("prog_move") else "Off"),
                     ("Progression", "playing   START stops" if self.aprog["run"] else "START plays it"),
                     ("Chord time", "%g s each" % self.aprog["time"])] + [
                 ("Chord %d" % (s + 1), "-" if self.aprog["steps"][s] is None else ROMAN[self.aprog["steps"][s] % 7])
@@ -893,7 +970,7 @@ class AmbientMixin:
             for s in range(6):
                 sc = self.ascenes[s] if s < len(self.ascenes) else None
                 g = mm.BUTTON_GLYPH[mm.CHORD_BUTTONS[s]]
-                rows.append(("Scene %d" % (s + 1), ("R2 + %s recalls" % g) if sc else "SELECT + %s saves" % g))
+                rows.append(("Scene %d" % (s + 1), ("L2 + %s recalls" % g) if sc else "SELECT + %s saves" % g))
             return rows
         return []
 
@@ -979,6 +1056,15 @@ class AmbientMixin:
                 ch["order"] = (ch["order"] + d) % len(ORDERS)
             elif name == "Bass on root":
                 ch["root"] = not ch.get("root")
+            elif name == "Sub bass":
+                ch["sub"] = not ch.get("sub")
+                if not ch["sub"] and self.av[5]["on"]:
+                    self.av[5]["on"] = False
+                    self.amb_push(5)
+            elif name == "Move":
+                ch["move"] = (ch["move"] + d) % len(MOVES)
+            elif name == "Progression moves":
+                ch["prog_move"] = not ch.get("prog_move")
             elif name == "Progression":
                 self.amb_prog_toggle()
             elif name == "Chord time":
@@ -1047,29 +1133,82 @@ class AmbientMixin:
         if surf is None or surf.get_size() != (w, h):
             surf = self._spec_surf = pygame.Surface((w, h))
             surf.fill(M().BG)
-            self._spec_rows = None
+            self._spec_grid = None
         sr = 11025.0                                        # the scope is the output at half rate
-        if self._spec_rows is None or len(self._spec_rows) != h:
-            f = np.geomspace(self.SPEC_LO, self.SPEC_HI, h)[::-1]
-            self._spec_rows = np.clip((f / sr * 2048).astype(int), 1, 1023)
+        if getattr(self, "_spec_win", None) is None:
             self._spec_win = np.hanning(2048).astype(np.float32)
         mag = np.abs(np.fft.rfft(buf * self._spec_win))
-        db = 20 * np.log10(mag[self._spec_rows] + 1e-4)
-        pk = getattr(self, "_spec_pk", 0.0)
-        pk = max(db.max(), pk - 0.3)                        # a slowly falling reference, so quiet parts still show
+        prev = getattr(self, "_spec_avg", None)
+        mag = mag if prev is None else 0.55 * prev + 0.45 * mag    # steadier lines, less flicker
+        self._spec_avg = mag
+        db = 20 * np.log10(mag + 1e-6)
+        pk = getattr(self, "_spec_pk", -40.0)
+        pk = max(float(db.max()), pk - 0.25)               # a slowly falling reference
         self._spec_pk = pk
-        lv = np.clip((db - (pk - 60)) / 60.0, 0, 1) ** 1.6
-        # palette: background, violet, gold, white
-        bg = np.array(M().BG, np.float32)
+        # crisp lines, not a heat map: only the spectral peaks are drawn. Each peak's
+        # frequency is refined between bins (parabolic), then placed on the log scale,
+        # so a harmonic is a thin bright line wherever it sits.
+        lo_b, hi_b = int(self.SPEC_LO / sr * 2048) + 1, min(1022, int(self.SPEC_HI / sr * 2048))
+        d = db[lo_b - 1:hi_b + 2]
+        mid = d[1:-1]
+        is_pk = (mid > d[:-2]) & (mid >= d[2:]) & (mid > pk - 32)
+        idx = np.nonzero(is_pk)[0]
+        if len(idx) > 24:                                   # the strongest 24: the harmonics that matter
+            idx = idx[np.argsort(mid[idx])[-24:]]
+        last = getattr(self, "_spec_lines", {})              # row -> (colour, age) from the columns before
+        last_rows = set(last)
+        rows_now = {}
+        col = np.tile(np.array(M().BG, np.uint8), (h, 1))
+        grid = getattr(self, "_spec_grid", None)
+        if grid is None or len(grid[0]) != h:
+            rows = []
+            for n in range(12, 120, 12):                    # faint octave lines of the key
+                fq = 440.0 * 2 ** ((n + self.key - 69) / 12.0)
+                if self.SPEC_LO < fq < self.SPEC_HI:
+                    rows.append(int(round((h - 1) * (1 - math.log(fq / self.SPEC_LO) /
+                                                     math.log(self.SPEC_HI / self.SPEC_LO)))))
+            grid = self._spec_grid = (np.zeros(h), rows)
+        gcol = np.array(self.mix(M().BG, M().DIM, 0.22), np.uint8)
+        for r in grid[1]:
+            col[r] = gcol
         v = np.array(M().ACCENT, np.float32)
         g = np.array(M().ACCENT2, np.float32)
         wht = np.array((250, 246, 236), np.float32)
-        col = np.where(lv[:, None] < 0.5, bg + (v - bg) * (lv[:, None] / 0.5),
-                       np.where(lv[:, None] < 0.85, v + (g - v) * ((lv[:, None] - 0.5) / 0.35),
-                                g + (wht - g) * ((lv[:, None] - 0.85) / 0.15)))
+        logspan = math.log(self.SPEC_HI / self.SPEC_LO)
+        for j in idx:
+            a_, b_, c_ = d[j], d[j + 1], d[j + 2]
+            den = a_ - 2 * b_ + c_
+            off = 0.5 * (a_ - c_) / den if den != 0 else 0.0
+            fq = (lo_b + j + off) * sr / 2048
+            if not (self.SPEC_LO < fq < self.SPEC_HI):
+                continue
+            y = int(round((h - 1) * (1 - math.log(fq / self.SPEC_LO) / logspan)))
+            lv = min(1.0, max(0.0, (b_ - (pk - 32)) / 32.0))
+            near = [r for r in last_rows if abs(r - y) <= 8]
+            # a line continues from the column before (or is strong enough to start one):
+            # stray one-column specks are left out
+            if lv < 0.6 and not any(abs(r - y) <= 2 for r in near):
+                continue
+            lv = round(lv * 4) / 4.0                        # a few steps of brightness: digital, not smeared
+            cc = v + (g - v) * min(1.0, lv / 0.7) if lv < 0.7 else g + (wht - g) * ((lv - 0.7) / 0.3)
+            ci = cc.astype(np.uint8)
+            col[y] = ci
+            if near:                                         # a glide: join it to where it was, no gaps
+                r0 = min(near, key=lambda r: abs(r - y))
+                if abs(r0 - y) > 1:
+                    lo_, hi_ = sorted((r0, y))
+                    col[lo_:hi_ + 1] = ci
+            if lv >= 0.5 and 0 < y < h - 1:                 # strong harmonics get a 2 px line
+                col[y + 1] = (cc * 0.55 + np.array(M().BG) * 0.45).astype(np.uint8)
+            rows_now[y] = (ci, 0)
+        for r, (ci, age) in last.items():                  # a line missing for a column holds briefly
+            if age < 2 and r not in rows_now and not any(abs(r - y) <= 2 for y in rows_now):
+                col[r] = ci
+                rows_now[r] = (ci, age + 1)
+        self._spec_lines = rows_now
         surf.scroll(-1, 0)
         px = pygame.surfarray.pixels3d(surf)
-        px[w - 1, :, :] = col.astype(np.uint8)
+        px[w - 1, :, :] = col
         del px
 
     def draw_ambient(self, c, now):

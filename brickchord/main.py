@@ -67,7 +67,7 @@ DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0),
 # Settings pages (L1/R1 flips between them). Drums is Bricklab only.
 MENU_PAGES = {
     "Songs": ["Song", "Demo song"],
-    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome",
+    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome", "Preview notes",
                "Click sound",
                "Click level",
                "Volume", "Latency",
@@ -331,6 +331,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         self.rec_quant = s.get("rec_quant", 1) if s.get("rec_quant", 1) in REC_QUANT else 1
         self.countin = s.get("countin", 1) if s.get("countin", 1) in (0, 1, 2) else 1
         self.metro = s.get("metro", "rec") if s.get("metro") in METRO_MODES else "rec"
+        self.preview_notes = bool(s.get("preview_notes", True))
         self.metro_snd = s.get("metro_snd") if s.get("metro_snd") in synth.METRO_SOUNDS else "Click"
         self.metro_lvl = clamp(float(s.get("metro_lvl", 0.7)), 0.0, 1.0)
         self.drone_slide = s.get("drone_slide", 1.0) if s.get("drone_slide", 1.0) in DRONE_SLIDES else 1.0
@@ -861,6 +862,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
                                     bass=self.bass, bass_lvl=self.bass_lvl, arp_oct=self.arp_oct,
                                     imode=getattr(self, "imode", "Play"), countin=getattr(self, "countin", 1),
                                     metro=self.metro, metro_snd=self.metro_snd, metro_lvl=self.metro_lvl,
+                                    preview_notes=self.preview_notes,
                                     drone_slide=self.drone_slide, song_slot=getattr(self, "song_slot", 1))
         if hasattr(self, "rack"):
             self.cfg["rack"] = self.rack
@@ -1176,6 +1178,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
              ("Demo song", (self.demo_names()[self.demo_pick % max(1, len(self.demo_names()))][0] + "   A loads")
               if self.demo_names() else "none installed"),
              ("Metronome", METRO_MODES[self.metro]),
+             ("Preview notes", "On" if self.preview_notes else "Off  (quiet editing)"),
              ("Click sound", self.metro_snd),
              ("Click level", "%d%%" % round(self.metro_lvl * 100))] if edition.LAB else []) + [
             ("Volume", "%d%%" % round(self.volume * 100)),
@@ -1301,6 +1304,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             ks = list(REC_QUANT)
             self.rec_quant = ks[(ks.index(self.rec_quant) + d) % len(ks)]
             self.push_params()
+        elif name == "Preview notes":
+            self.preview_notes = not self.preview_notes
         elif name in ("Metronome", "Click sound", "Click level"):
             if name == "Metronome":
                 ks = list(METRO_MODES)
