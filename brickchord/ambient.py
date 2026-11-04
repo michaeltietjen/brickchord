@@ -13,6 +13,7 @@
 #   R2 + a drone button      glide the drones into a chord on degree I-VI (Settings > Chords
 #                            picks the chord, the path shape, the time and the order)
 #   R2 (tap)                 evolve: every voice glides to a new note of the scale
+#   R2 + A                   run / stop the chord progression (Settings > Chords)
 #   START                    freeze: the cloud holds what is sounding
 #   left stick               X spreads the voices apart, Y deepens their movement
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
@@ -47,7 +48,9 @@ CHORDS = [("Triad", "deg", [0, 2, 4]), ("Seventh", "deg", [0, 2, 4, 6]), ("Ninth
 PATHS = ["Smooth", "Linear", "Ease", "Swell", "Steps"]       # Steps walks the scale notes on the way
 ORDERS = ["Together", "Low first", "High first", "Outside in", "Random"]
 STAGGERS = [0, 0.5, 1, 2, 3, 5, 8]
-CHORD_TIMES = [1, 2, 4, 6, 8, 12, 20, 30, 60]
+CHORD_TIMES = [0.25, 0.4, 0.6, 1, 2, 4, 6, 8, 12, 20, 30, 60]
+PROG_TIMES = [1, 2, 3, 4, 6, 8, 12, 16]
+ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"]
 BEND_RANGES = [1, 2, 3, 5, 7, 12, 24]                   # semitones at full stick
 SNAPS = ["Scale", "Semitone", "Free"]                    # where a bent voice settles when you let go
 
@@ -65,7 +68,8 @@ def amb_bank():
     """The sounds a voice can be: sustaining drones and pads first, struck and
     plucked ones (for the melodic voices) after."""
     out = list(synth.DRONE_PATCHES)
-    for n in ("Bowed String", "Bowed Glass", "Blown Pipe", "Vowel Choir", "Juno Strings", "Poly Pad", "Organ Pipes",
+    for n in ("Supersaw", "Juno Strings", "Poly Pad", "Prophet Brass", "Bowed String", "Bowed Glass", "Blown Pipe",
+              "Vowel Choir", "Organ Pipes",
               "Folded Sine", "Bell Bowl", "Marimba", "Kalimba", "Plucked String", "Twin Strings"):
         try:
             out.append(_find(synth.MACRO_PATCHES, n))
@@ -116,7 +120,11 @@ class AmbientMixin:
             m["next"] = 0.0
         self.ascenes = st.get("scenes") or [None] * 6
         self.amorph = st.get("morph", 8)
-        self.achord = dict({"type": 2, "path": 2, "time": 8, "stagger": 1, "order": 1}, **(st.get("chord") or {}))
+        self.achord = dict({"type": 2, "path": 2, "time": 8, "stagger": 1, "order": 1, "root": True},
+                           **(st.get("chord") or {}))
+        # a chord progression that steps by itself: every voice glides into each chord
+        self.aprog = dict({"steps": [5, 0, 4, 3, None, None, None, None], "time": 4}, **(st.get("prog") or {}))
+        self.aprog.update(run=False, i=-1, next=0.0)
         self.r2_used = False
         self.aexp = {}            # voices held for expression: i -> {"bend", "press", "moved", "was_on", "sent"}
         self.aexpr = dict({"range": 7, "snap": 0}, **(st.get("expr") or {}))
@@ -134,7 +142,8 @@ class AmbientMixin:
         keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
         return {"voices": [{k: v[k] for k in keys} for v in self.av],
                 "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
-                "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord, "expr": self.aexpr}
+                "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord, "expr": self.aexpr,
+                "prog": {"steps": self.aprog["steps"], "time": self.aprog["time"]}}
 
     # ------------------------------------------------------------ talking to the engine
     def amb_patch(self, i):
@@ -231,6 +240,10 @@ class AmbientMixin:
             if "R2" in held and i < 6:
                 self.r2_used = True
                 self.amb_chord(i)                       # R2 + a drone button: glide into a chord on that degree
+                return True
+            if "R2" in held and name == "A":
+                self.r2_used = True
+                self.amb_prog_toggle()                  # R2 + A: the progression runs (or stops)
                 return True
             if "R1" in held and i < 6:
                 self.amb_recall(i)
@@ -414,10 +427,17 @@ class AmbientMixin:
             pcs = {(root + s) % 12 for s in steps}
         cand = [n for n in range(24, 97) if n % 12 in pcs]
         cur = sorted(((self.aui[i]["cur"] or self.av[i]["note"] * 100.0) / 100.0, i) for i in on)
-        # each voice, low to high, takes the nearest chord tone above the one below it,
-        # preferring chord tones not used yet so the chord is complete
+        # the lowest voice takes the root (as a bass would), then each voice, low to high,
+        # takes the nearest chord tone above the one below it, preferring tones not used
+        # yet so the chord is complete
         best, used, prev = [], set(), 0
-        for c, _ in cur:
+        rest = cur
+        if self.achord.get("root") and len(cur) > 1:
+            root_pc = (self.key + sc[deg % 7]) % 12
+            c0 = cur[0][0]
+            b = min((n for n in range(24, 97) if n % 12 == root_pc), key=lambda n: abs(n - c0))
+            best, used, prev, rest = [b], {root_pc}, b, cur[1:]
+        for c, _ in rest:
             opts = [n for n in cand if n > prev] or [cand[-1]]
             n = min(opts, key=lambda n: abs(n - c) + (2.5 if n % 12 in used and len(used) < len(pcs) else 0))
             best.append(n)
@@ -427,6 +447,16 @@ class AmbientMixin:
         roman = ["I", "II", "III", "IV", "V", "VI", "VII"][deg % 7]
         self.amb_glide_all(moves, "%s %s   %s PATH   %ds" % (roman, name.upper(),
                                                             PATHS[self.achord["path"]].upper(), self.achord["time"]))
+
+    def amb_prog_toggle(self):
+        p = self.aprog
+        if not any(s is not None for s in p["steps"]):
+            self.flash("THE PROGRESSION IS EMPTY   SETTINGS > CHORDS")
+            return
+        p["run"] = not p["run"]
+        p["i"], p["next"] = -1, 0.0
+        steps = "  ".join(ROMAN[s % 7] for s in p["steps"] if s is not None)
+        self.flash(("PROGRESSION  %s   every %gs" % (steps, p["time"])) if p["run"] else "PROGRESSION STOPPED")
 
     def amb_evolve(self):
         """Every sounding drone glides to a nearby note of the scale: the slow
@@ -454,6 +484,16 @@ class AmbientMixin:
     def amb_tick(self, now):
         dt = min(0.25, now - self.alast)
         self.alast = now
+        # the progression steps through its chords
+        pr = self.aprog
+        if pr["run"] and now >= pr["next"]:
+            for _ in range(8):
+                pr["i"] = (pr["i"] + 1) % 8
+                if pr["steps"][pr["i"]] is not None:
+                    break
+            pr["next"] = now + float(pr["time"])
+            if pr["steps"][pr["i"]] is not None:
+                self.amb_chord(pr["steps"][pr["i"]])
         # the melodic voices step through their notes
         for j, m in enumerate(self.amel):
             i = 6 + j
@@ -532,9 +572,14 @@ class AmbientMixin:
             ch = self.achord
             return [("Bend range", "%d semitones" % self.aexpr["range"]), ("Bend settles on", SNAPS[self.aexpr["snap"]]),
                     ("Chord", CHORDS[ch["type"] % len(CHORDS)][0]), ("Path", PATHS[ch["path"]]),
-                    ("Glide time", "%d s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
+                    ("Glide time", "%g s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
                     ("Order", ORDERS[ch["order"]]),
-                    ("Play", "R2 + ^ > v < X Y = degree I to VI"), ("Evolve", "tap R2")]
+                    ("Bass on root", "On" if ch.get("root") else "Off"),
+                    ("Play", "R2 + ^ > v < X Y = degree I to VI"), ("Evolve", "tap R2"),
+                    ("Progression", ("running   R2+A stops" if self.aprog["run"] else "stopped   R2+A runs it")),
+                    ("Chord time", "%g s each" % self.aprog["time"])] + [
+                ("Chord %d" % (s + 1), "-" if self.aprog["steps"][s] is None else ROMAN[self.aprog["steps"][s] % 7])
+                for s in range(8)]
         if pg == "Melody":
             j = max(0, self.asel - 6) if self.asel >= 6 else getattr(self, "amel_sel", 0)
             self.amel_sel = j
@@ -640,6 +685,17 @@ class AmbientMixin:
                 ch["stagger"] = self._amb_step(STAGGERS, ch["stagger"], d)
             elif name == "Order":
                 ch["order"] = (ch["order"] + d) % len(ORDERS)
+            elif name == "Bass on root":
+                ch["root"] = not ch.get("root")
+            elif name == "Progression":
+                self.amb_prog_toggle()
+            elif name == "Chord time":
+                self.aprog["time"] = self._amb_step(PROG_TIMES, self.aprog["time"], d)
+            elif name.startswith("Chord ") and name[6:].isdigit():
+                s = int(name[6:]) - 1
+                opts = [None] + list(range(7))
+                cur = self.aprog["steps"][s]
+                self.aprog["steps"][s] = opts[(opts.index(cur) + d) % len(opts)]
             return
         if pg == "Scenes" and name == "Morph time":
             self.amorph = self._amb_step(MORPHS, self.amorph, d)
@@ -649,6 +705,8 @@ class AmbientMixin:
             self.amb_toggle(self.asel)
         elif pg == "Melody" and name == "Melody":
             self.amb_toggle(6 + getattr(self, "amel_sel", 0))
+        elif pg == "Chords" and name == "Progression":
+            self.amb_prog_toggle()
         elif pg == "Scenes" and name.startswith("Scene "):
             self.menu = False
             self.amb_recall(int(name.split()[1]) - 1)
@@ -758,6 +816,16 @@ class AmbientMixin:
             pygame.draw.rect(c, mm.BG, (r.x + 8, r.bottom - 9, tw - 16, 4), border_radius=2)
             if bw:
                 pygame.draw.rect(c, col, (r.x + 8, r.bottom - 9, bw, 4), border_radius=2)
+        # the progression: its chords along the bottom of the graph, the current one lit
+        pr = self.aprog
+        if pr["run"]:
+            xx = gx0 + 100
+            for s, deg in enumerate(pr["steps"]):
+                if deg is None:
+                    continue
+                lab = ROMAN[deg % 7]
+                r = self.text(c, lab, self.f_small, mm.ACCENT if s == pr["i"] else mm.DIM, (xx, gy1 - 16))
+                xx = r.right + 10
         # scenes: six dots under the graph
         for s in range(6):
             sx = gx0 + s * 14
