@@ -448,6 +448,35 @@ class AmbientMixin:
         self.amb_glide_all(moves, "%s %s   %s PATH   %ds" % (roman, name.upper(),
                                                             PATHS[self.achord["path"]].upper(), self.achord["time"]))
 
+    def amb_starter(self):
+        """Glide Chords: five bright saw voices sliding through vi, I, V, IV in your
+        key, a chord every four seconds, every voice gliding at once."""
+        names = [p["name"] for p in self.amb_sounds]
+
+        def ix(n):
+            return names.index(n) if n in names else 0
+        sc = M().SCALES[self.scale]
+        k = self.key
+        start = [12 * 3 + k + sc[5], 12 * 4 + k, 12 * 4 + k + sc[2], 12 * 5 + k, 12 * 5 + k + sc[2]]   # vi in five voices
+        snds = ["Juno Strings", "Supersaw", "Juno Strings", "Supersaw", "Juno Strings"]
+        pans = [0.0, -0.5, 0.5, -0.25, 0.25]
+        for i in range(6):
+            v = self.av[i]
+            if v["on"] and i >= 5:
+                self.amb_toggle(i)
+            if i >= 5:
+                continue
+            v.update(snd=ix(snds[i]), note=start[i], cents=0, level=0.65 if i == 0 else 0.5, pan=pans[i], glide=0.4,
+                     fade=0.8, vib=3, rate=0.3, trem=0.0, drift=3, base=None)
+            if not v["on"]:
+                v["on"] = True
+            self.amb_render(i)
+            self.amb_push(i, jump=True)
+        self.achord.update(type=0, path=1, time=0.4, stagger=0, order=0, root=True)
+        self.aprog.update(steps=[5, 0, 4, 3, None, None, None, None], time=4, run=False)
+        self.amb_prog_toggle()
+        self.flash("GLIDE CHORDS   vi  I  V  IV   R2+A STOPS IT")
+
     def amb_prog_toggle(self):
         p = self.aprog
         if not any(s is not None for s in p["steps"]):
@@ -595,7 +624,7 @@ class AmbientMixin:
             rows.append(("Glide", ("%g s" % self.av[6 + j]["glide"]) if self.av[6 + j]["glide"] else "Off"))
             return rows
         if pg == "Scenes":
-            rows = [("Morph time", "%d s" % self.amorph)]
+            rows = [("Starter", "Glide Chords   A loads it"), ("Morph time", "%d s" % self.amorph)]
             for s in range(6):
                 sc = self.ascenes[s] if s < len(self.ascenes) else None
                 rows.append(("Scene %d  %s" % (s + 1, GLYPH[DRONE_BTNS[s]]),
@@ -707,6 +736,9 @@ class AmbientMixin:
             self.amb_toggle(6 + getattr(self, "amel_sel", 0))
         elif pg == "Chords" and name == "Progression":
             self.amb_prog_toggle()
+        elif pg == "Scenes" and name == "Starter":
+            self.menu = False
+            self.amb_starter()
         elif pg == "Scenes" and name.startswith("Scene "):
             self.menu = False
             self.amb_recall(int(name.split()[1]) - 1)
