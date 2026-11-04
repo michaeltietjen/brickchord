@@ -46,6 +46,7 @@ def offline(data):
             e.c_lp("mix", p, k, {"vol": t["vol"], "pan": t["pan"], "rs": t["rs"], "ds": t["ds"],
                                  "bus": t.get("bus", 0), "mute": t["mute"]})
             e.c_lp("fx", p, k, {n: tuple(v) for n, v in t["rack"].items()}, tuple(t["flt"]))
+            e.c_lp("locks", p, k, t.get("locks") or {})
     evs = [[t.get("ev") or [] for t in pd["tracks"]] for pd in data["pats"]]
     for p in range(len(evs)):
         if any(evs[p]):

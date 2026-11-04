@@ -189,6 +189,10 @@ def acid_room():
     pad = drone(k, s, 0, 31.5, octave=3)
     t_drum = drum_track("909")
     t_acid = synth_track("bass", "Acid Bass", vol=0.75, rs=0.05, ds=0.15, fx=rack(Drive=0.4))
+    # the 303 part: slides into the off-beat notes, and the filter opening up across each bar
+    t_acid["locks"] = {str(st): {"slide": True} for st in (2, 7, 13, 15, 18, 23, 29, 31)}
+    for st, f in ((0, 0.6), (4, 0.45), (8, 0.3), (12, 0.15), (16, 0.55), (20, 0.4), (24, 0.25), (28, 0.1)):
+        t_acid["locks"].setdefault(str(st), {})["flt"] = [f, 0.5]
     t_stab = synth_track("lead", "Sync Lead", vol=0.5, rs=0.3, ds=0.4, bus=1, fx=rack(Gate=(0.6, 0)))
     t_pad = synth_track("drone", "Dark Pad", vol=0.4, rs=0.5, bus=1, fx=rack(Filter_LFO=(0.6, 5)))
     a = [with_ev(t_drum, drums), with_ev(t_acid, acid), dict(t_stab, ev=[]), with_ev(t_pad, pad), empty(), empty()]
@@ -281,6 +285,7 @@ def analog_drift():
         dr += [[float(n * 8), "n", m, 0.8, 0.0, 7.8, 1.5] for m in (degree(k, s, dg, 2), degree(k, s, dg + 4, 2))]
     t_drum = dict(drum_track("Classic", swing=0.12, human=0.2), vol=0.6)
     t_bass = synth_track("bass", "Moog Bass", vol=0.95, rs=0.05, fx=rack(Drive=0.3))
+    t_bass["locks"] = {str(st): {"slide": True} for st in (6, 14, 22, 30)}
     t_lead = synth_track("lead", "Brass Lead", vol=0.75, pan=-0.1, rs=0.35, ds=0.3, bus=1, fx=rack(Vibrato=(0.2, 0)))
     t_drone = synth_track("drone", "Shimmer", vol=0.6, rs=0.55, bus=1, fx=rack(Filter_LFO=(0.5, 6), Wide=0.6))
     t_choir = sample_track("drift_choir.wav", vol=0.55, rs=0.5, ds=0.2, bus=1, fx=rack(Chorus=0.4),

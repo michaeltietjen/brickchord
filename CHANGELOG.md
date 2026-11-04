@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased: modes, engines, effects rack, Bricklab
+- Parameter locks and slide (Bricklab): on the GRID page, hold L2 on a step: L2+UP/DOWN locks that step's filter cutoff, L2+LEFT/RIGHT sets its velocity, L2+A turns slide on, L2+B clears the step's locks. A track with any slide steps plays mono like a 303: a slide step glides the sounding note to the new pitch, and the note before it holds into the slide. Locked steps show a dot (filter) and a slash (slide). Acid Room and Analog Drift now use slides and filter locks.
+- Settings has a Songs tab (Bricklab) with Song and Demo song, so Global is back to settings.
 - Mixer (Bricklab): a MIX page in Song mode (L1/R1 to it) with the six tracks of the playing pattern as faders. LEFT/RIGHT picks a track, UP/DOWN sets its level, Y+LEFT/RIGHT pans, A mutes, X solos (X again restores the mutes), B copies every track's level and pan to all patterns.
 - Slice mode (Bricklab): Settings > Sample > Slices (Off, 8, 16, 32) cuts the sample into equal slices; the buttons and the grid play one slice each at its own pitch. Slice to grid fills the pattern with one step per slice, so a loop recorded at any BPM plays in time with the song.
 - First launch (Bricklab): a welcome screen with the five controls that matter, A to load Analog Drift into an empty song and play it, B to start empty.

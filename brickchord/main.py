@@ -65,7 +65,8 @@ DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0),
                ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
 # Settings pages (L1/R1 flips between them). Drums is Bricklab only.
 MENU_PAGES = {
-    "Global": ["Song", "Demo song", "Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome",
+    "Songs": ["Song", "Demo song"],
+    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome",
                "Click sound",
                "Click level",
                "Volume", "Latency",
@@ -1007,7 +1008,7 @@ class App(modes.ModesMixin):
 
     # ---------------- menu
     def menu_pages(self):
-        out = [n for n in MENU_PAGES if n not in ("Drums", "Sample") or edition.LAB]
+        out = [n for n in MENU_PAGES if n not in ("Drums", "Sample", "Songs") or edition.LAB]
         if edition.LAB and self.machine != "sample" and "Sample" in out:
             out.remove("Sample")
         return out

@@ -64,6 +64,8 @@ class _Track:
         self.mute = False
         self.vol, self.pan, self.rs, self.ds = 0.85, 0.0, 0.25, 0.0
         self.bus = 0             # which send bus (A or B) this track's reverb and delay go to
+        self.locks = {}          # step -> {"flt": (cutoff, res), "slide": True}: parameter locks
+        self.lock_flt = False    # a filter lock is holding the chain's filter right now
         self.ch = chain
         self.idle = 99
         # drum track (Bricklab track 1): kit name, per-lane [level, mute, tune], swing 0..0.5 of
@@ -140,6 +142,8 @@ class Engine:
         self.drone_xy = (0.0, 0.0) # left stick in Drone mode: x = thin/shimmer, y = pulse/swell
         self.drone_slide = 0.0     # seconds; > 0 and the drone glides to a new degree instead of restriking
         self.dvoices = []          # sliding drone voices (lead-style, pitch-shifted on the fly)
+        self.gvoices = []          # sequenced slide voices: a track with slide locks plays mono and glides
+        self.slide_time = 0.09     # seconds a slide step takes to reach its note
         self.drone_ph = 0.0
         # patterns and songs (see the section below)
         self.pats = []
@@ -1044,6 +1048,9 @@ class Engine:
         for v in self.voices:
             if v.tag == "loop" and v.trk == key and (v.rel_at is None or v.rel_at > at):
                 v.rel_at, v.rel_len = at, int(fade * self.sr)
+        for v in self.gvoices:
+            if v.trk == key:
+                v.rel_at, v.rel_n, v.pend = at, int(fade * self.sr) or 64, None
 
     def _start_transport(self, row=None):
         step = self._step_len()
@@ -1125,6 +1132,7 @@ class Engine:
                 for f in DRUM_ATTRS:
                     setattr(td, f, getattr(ts, f))
                 td.lanes = {n: list(v) for n, v in ts.lanes.items()}
+                td.locks = {st: dict(v) for st, v in ts.locks.items()}
                 td.ch.rack = dict(ts.ch.rack)
                 td.ch.flt_base = ts.ch.flt_base
                 self._apply_flt(td.ch, False)
@@ -1143,6 +1151,8 @@ class Engine:
                 for v in self.voices:
                     if v.tag == "loop" and (v.rel_at is None or v.rel_at > self.t):
                         v.rel_at, v.rel_len = self.t, int(0.03 * self.sr)
+                for v in self.gvoices:
+                    v.rel_at, v.rel_n, v.pend = self.t, int(0.03 * self.sr), None
             self.lp_ver += 1
         elif op == "song":
             self.song = [[int(r[0]) % NPATS, max(1, int(r[1]))] for r in a[0]] or [[0, 1]]
@@ -1174,6 +1184,9 @@ class Engine:
             else:
                 tr.snd.update(snd)
             self._bump(p)
+        elif op == "locks":                   # (p, k, {step: {"flt": (f, r), "slide": bool}})
+            tr = self.pats[int(a[0])].tracks[int(a[1])]
+            tr.locks = {int(st): dict(v) for st, v in (a[2] or {}).items() if v}
         elif op == "load":
             p, n, tracks = int(a[0]), int(a[1]), a[2]
             pat = self.pats[p]
@@ -1253,6 +1266,11 @@ class Engine:
                 tr.ev = [e for e in tr.ev if not any(e is h for h in hit)]
             else:
                 tr.ev.append([float(step), "d", part, float(a[2]), float(a[3]), None, 0.02, False])
+        elif what == "nvel":                 # note velocity on a step: (step, delta)
+            step, dl = int(a[0]), float(a[1])
+            for e in tr.ev:
+                if e[1] in ("n", "b") and int(round(e[0])) % pat.len == step:
+                    e[3] = round(max(0.1, min(1.2, e[3] + dl)), 2)
         elif what == "dvel":                 # set a drum step's level: (step, part, gain)
             step, part = int(a[0]), a[1]
             for e in tr.ev:
@@ -1319,6 +1337,14 @@ class Engine:
         self._nocap = True
         try:
             for k, tr in enumerate(self.pats[p].tracks):
+                lk = tr.locks.get(pos) if tr.locks else None
+                if lk and lk.get("flt") is not None:
+                    tr.ch.flt_t = (round(float(lk["flt"][0]), 2), round(float(lk["flt"][1]), 2))
+                    tr.lock_flt = True
+                elif tr.lock_flt:
+                    fu = tr.ch.flt_user
+                    tr.ch.flt_t = (round(fu[0], 2), round(fu[1], 2))
+                    tr.lock_flt = False
                 evs = tr.by.get(pos)
                 if not evs:
                     continue
@@ -1331,8 +1357,90 @@ class Engine:
         finally:
             self._nocap = False
 
+    def _glide_play(self, key, tr, ident, snd, gain, pan, dur, rel, start, step, slide, pos=0.0):
+        """A track with slide locks plays mono: a slide step glides the sounding
+        voice to the new note (303 style); any other step starts a fresh voice.
+        A note followed by a slide step holds until that step, so it can glide."""
+        cur = next((v for v in self.gvoices if v.trk == key and not v.rel), None)
+        end = int(start + (dur if dur else 1.0) * step)
+        L = max(1, self.pats[key[0]].len)
+        later = sorted(((e[0] - pos) % L, e[0]) for e in tr.ev if e[1] == "n" and (e[0] - pos) % L > 0.01)
+        if later:
+            gap, nxt = later[0]
+            if tr.locks.get(int(round(nxt)) % L, {}).get("slide"):
+                end = max(end, int(start + gap * step) + 256)
+        if cur is not None and slide:
+            cur.pend = (int(start), ident, self.slide_time, end)
+            cur.end_at = max(cur.end_at, int(start) + 64)
+            return
+        if cur is not None:
+            cur.rel_at = int(start)
+        v = self._Lead()
+        v.trk = key
+        v.a, v.l = snd
+        v.base = v.target = ident
+        v.ratio, v.glide, v.pos, v.env = 1.0, 0.0, 0.0, 0.0
+        v.rel, v.rel_n, v.rel_at = False, max(64, int(rel * self.sr)), None
+        v.start, v.end_at, v.pend = int(start), end, None
+        v.gain = gain
+        v.lg, v.rg = min(1.0, 1.0 - pan), min(1.0, 1.0 + pan)
+        self.gvoices.append(v)
+
+    def _glide_render(self, tb, N, sr):
+        T0 = self.t
+        keep = []
+        for v in self.gvoices:
+            b = tb.get(v.trk)
+            if b is None:
+                b = tb[v.trk] = np.zeros((N, 2), np.float32)
+            if v.start >= T0 + N:
+                keep.append(v)
+                continue
+            if v.pend is not None and v.pend[0] < T0 + N:
+                _, tgt, gl, end = v.pend
+                v.target, v.glide, v.end_at, v.pend = tgt, gl, end, None
+            if not v.rel and ((v.rel_at is not None and v.rel_at < T0 + N) or
+                              (v.pend is None and v.end_at < T0 + N)):
+                v.rel = True
+            off = max(0, v.start - T0)
+            n = N - off
+            i = np.arange(n, dtype=np.float64)
+            rt = 2.0 ** ((v.target - v.base) / 12.0)
+            if v.glide > 0.005 and abs(v.ratio - rt) > 1e-5:
+                cc = math.exp(-1.0 / (v.glide * 0.35 * sr))
+                r = rt + (v.ratio - rt) * cc ** (i + 1)
+            else:
+                r = np.full(n, rt)
+            v.ratio = float(r[-1])
+            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
+            v.pos = float(pos[-1] + r[-1])
+            i0 = pos.astype(np.int64)
+            fr = (pos - i0).astype(np.float32)[:, None]
+            seg = self._lead_fetch(v, i0) * (1 - fr) + self._lead_fetch(v, i0 + 1) * fr
+            if v.rel:
+                env = v.env - np.arange(1, n + 1, dtype=np.float32) / v.rel_n
+            else:
+                env = v.env + np.arange(1, n + 1, dtype=np.float32) / 64.0
+            env = np.clip(env, 0, 1)
+            v.env = float(env[-1])
+            seg *= (env * v.gain)[:, None]
+            seg[:, 0] *= v.lg
+            seg[:, 1] *= v.rg
+            b[off:] += seg
+            if not (v.rel and v.env <= 0.0) and v.pos < len(v.a) + (1e12 if v.l is not None else 0):
+                keep.append(v)
+        self.gvoices = keep
+
     def _lp_play(self, key, tr, ev, start, step):
         pos, kind, ident, gain, pan, dur, rel = ev[:7]
+        if kind == "n" and tr.locks and any(l.get("slide") for l in tr.locks.values()):
+            snd = tr.snd.get(ident)
+            if snd is not None:
+                st = int(round(pos)) % max(1, self.pats[key[0]].len)
+                slide = bool(tr.locks.get(st, {}).get("slide"))
+                self._glide_play(key, tr, ident, snd, gain, max(-1.0, min(1.0, pan)), dur, rel, start, step, slide,
+                                 pos)
+                return
         if kind == "n":
             snd = tr.snd.get(ident)
         elif kind == "b":
@@ -1722,6 +1830,8 @@ class Engine:
                 self._lead_render(b, N, sr)
             else:
                 self._lead_render(mix, N, sr)
+        if self.gvoices:
+            self._glide_render(tb, N, sr)
         if self.dvoices:
             if self.route and not self._seltr().drum:
                 key = (self.cur, self.sel)

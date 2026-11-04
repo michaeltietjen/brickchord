@@ -77,7 +77,7 @@ def new_drum():
 
 
 def new_track(k=1):
-    t = {"machine": "drums" if k == DT else "chord", "smp": {},
+    t = {"machine": "drums" if k == DT else "chord", "smp": {}, "locks": {},
          "name": None, "patch": None, "tone": 0.0, "res": 0.0, "pj": None, "vol": 0.85, "pan": 0.0,
          "rs": 0.25, "ds": 0.0, "bus": 0, "mute": False,
          "rack": {n: [False, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]] for n in FX_ORDER},
@@ -110,6 +110,7 @@ def copy_track(m):
     t = dict(m)
     t["rack"] = {k: list(v) for k, v in m["rack"].items()}
     t["flt"] = list(m["flt"])
+    t["locks"] = {st: dict(v) for st, v in (m.get("locks") or {}).items()}
     if "drum" in m:
         t["drum"] = fix_drum(m["drum"])
     return t
@@ -350,6 +351,47 @@ class SongMixin:
                                           "bus": m.get("bus", 0), "mute": m["mute"]})
         self.eng.post("lp", "fx", p, k, {n: tuple(v) for n, v in m["rack"].items() if n != "Glide"},
                       tuple(m["flt"]))
+        self.eng.post("lp", "locks", p, k, m.get("locks") or {})
+
+    def step_lock(self, p, k, x, name):
+        """L2 held on the grid: parameter locks on the step under the cursor.
+        L2+UP/DOWN filter cutoff, L2+LEFT/RIGHT velocity, L2+A slide, L2+B clears."""
+        m = self.pm[p][k]
+        locks = m.setdefault("locks", {})
+        lk = locks.setdefault(str(x), {})
+        msg = None
+        if name in ("UP", "DOWN"):
+            f, r = lk.get("flt") or (m["flt"][0], m["flt"][1])
+            f = round(max(0.0, min(1.0, f + (0.1 if name == "UP" else -0.1))), 2)
+            lk["flt"] = [f, r if r else 0.2]
+            msg = "STEP %d FILTER %d%%" % (x + 1, round(f * 100))
+        elif name in ("LEFT", "RIGHT"):
+            if self.is_drum(k):
+                return False
+            self.eng.post("lp", "ed", "nvel", p, k, x, 0.1 if name == "RIGHT" else -0.1)
+            here = self.grid_events(self.lp_e(), x)
+            g = max((ev[3] for ev in here), default=0.9) + (0.1 if name == "RIGHT" else -0.1)
+            msg = "STEP %d VELOCITY %d%%" % (x + 1, round(max(0.1, min(1.2, g)) * 100))
+            self.grid_preview(here, 0)
+        elif name == "A":
+            if self.is_drum(k):
+                return False
+            lk["slide"] = not lk.get("slide")
+            if not lk["slide"]:
+                lk.pop("slide")
+            msg = "STEP %d SLIDE %s" % (x + 1, "ON" if lk.get("slide") else "OFF")
+        elif name == "B":
+            locks.pop(str(x), None)
+            msg = "STEP %d LOCKS CLEARED" % (x + 1)
+        else:
+            return False
+        if str(x) in locks and not locks[str(x)]:
+            locks.pop(str(x))
+        self.eng.post("lp", "locks", p, k, locks)
+        self.lp_dirty = True
+        if msg:
+            self.flash(msg)
+        return True
 
     def lp_resolve(self, p, k, replace=False):
         pj = self.pm[p][k]["pj"]
@@ -822,6 +864,10 @@ class SongMixin:
         return [ev for ev in e.pats[e.cur].tracks[self.lp_sel].ev if int(ev[0]) == step]
 
     def input_grid(self, name, e, y):
+        if "L2" in self.inp.held and name in ("UP", "DOWN", "LEFT", "RIGHT", "A", "B"):
+            x = self.grid_x % e.pats[e.cur].len
+            if self.step_lock(e.cur, self.lp_sel, x, name):
+                return True
         if self.is_drum(self.lp_sel):
             return self.input_drums(name, e, y)
         p, k = e.cur, self.lp_sel
@@ -1565,7 +1611,7 @@ class SongMixin:
         if pg == "grid" and self.is_drum(self.lp_sel):
             return "A step  B accent/ghost  X beat  Y+X kit  Y+^v lane level  Y+A mute  Y+B clear  Y+<> swing"
         if pg == "grid":
-            return "A add  B del  UP/DOWN pitch  X quantize  Y+<> length  Y+A kick  L1/R1 page"
+            return "A add  B del  ^v pitch  Y+<> length  X quantize   L2+: ^v filter  <> velocity  A slide  B clear"
         if pg == "song":
             return "<> pattern  X repeats  A add  B del  Y song on/off  START play  L1/R1 page"
         if pg == "mix":
@@ -1758,15 +1804,25 @@ class SongMixin:
             r = pygame.Rect(int(20 + i * cw), ty, int(cw) - 3, th)
             base = mm.PANEL if (i // 4) % 2 == 0 else self.mix(mm.PANEL, mm.BG, 0.45)
             pygame.draw.rect(c, col if here else base, r, border_radius=4)
+            lk = (self.pm[p][k].get("locks") or {}).get(str(s))
+            if lk:
+                if lk.get("flt") is not None:
+                    pygame.draw.circle(c, mm.BG, (r.right - 7, r.top + 7), 5)
+                    pygame.draw.circle(c, mm.INK, (r.right - 7, r.top + 7), 3)
+                if lk.get("slide"):
+                    pygame.draw.line(c, mm.INK, (r.left + 4, r.bottom - 5), (r.right - 4, r.top + 5), 2)
             if s == x:
                 pygame.draw.rect(c, mm.INK, r.inflate(4, 4), 2, border_radius=5)
             if here and th > 20:
                 lab = DRUM_ABBR.get(here[0][2], "?") if here[0][1] == "d" else M().NOTE_NAMES[min(ev[2] for ev in here) % 12]
                 self.text(c, lab, self.f_small, mm.BG, r.center, center=True)
         here = [ev for ev in tr.ev if int(ev[0]) == x]
+        lk = (self.pm[p][k].get("locks") or {}).get(str(x)) or {}
+        lt = (("   filter %d%%" % round(lk["flt"][0] * 100)) if lk.get("flt") else "") + ("   SLIDE" if lk.get("slide") else "")
         if here:
             ns = sorted(set(note_name(ev[2]) if ev[1] != "d" else ev[2].upper() for ev in here))
-            info = "step %d:  %s   len %.1f" % (x + 1, " ".join(ns[:6]), max((ev[5] or 0) for ev in here))
+            info = "step %d:  %s   len %.1f   vel %d%%%s" % (x + 1, " ".join(ns[:6]), max((ev[5] or 0) for ev in here),
+                                                           round(max(ev[3] for ev in here) * 100), lt)
         else:
             info = "step %d: empty   A adds a copy of the last trig" % (x + 1)
         self.text(c, info, self.f_small, mm.INK, (20, ty + th + 8))
