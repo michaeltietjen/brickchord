@@ -30,7 +30,7 @@ FX_DEFAULTS = {"Drive": (0.4, 3), "Lo-fi": (0.4, 3), "Chorus": (0.5, 5), "Flange
                "Vibrato": (0.3, 0), "Tremolo": (0.5, 1), "Gate": (0.7, 0), "Auto-Pan": (0.6, 4),
                "Wide": (0.6, 3), "Filter LFO": (0.6, 5), "Cloud": (0.5, 2), "Glide": (0.3, 0)}
 TFX_ROWS = ["Machine", "Sound", "Level", "Pan", "Mute", "Reverb", "Delay", "FX bus", "Cutoff", "Resonance"] + FX_ORDER
-TFX_SECTION = {"Machine": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "LIVE FILTER", "Drive": "EFFECTS"}
+TFX_SECTION = {"Machine": "SOUND", "Level": "MIX", "Reverb": "SENDS", "Cutoff": "FILTER", "Drive": "EFFECTS"}
 NO_RATE = ("Drive", "Lo-fi", "Wide")
 TRACK_COLS = [(255, 140, 66), (110, 200, 190), (255, 200, 90), (190, 140, 255), (120, 200, 110), (255, 120, 160)]
 DRUM_ROW = {"kick": 0.85, "snare": 0.6, "clap": 0.55, "tom": 0.7, "rim": 0.45, "hat": 0.25, "ohat": 0.2, "shk": 0.35}
@@ -1670,6 +1670,44 @@ class SongMixin:
             self.song_save()
 
     # ------------------------------------------------------------ drawing
+    def draw_lab_header(self, c, now):
+        """Bricklab's header, centre and right: six layer lamps (REC beside them
+        while recording), then pattern, track, key and tempo."""
+        mm = M()
+        e = self.lp_e()
+        if e is None:
+            return
+        n, w, g = NT, 16, 6
+        x0 = mm.BASE_W // 2 - (n * w + (n - 1) * g) // 2
+        for k in range(n):
+            tr = e.pats[e.cur].tracks[k]
+            m = self.pm[e.cur][k]
+            recording = e.lp_state and e.lp_rec == k
+            if recording:
+                colr = REC if (e.lp_state == "rec" or int(now * 3) % 2 == 0) else mm.PANEL
+            elif tr.ev:
+                colr = mm.DIM if m["mute"] else TRACK_COLS[k % len(TRACK_COLS)]
+            else:
+                colr = mm.BG
+            r = pygame.Rect(x0 + k * (w + g), 11, w, w)
+            pygame.draw.rect(c, colr, r, border_radius=4)
+            if colr == mm.BG:
+                pygame.draw.rect(c, self.mix(mm.BG, mm.DIM, 0.6), r, 1, border_radius=4)
+            if k == self.lp_sel:
+                pygame.draw.rect(c, mm.INK, r.inflate(4, 4), 1, border_radius=5)
+            if m["mute"] and tr.ev:
+                pygame.draw.line(c, mm.BG, (r.left + 3, r.centery), (r.right - 3, r.centery), 2)
+        if e.lp_state:
+            t = "COUNT" if e.lp_state == "count" else "REC"
+            rx = x0 + n * (w + g) + 4
+            pygame.draw.circle(c, REC, (rx + 5, 19), 5)
+            self.text(c, t, self.f_small, REC, (rx + 14, 12))
+        pos = ("%d/%d  " % (e.song_row + 1, len(self.song_rows)) if (e.lp_on and e.song_on) else "") + \
+              "P%02d  T%d" % (e.cur + 1, self.lp_sel + 1)
+        info = "%s %s   %d BPM" % (mm.NOTE_NAMES[self.key], self.scale, self.bpm)
+        r = self.text(c, info, self.f_small, mm.INK, (mm.BASE_W - 14, 12), right=True)
+        self.text(c, pos, self.f_small, mm.ACCENT if e.lp_on else mm.DIM, (r.left - 14, 12), right=True)
+
     def song_chip(self, c, x, y):
         mm = M()
         e = self.lp_e()
@@ -1946,88 +1984,111 @@ class SongMixin:
                 self.text(c, "%d/%d" % (e.song_rep + 1, reps), self.f_small, mm.ACCENT, (mm.BASE_W - 30, y + 4), right=True)
 
     def draw_track_fx(self, c, e):
+        """The track page: one card per section (Sound, Mix, Sends, Filter, Effects),
+        the selected row lit, scrolling to keep it in view."""
         mm = M()
         p, k = e.cur, self.lp_sel
         m = self.pm[p][k]
         top = 46
         bottom = mm.L["tiles_y"] + mm.L["tile_h"]
         col = TRACK_COLS[k % len(TRACK_COLS)]
-        nm = ("Drums  " + m["drum"]["kit"]) if self.is_drum(k) else (m["name"] or self.bank[self.patch]["name"])
-        self.text(c, "P%02d  TRACK %d" % (p + 1, k + 1), self.f_med, col, (20, top))
-        self.text(c, nm, self.f_med, mm.INK, (210, top))
+        nm = (m["drum"]["kit"] + " kit") if self.is_drum(k) else (m["name"] or self.bank[self.patch]["name"])
+        mc = "Drums" if self.is_drum(k) else synth.MACHINE_NAME.get(m.get("machine", "chord"), "")
+        # title: a track-colour badge, the machine and the sound
+        badge = pygame.Rect(16, top - 2, 44, 26)
+        pygame.draw.rect(c, col, badge, border_radius=8)
+        self.text(c, "T%d" % (k + 1), self.f_med, mm.BG, badge.center, center=True)
+        self.text(c, mc.upper(), self.f_small, col, (72, top - 1))
+        self.text(c, nm, self.f_med, mm.INK, (72, top + 11))
+        self.text(c, "P%02d" % (p + 1), self.f_small, mm.DIM, (mm.BASE_W - 20, top + 6), right=True)
         if m["mute"]:
-            self.text(c, "MUTED", self.f_small, REC, (mm.BASE_W - 28, top + 6), right=True)
-        y0 = top + 34
-        rh = 22
-        sec_h = 16
-        # rows with their section labels, laid out once so scrolling stays stable
-        lines = []
+            self.text(c, "MUTED", self.f_small, REC, (mm.BASE_W - 64, top + 6), right=True)
+        y0 = top + 38
+        rh, head, gap = 25, 22, 8
+        # sections as cards: (title, rows)
+        groups = []
         for row in TFX_ROWS:
-            if row in TFX_SECTION:
-                lines.append(("sec", TFX_SECTION[row]))
-            lines.append(("row", row))
-        heights = [sec_h if kind == "sec" else rh for kind, _ in lines]
-        ys = [0]
-        for h in heights:
-            ys.append(ys[-1] + h)
-        sel_line = next(i for i, (kind, v) in enumerate(lines) if kind == "row" and v == TFX_ROWS[self.tfx_i])
+            if row in TFX_SECTION or not groups:
+                groups.append((TFX_SECTION.get(row, ""), []))
+            groups[-1][1].append(row)
+        layout = []                                       # (kind, value, y_rel)
+        y = 0
+        for title, rows in groups:
+            layout.append(("card", (title, len(rows)), y))
+            y += head
+            for row in rows:
+                layout.append(("row", row, y))
+                y += rh
+            y += 6 + gap
+        total = y
+        sel_row = TFX_ROWS[self.tfx_i]
+        sel_y = next(yr for kind, v, yr in layout if kind == "row" and v == sel_row)
         avail = bottom - y0
-        off = max(0, min(ys[sel_line] - avail // 2, ys[-1] - avail))        # keep the selected row in view
+        off = max(0, min(sel_y - avail // 2, total - avail))
         off = int(self.sm("tfx_off", off, 24))
         nt, nd = self.nudge
         c.set_clip(pygame.Rect(0, y0, mm.BASE_W, avail))
-        for (kind, v), y_rel, h in zip(lines, ys, heights):
+        card_bg = self.mix(mm.BG, mm.PANEL, 0.75)
+        for kind, v, y_rel in layout:
             y = y0 + y_rel - off
-            if y + h < y0 or y > bottom:
+            if kind == "card":
+                title, n = v
+                h = head + n * rh + 6
+                if y + h < y0 or y > bottom:
+                    continue
+                pygame.draw.rect(c, card_bg, (12, y, mm.BASE_W - 24, h), border_radius=10)
+                self.text(c, title, self.f_small, self.mix(mm.DIM, col, 0.5), (26, y + 4))
                 continue
-            if kind == "sec":
-                self.text(c, v, self.f_small, mm.DIM, (28, y + 2))
+            if y + rh < y0 or y > bottom:
                 continue
             row = v
-            sel = row == TFX_ROWS[self.tfx_i]
+            sel = row == sel_row
             fx = row in FX_ORDER
             val = self.tfx_value(m, row)
             on = val[0] if fx else True
             if sel:
-                pygame.draw.rect(c, mm.PANEL, (14, y - 1, mm.BASE_W - 28, rh), border_radius=6)
-            self.text(c, row, self.f_small if len(row) > 9 else self.f_med,
-                      mm.ACCENT if sel else (mm.INK if on else mm.DIM), (28, y + 1))
+                pygame.draw.rect(c, mm.PANEL, (18, y, mm.BASE_W - 36, rh - 2), border_radius=7)
+                pygame.draw.rect(c, col, (18, y + 4, 3, rh - 10), border_radius=2)
+            self.text(c, row, self.f_med if len(row) <= 10 else self.f_small,
+                      mm.INK if sel else (self.mix(mm.INK, mm.DIM, 0.25) if on else mm.DIM), (30, y + 3))
             kick = int(6 * nd * (1 - self.since(nt, 0.18)) ** 2) if sel else 0
+            vy = y + 3
             if row in ("Sound", "Machine"):
                 self.text(c, ("< %s >" % val) if not (row == "Machine" and self.is_drum(k)) else val,
-                          self.f_med, mm.INK, (230 + kick, y + 1))
+                          self.f_med, mm.INK if sel else mm.DIM, (230 + kick, vy))
                 continue
             if row == "Mute":
-                pill = pygame.Rect(230, y + 3, 54, rh - 7)
+                pill = pygame.Rect(230, y + 4, 60, rh - 9)
                 pygame.draw.rect(c, REC if val else mm.BG, pill, border_radius=8)
                 self.text(c, "MUTED" if val else "on", self.f_small, mm.INK if val else mm.DIM, pill.center, center=True)
                 continue
             if row == "FX bus":
                 b = 1 if val == "B" else 0
                 desc = (self.rev_type2 if b else self.rev_type) + " + " + (self.dly_type2 if b else self.dly_type)
-                self.text(c, "< %s >" % val, self.f_med, mm.INK, (230 + kick, y + 1))
-                self.text(c, desc, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28, y + 5), right=True)
+                self.text(c, "< %s >" % val, self.f_med, mm.INK if sel else mm.DIM, (230 + kick, vy))
+                self.text(c, desc, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 30, y + 6), right=True)
                 continue
             if fx:
-                pill = pygame.Rect(170, y + 3, 42, rh - 7)
-                pygame.draw.rect(c, mm.MOD_ON if on else mm.BG, pill, border_radius=8)
+                pill = pygame.Rect(166, y + 4, 46, rh - 9)
+                pygame.draw.rect(c, col if on else mm.BG, pill, border_radius=8)
                 self.text(c, "ON" if on else "off", self.f_small, mm.BG if on else mm.DIM, pill.center, center=True)
                 amt = val[1]
             else:
                 amt = val
-            bx, bw = 230, 210
-            pygame.draw.rect(c, mm.BG, (bx, y + rh // 2 - 4, bw, 8), border_radius=4)
+            bx, bw = 230, 200
+            by = y + rh // 2 - 4
+            pygame.draw.rect(c, mm.BG, (bx, by, bw, 7), border_radius=4)
             if row == "Pan":
                 cx = bx + bw // 2
                 px = int(cx + amt * bw / 2)
-                pygame.draw.rect(c, mm.ACCENT, (min(cx, px), y + rh // 2 - 4, max(3, abs(px - cx)), 8), border_radius=4)
+                pygame.draw.rect(c, col, (min(cx, px), by, max(3, abs(px - cx)), 7), border_radius=4)
                 txt = "C" if abs(amt) < 0.05 else ("L%d" % round(-amt * 100) if amt < 0 else "R%d" % round(amt * 100))
             else:
                 fill = int(bw * self.sm("tfx_%d_%d_%s" % (p, k, row), amt, 18))
                 if fill:
-                    pygame.draw.rect(c, mm.ACCENT if on else mm.DIM, (bx, y + rh // 2 - 4, fill, 8), border_radius=4)
+                    pygame.draw.rect(c, col if on else mm.DIM, (bx, by, fill, 7), border_radius=4)
                 txt = "%d%%" % round(amt * 100)
                 if fx and row not in NO_RATE:
-                    txt += "   " + (engine.Engine.CLOUD_TEX[val[2] % 8][0] if row == "Cloud" else RATES[val[2]][0])
-            self.text(c, txt, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 28 + kick, y + 5), right=True)
+                    txt += "  " + (engine.Engine.CLOUD_TEX[val[2] % 8][0] if row == "Cloud" else RATES[val[2]][0])
+            self.text(c, txt, self.f_small, mm.INK if sel else mm.DIM, (mm.BASE_W - 30 + kick, y + 6), right=True)
         c.set_clip(None)

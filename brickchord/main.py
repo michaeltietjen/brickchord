@@ -97,6 +97,8 @@ INK = (236, 228, 214)
 DIM = (130, 122, 140)
 ACCENT = (255, 140, 66)
 ACCENT2 = (110, 200, 190)
+if edition.LAB:                           # Bricklab is teal, with orange as its second colour
+    ACCENT, ACCENT2 = (41, 174, 184), (255, 150, 80)
 MOD_ON = (255, 200, 90)
 
 
@@ -1586,22 +1588,33 @@ class App(modes.ModesMixin):
         # ---- header: mini logo that steps with the beat, info slides when it changes
         pygame.draw.rect(c, PANEL, (0, 0, BASE_W, 38))
         self.draw_mini_mark(c, 14, 12, st)
-        self.text(c, edition.NAME.upper(), self.f_small, ACCENT, (62, 12))
-        chips_end = self.draw_mode_chip(c, 172, 9)
-        info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
-                                                   self.bank[self.patch]["name"], self.mode(), self.bpm)
-        for alt in ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bank[self.patch]["name"], self.bpm),
-                    "%s %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bpm)):
+        if edition.LAB:
+            # Bricklab: mark and mode on the left, the six layers in the middle,
+            # where you are and the key and tempo on the right
+            self.draw_mode_chip(c, 62, 9, songchip=False)
+            self.draw_lab_header(c, now)
+            if beat_pop:
+                pygame.draw.rect(c, self.mix(PANEL, ACCENT, beat_pop), (0, 36, BASE_W, 2))
+            info = None
+        else:
+            self.text(c, edition.NAME.upper(), self.f_small, ACCENT, (62, 12))
+            chips_end = self.draw_mode_chip(c, 172, 9)
+            info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
+                                                       self.bank[self.patch]["name"], self.mode(), self.bpm)
+        for alt in (() if info is None else
+                    ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bank[self.patch]["name"], self.bpm),
+                     "%s %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bpm))):
             if BASE_W - 12 - self.f_small.size(info)[0] > chips_end + 10:
                 break
             info = alt
-        if info != self.anim.get("_info"):
+        if info is not None and info != self.anim.get("_info"):
             self.anim["_info"] = info
             self.anim["_info_t"] = now
         k = self.since(self.anim.get("_info_t", -9), 0.25)
         dy = int((1 - k) ** 2 * -10)
-        self.text(c, info, self.f_small, self.mix(ACCENT, INK, k), (BASE_W - 12, 12 + dy), right=True)
-        if beat_pop:
+        if info is not None:
+            self.text(c, info, self.f_small, self.mix(ACCENT, INK, k), (BASE_W - 12, 12 + dy), right=True)
+        if beat_pop and info is not None:
             pygame.draw.rect(c, self.mix(PANEL, ACCENT, beat_pop), (0, 36, BASE_W, 2))
 
         if self.imode in ("Song", "Effects"):
@@ -2037,6 +2050,15 @@ class App(modes.ModesMixin):
     def draw_mini_mark(self, c, x, y, step):
         """Tiny logo in the header; with the beat running, its keys follow the 16ths."""
         k, g = 6, 2
+        if edition.LAB:                      # Bricklab's mark: 4 x 4, step 1 teal, the playhead runs the 16ths
+            k, g = 4, 2
+            lit = (step - 1) % 16 if self.clock_on() else -1
+            for i in range(16):
+                col = ACCENT if (i == 0 and lit < 0) or i == lit else (120, 116, 128)
+                if i == lit and i != 0:
+                    col = INK
+                pygame.draw.rect(c, col, (x + (i % 4) * (k + g), y - 2 + (i // 4) * (k + g), k, k), border_radius=1)
+            return
         lit = (step - 1) % 8 if self.clock_on() else -1
         for i in range(8):
             col = self.ORANGE if (i == 6 and lit < 0) or i == lit else (120, 116, 128)

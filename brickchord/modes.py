@@ -375,7 +375,7 @@ class ModesMixin(song.SongMixin):
                 self.eng.post("lead_off")
 
     # ------------------------------------------------------------ drawing
-    def draw_mode_chip(self, c, x, y):
+    def draw_mode_chip(self, c, x, y, songchip=True):
         mm = M()
         label = self.imode.upper()
         w = self.f_small.size(label)[0] + 16
@@ -389,7 +389,7 @@ class ModesMixin(song.SongMixin):
             pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT2, 0.4 + 0.4 * b), (x, y, w, 20), border_radius=10)
             self.text(c, t, self.f_small, mm.BG, (x + w // 2, y + 10), center=True)
             x += w + 6
-        if edition.LAB:
+        if edition.LAB and songchip:
             x = self.song_chip(c, x, y)
         return x
 
