@@ -118,6 +118,20 @@ STICK_LABEL = {"ninth": "9", "maj7": "maj7", "seventh": "7", "sus2": "sus2", "su
                "dim": "dim", "flip": "flip", "aug": "aug"}
 
 
+# Spelling: flat keys get flat names (Db, not C#). The scale's parent major decides.
+_PARENT = {"Major": 0, "Minor": 3, "Dorian": 10, "Phrygian": 8, "Lydian": 7, "Mixolydian": 5, "Locrian": 1,
+           "Harmonic Minor": 3, "Melodic Minor": 3}
+FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+
+
+def note_name(pc, key=None, scale=None):
+    if key is not None:
+        parent = (key + _PARENT.get(scale, 0)) % 12
+        if parent in (5, 10, 3, 8, 1, 6):
+            return FLAT_NAMES[pc % 12]
+    return NOTE_NAMES[pc % 12]
+
+
 def build_chord(key, scale, degree, m):
     """m: dict with any of MOD_KEYS set True."""
     sc = SCALES[scale]
@@ -152,17 +166,17 @@ def build_chord(key, scale, degree, m):
     if m.get("ninth"):
         ivals.append(14)
     pc_root = (key + root) % 12
-    return pc_root, ivals, chord_name(pc_root, ivals, sus, sus2)
+    return pc_root, ivals, chord_name(pc_root, ivals, sus, sus2, key, scale)
 
 
-def chord_name(pc, iv, sus, sus2=False):
+def chord_name(pc, iv, sus, sus2=False, key=None, scale=None):
     s = set(i % 12 for i in iv)
     third = 3 if 3 in s and not sus else (4 if 4 in s else None)
     fifth = 6 if 6 in s else (8 if 8 in s else 7)
     has7 = 10 in s or 11 in s
     maj7 = 11 in s
     has9 = 2 in s and not sus2
-    n = NOTE_NAMES[pc]
+    n = note_name(pc, key, scale)
     if sus2:
         return n + ("maj7sus2" if maj7 else ("7sus2" if has7 else "sus2"))
     if sus:
@@ -409,6 +423,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             self.push_rack()                        # Bricklab: every track has its own rack (lp_push_track)
         if edition.AMBIENT:
             self.amb_init()
+            self.amb_fx_defaults()
         self.intro()
         self.queue_precache()
 
@@ -1099,6 +1114,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     def menu_items(self):
         if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
+        if edition.AMBIENT and self.menu_pg == "FX":
+            return self.amb_fx_items()
         if edition.AMBIENT and self.menu_pg == "Global":
             rows = dict(self.all_menu_items())
             return [(n, rows[n]) for n in self.AMB_GLOBAL if n in rows]
@@ -1175,6 +1192,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             name = name[2:]                 # bus A rows share the Brickchord handlers
         if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_change(self.menu_pg, name, d)
+            return
+        if edition.AMBIENT and self.menu_pg == "FX":
+            self.amb_fx_change(name, d)
             return
         if name == "Machine" and edition.LAB:
             e = self.lp_e()
@@ -1822,7 +1842,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
                 if edition.AMBIENT else None) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
-        if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0]:
+        flashing = bool(self.msg) and self.since(self.msg_t, 1.5) < 1
+        if sr.right + 20 < BASE_W - 20 - self.f_small.size(hint)[0] and not (edition.AMBIENT and flashing):
             self.text(c, hint, self.f_small, DIM, (BASE_W - 20, L["status_y"]), right=True)
         on = self.sm("beatrow", 1.0 if clk else 0.0, 10)
         if on > 0.02:
@@ -2226,11 +2247,17 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             sel = i == sel_i
             if not opening and a < 0.6:
                 continue                       # closing: rows vanish, the panel fades
-            self.text(c, label, self.f_med, ACCENT if sel else col, (xin, y))
+            lr = self.text(c, label, self.f_med, ACCENT if sel else col, (xin, y))
             if val:
                 s = ("< %s >" % val) if sel else val
-                self.text(c, s, self.f_med, INK if sel else DIM,
-                          (BASE_W - xin + (kick if sel else 0), y), right=True)
+                room = (BASE_W - xin) - (lr.right + 18)        # the value never runs into its label
+                f = self.f_med
+                if f.size(s)[0] > room:
+                    f = self.f_small
+                while f.size(s)[0] > room and len(s) > 4:
+                    s = s[:-2].rstrip() + "\u2026" if not s.endswith("\u2026") else s[:-3].rstrip() + "\u2026"
+                self.text(c, s, f, INK if sel else DIM,
+                          (BASE_W - xin + (kick if sel else 0), y + (3 if f is self.f_small else 0)), right=True)
 
     def draw_editor(self, c, a=1.0):
         rows = [(label, val, MOD_ON if edited else INK) for key, label, val, edited in self.editor_items()]
@@ -2256,12 +2283,18 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         labels = [("T%d %s%s" % (self.lp_sel + 1, pg.upper(), ("  P%02d" % cur) if pg == "Drums" else ""))
                   if (edition.LAB and pg in self.TRACK_TABS) else pg.upper() for pg in pages]
         gap = 34
-        ws = [self.f_med.size(t)[0] for t in labels]
+        tf = self.f_med
+        ws = [tf.size(t)[0] for t in labels]
+        while sum(ws) + gap * (len(ws) - 1) > BASE_W - 110 and gap > 14:
+            gap -= 4                                       # many tabs: close up, then a smaller font
+        if sum(ws) + gap * (len(ws) - 1) > BASE_W - 110:
+            tf = self.f_small
+            ws = [tf.size(t)[0] for t in labels]
         x = BASE_W // 2 - (sum(ws) + gap * (len(ws) - 1)) // 2
         y = 30 + off
         for pg, t, w in zip(pages, labels, ws):
             on = pg == self.menu_pg
-            self.text(c, t, self.f_med, self.mix(BG, ACCENT if on else DIM, a), (x + w // 2, y), center=True)
+            self.text(c, t, tf, self.mix(BG, ACCENT if on else DIM, a), (x + w // 2, y), center=True)
             if on:
                 pygame.draw.rect(c, self.mix(BG, ACCENT, a), (x, y + 16, w, 3), border_radius=2)
             x += w + gap

@@ -19,7 +19,7 @@ import numpy as np
 import pygame
 
 import engine
-import synth
+import synth  # noqa
 
 DRONE_BTNS = ["UP", "RIGHT", "DOWN", "LEFT", "X", "Y"]
 MEL_BTNS = ["A", "B"]
@@ -91,13 +91,13 @@ TUTORIAL = [
     ("Hold  L1  and press  X :  the fifth chord with a 7th", 4, lambda s: s.acur_deg == 4 and "seventh" in (s.acur_key or (0, ()))[1]),
     ("Hold  Y  and press  ^ :  Y flips major and minor", 1,
      lambda s: s.acur_deg == 1 and "flip" in (s.acur_key or (0, ()))[1]),
-    ("Push the LEFT STICK sideways to bend the chord, up to swell it", None,
+    ("Push the LEFT STICK sideways to bend the chord", None,
      lambda s: abs(getattr(s, "abend", 0.0)) > 150),
     ("Press  R2 :  bloom, every voice from one note", None, lambda s: s.atut_flags.get("bloom")),
     ("Press  START :  the chords play by themselves", None, lambda s: s.aprog.get("run")),
-    ("Click  L3  (press the left stick in):  see the real sound", None,
+    ("Click  L3  (press the left stick in)  to see the sound", None,
      lambda s: getattr(s, "aview", "guides") == "spectrum"),
-    ("Press  START  to stop.  SELECT opens Settings.  You know it all now", None,
+    ("Press  START  to stop.  SELECT opens Settings", None,
      lambda s: not s.aprog.get("run")),
 ]
 
@@ -196,13 +196,91 @@ class AmbientMixin:
         pygame.draw.rect(c, mm.ACCENT, r, 2, border_radius=12)
         self.text(c, "STEP %d OF %d" % (self.atut + 1, len(TUTORIAL)), self.f_small, mm.ACCENT, (r.x + 16, r.y + 8))
         self.text(c, "SELECT skips", self.f_small, mm.DIM, (r.right - 16, r.y + 8), right=True)
-        self.text(c, text, self.f_med, mm.INK, (r.centerx, r.y + 40), center=True)
+        f = self.f_med if self.f_med.size(text)[0] <= r.w - 28 else self.f_small
+        self.text(c, text, f, mm.INK, (r.centerx, r.y + 40), center=True)
         if tile is not None:                                 # point at the button to press
             tw, gap = 82, 6
             x0 = (W - (7 * tw + 6 * gap)) // 2
             b = 0.5 + 0.5 * math.sin(now * 6)
             tr = pygame.Rect(x0 + tile * (tw + gap), mm.L["tiles_y"], tw, mm.L["tile_h"]).inflate(6, 6)
             pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT2, 0.4 + 0.6 * b), tr, 3, border_radius=12)
+
+    # ------------------------------------------------------------ effects (Settings > FX)
+    FX_ROWS = [("Space", None), ("Reverb", None), ("Echo", None), ("Echo type", None), ("Echo time", None),
+               ("Cloud", "Cloud"), ("Cloud texture", "Cloud"), ("Chorus", "Chorus"), ("Wide", "Wide"),
+               ("Tape wobble", "Vibrato"), ("Filter drift", "Filter LFO"), ("Drive", "Drive"), ("Lo-fi", "Lo-fi")]
+
+    def amb_fx_defaults(self):
+        """Brickglide starts wet and wide (once; your changes are kept after that)."""
+        if self.cfg.get("amb_fx_v1"):
+            return
+        mm = M()
+        self.cfg["amb_fx_v1"] = True
+        self.base_rev, self.base_dly = 0.5, 0.3
+        self.rev_type = "Big Hall" if "Big Hall" in synth.REVERBS else self.rev_type
+        self.dly_type = "Tape" if "Tape" in mm.DELAY_TYPES else self.dly_type
+        self.dly_time = next((i for i, (n, _) in enumerate(mm.DELAY_TIMES) if n == "1/4 dotted"), self.dly_time)
+        for name, on, amt in (("Chorus", True, 0.35), ("Wide", True, 0.6)):
+            cur = self.rack.get(name) or [False, 0.5, 2]
+            self.rack[name] = [on, amt, cur[2]]
+        self.rev, self.dly = self.base_rev, self.base_dly
+        self.push_types()
+        self.push_fx()
+        self.push_rack()
+
+    def amb_fx_items(self):
+        mm = M()
+        out = []
+        for label, key in self.FX_ROWS:
+            if label == "Space":
+                v = "%d%%" % round(self.base_rev * 100)
+            elif label == "Reverb":
+                v = self.rev_type
+            elif label == "Echo":
+                v = "%d%%" % round(self.base_dly * 100)
+            elif label == "Echo type":
+                v = self.dly_type
+            elif label == "Echo time":
+                v = mm.DELAY_TIMES[self.dly_time][0]
+            elif label == "Cloud texture":
+                r = self.rack.get("Cloud") or [False, 0.5, 3]
+                v = engine.Engine.CLOUD_TEX[int(r[2]) % len(engine.Engine.CLOUD_TEX)][0]
+            else:
+                r = self.rack.get(key) or [False, 0.0, 2]
+                v = ("%d%%" % round(r[1] * 100)) if r[0] else "Off"
+            out.append((label, v))
+        return out
+
+    def amb_fx_change(self, name, d):
+        mm = M()
+        key = dict(self.FX_ROWS).get(name)
+        if name == "Space":
+            self.base_rev = round(max(0.0, min(1.0, self.base_rev + 0.05 * d)), 2)
+        elif name == "Reverb":
+            self.rev_type = synth.REVERBS[(synth.REVERBS.index(self.rev_type) + d) % len(synth.REVERBS)]
+            self.push_types()
+        elif name == "Echo":
+            self.base_dly = round(max(0.0, min(1.0, self.base_dly + 0.05 * d)), 2)
+        elif name == "Echo type":
+            self.dly_type = mm.DELAY_TYPES[(mm.DELAY_TYPES.index(self.dly_type) + d) % len(mm.DELAY_TYPES)]
+            self.push_types()
+        elif name == "Echo time":
+            self.dly_time = (self.dly_time + d) % len(mm.DELAY_TIMES)
+            self.push_types()
+        elif name == "Cloud texture":
+            r = list(self.rack.get("Cloud") or [False, 0.5, 3])
+            r[2] = (int(r[2]) + d) % len(engine.Engine.CLOUD_TEX)
+            self.rack["Cloud"] = r
+            self.push_rack()
+        elif key:
+            r = list(self.rack.get(key) or [False, 0.0, 2])
+            amt = 0.0 if not r[0] else float(r[1])
+            amt = round(max(0.0, min(1.0, amt + 0.05 * d)), 2)
+            r[0], r[1] = amt > 0, max(amt, 0.05) if amt > 0 else r[1]
+            self.rack[key] = r
+            self.push_rack()
+        self.rev, self.dly = self.base_rev, self.base_dly
+        self.push_fx()
 
     def amb_state(self):
         keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
@@ -386,12 +464,12 @@ class AmbientMixin:
         keys = ("on", "snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
         self.ascenes[s] = [{k: v[k] for k in keys} for v in self.av[:6]]
         self.save_cfg()
-        self.flash("SCENE %d SAVED   R1+%s RECALLS IT" % (s + 1, GLYPH[DRONE_BTNS[s]]))
+        self.flash("SCENE %d SAVED   R2 + %s RECALLS IT" % (s + 1, M().BUTTON_GLYPH[M().CHORD_BUTTONS[s]]))
 
     def amb_recall(self, s):
         sc = self.ascenes[s] if s < len(self.ascenes) else None
         if not sc:
-            self.flash("SCENE %d IS EMPTY   SELECT+%s SAVES ONE" % (s + 1, GLYPH[DRONE_BTNS[s]]))
+            self.flash("SCENE %d IS EMPTY   SELECT + %s SAVES ONE" % (s + 1, M().BUTTON_GLYPH[M().CHORD_BUTTONS[s]]))
             return
         for i, d in enumerate(sc[:6]):
             v = self.av[i]
@@ -468,9 +546,11 @@ class AmbientMixin:
         else:
             root = (self.key + sc[deg % 7]) % 12
             pcs = {(root + s) % 12 for s in steps}
-        roman = ["I", "II", "III", "IV", "V", "VI", "VII"][deg % 7]
+        mm = M()
+        _, iv0, cname = mm.build_chord(self.key, self.scale, deg % 7, {})
+        roman = mm.roman_for(deg % 7, iv0)
         self.acur_deg = deg % 7
-        self.acur_name = "%s %s" % (roman, name)
+        self.acur_name = "%s  %s" % (roman, cname)
         self.amb_glide_all(self.amb_voicelead(on, pcs, (self.key + sc[deg % 7]) % 12),
                            "%s %s   %s PATH   %gs" % (roman, name.upper(), PATHS[self.achord["path"]].upper(),
                                                      self.achord["time"]))
@@ -618,7 +698,7 @@ class AmbientMixin:
         self.amb_bloom(secs=3.5)
         self.aprog["run"] = True
         self.aprog["next"] = time.perf_counter() + 6.0          # let the bloom finish first
-        self.flash("DEEP BLOOM   %s %s   i V VI IV V   R2+A STOPS IT" % (M().NOTE_NAMES[k], self.scale))
+        self.flash("DEEP BLOOM   %s %s   START STOPS IT" % (M().NOTE_NAMES[k], self.scale))
 
     def amb_starter(self):
         """Glide Chords: five bright saw voices sliding through vi, I, V, IV in your
@@ -647,17 +727,17 @@ class AmbientMixin:
         self.achord.update(type=0, path=1, time=0.4, stagger=0, order=0, root=True)
         self.aprog.update(steps=[5, 0, 4, 3, None, None, None, None], time=4, run=False)
         self.amb_prog_toggle()
-        self.flash("GLIDE CHORDS   vi  I  V  IV   R2+A STOPS IT")
+        self.flash("GLIDE CHORDS   START STOPS IT")
 
     def amb_prog_toggle(self):
         p = self.aprog
         if not any(s is not None for s in p["steps"]):
-            self.flash("THE PROGRESSION IS EMPTY   SETTINGS > CHORDS")
+            self.flash("NO CHORDS IN THE PROGRESSION   SETTINGS > CHORDS")
             return
         p["run"] = not p["run"]
         p["i"], p["next"] = -1, 0.0
         steps = "  ".join(ROMAN[s % 7] for s in p["steps"] if s is not None)
-        self.flash(("PROGRESSION  %s   every %gs" % (steps, p["time"])) if p["run"] else "PROGRESSION STOPPED")
+        self.flash(("PROGRESSION  %s   EVERY %gs" % (steps, p["time"])) if p["run"] else "PROGRESSION STOPPED")
 
     def amb_evolve(self):
         """Every sounding drone glides to a nearby note of the scale: the slow
@@ -788,9 +868,7 @@ class AmbientMixin:
                     ("Glide time", "%g s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
                     ("Order", ORDERS[ch["order"]]),
                     ("Bass on root", "On" if ch.get("root") else "Off"),
-                    ("Play", "R2 + ^ > v < X Y = degree I to VI"), ("Evolve", "tap R2"),
-                    ("Bloom", "R2 + B: all voices from one note, fanning out"),
-                    ("Progression", ("running   R2+A stops" if self.aprog["run"] else "stopped   R2+A runs it")),
+                    ("Progression", "playing   START stops" if self.aprog["run"] else "START plays it"),
                     ("Chord time", "%g s each" % self.aprog["time"])] + [
                 ("Chord %d" % (s + 1), "-" if self.aprog["steps"][s] is None else ROMAN[self.aprog["steps"][s] % 7])
                 for s in range(8)]
@@ -809,15 +887,13 @@ class AmbientMixin:
             rows.append(("Glide", ("%g s" % self.av[6 + j]["glide"]) if self.av[6 + j]["glide"] else "Off"))
             return rows
         if pg == "Scenes":
-            rows = [("Guided demo", "the controls, one move at a time   A"),
-                    ("Starter", "Glide Chords   A loads it"), ("Starter 2", "Deep Bloom   A loads it"),
+            mm = M()
+            rows = [("Guided demo", "A starts it"), ("Starter", "Glide Chords"), ("Starter 2", "Deep Bloom"),
                     ("Morph time", "%d s" % self.amorph)]
             for s in range(6):
                 sc = self.ascenes[s] if s < len(self.ascenes) else None
-                rows.append(("Scene %d  %s" % (s + 1, GLYPH[DRONE_BTNS[s]]),
-                             ("%d voices   R1+%s recalls" % (sum(1 for d in sc if d.get("on")), GLYPH[DRONE_BTNS[s]]))
-                             if sc else "empty   SELECT+%s saves" % GLYPH[DRONE_BTNS[s]]))
-            rows.append(("Evolve", "R2 on the main screen"))
+                g = mm.BUTTON_GLYPH[mm.CHORD_BUTTONS[s]]
+                rows.append(("Scene %d" % (s + 1), ("R2 + %s recalls" % g) if sc else "SELECT + %s saves" % g))
             return rows
         return []
 
@@ -1014,10 +1090,13 @@ class AmbientMixin:
                 fq = 440.0 * 2 ** ((n + self.key - 69) / 12.0)
                 if self.SPEC_LO < fq < self.SPEC_HI:
                     y = gy1 - math.log(fq / self.SPEC_LO) / math.log(self.SPEC_HI / self.SPEC_LO) * gh
-                    self.text(c, mm.NOTE_NAMES[(n + self.key) % 12] + str((n + self.key) // 12 - 1), self.f_small,
+                    self.text(c, mm.note_name((n + self.key) % 12, self.key, self.scale) + str((n + self.key) // 12 - 1),
+                              self.f_small,
                               self.mix(mm.BG, mm.DIM, 0.8), (gx0 + 4, int(y) - 15))
-            self.text(c, "SPECTROGRAM   L3 GUIDES", self.f_small, self.mix(mm.BG, mm.DIM, 0.8), (gx1 - 4, gy0 + 2),
-                      right=True)
+            lab = "SPECTROGRAM    L3: GUIDES"
+            lw = self.f_small.size(lab)[0] + 16
+            pygame.draw.rect(c, mm.BG, (gx1 - lw - 2, gy0 + 3, lw, 20), border_radius=8)
+            self.text(c, lab, self.f_small, mm.DIM, (gx1 - lw // 2 - 2, gy0 + 13), center=True)
             self.draw_amb_tiles(c, now)
             self.draw_amb_tutorial(c, now)
             return
@@ -1046,7 +1125,8 @@ class AmbientMixin:
             col = self.mix(mm.BG, mm.DIM, 0.55 if root else (0.32 if fifth else 0.16))
             pygame.draw.line(c, col, (gx0, y), (gx1, y), 1)
             if root or fifth:
-                self.text(c, mm.NOTE_NAMES[n % 12] + str(n // 12 - 1), self.f_small, col, (gx0 + 2, y - 15))
+                self.text(c, mm.note_name(n % 12, self.key, self.scale) + str(n // 12 - 1), self.f_small, col,
+                          (gx0 + 2, y - 15))
         # each voice's pitch over the last seconds: a line that glides
         span = HIST_SECS
         for i in range(NV):
@@ -1084,7 +1164,7 @@ class AmbientMixin:
             for s, deg in enumerate(pr["steps"]):
                 if deg is None:
                     continue
-                lab = ROMAN[deg % 7]
+                lab = mm.roman_for(deg % 7, mm.build_chord(self.key, self.scale, deg % 7, {})[1])
                 r = self.text(c, lab, self.f_small, mm.ACCENT if s == pr["i"] else mm.DIM, (xx, gy1 - 16))
                 xx = r.right + 10
         # scenes: six dots under the graph
