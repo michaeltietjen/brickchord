@@ -1,23 +1,16 @@
-# Brickglide: an ambient machine on the Brickchord engine. Six drone voices
-# you switch on and leave running, two melodic voices that step through five
-# notes, long glides between pitches drawn as guides on screen, scenes that
-# morph the whole texture, and the sticks for spread, movement and Cloud.
+# Brickglide: an ambient machine on the Brickchord engine, played like Brickchord.
 #
-#   UP RIGHT DOWN LEFT X Y   drone voices 1-6: press starts one, tap a sounding one to stop it;
-#                            hold one (or several) and the left stick bends and swells only
-#                            those voices, MPE-style; let go and they settle on the scale
-#   A B                      melodic voices 1-2: start / stop their steps
-#   L1 + a voice button      select that voice (Settings opens on it)
-#   R1 + a drone button      recall scene 1-6 (the voices glide there)
-#   SELECT + a drone button  save the current sound as that scene
-#   R2 + a drone button      glide the drones into a chord on degree I-VI (Settings > Chords
-#                            picks the chord, the path shape, the time and the order)
-#   R2 (tap)                 evolve: every voice glides to a new note of the scale
-#   R2 + A                   run / stop the chord progression (Settings > Chords)
-#   R2 + B                   bloom: every voice from one note, fanning out, the filter opening
-#   START                    freeze: the cloud holds what is sounding
-#   left stick               X spreads the voices apart, Y deepens their movement
+#   < ^ > v X A B            the seven chords of the key (I to VII): the voices glide into it
+#                            and hold it; the same chord again lets it fade
+#   L1 / R1 / L1+R1 / Y      with a chord: 7th / sus4 / 9th / flip major-minor (as in Brickchord)
+#   left stick               bend the whole chord (X) and swell it (Y); it springs back
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
+#   right stick              filter and space, as in Brickchord
+#   R2                       bloom: every voice from one note, fanning out into the chord
+#   START                    the progression plays by itself (Settings > Chords)
+#   L3                       glide guides / spectrogram
+#   SELECT                   Settings (sounds, glide time and path, the progression, scenes)
+#   SELECT + chord button    save a scene; R2 + chord button recalls it
 import json
 import math
 import time
@@ -122,8 +115,10 @@ class AmbientMixin:
             m["next"] = 0.0
         self.ascenes = st.get("scenes") or [None] * 6
         self.amorph = st.get("morph", 8)
-        self.achord = dict({"type": 2, "path": 2, "time": 8, "stagger": 1, "order": 1, "root": True},
+        self.achord = dict({"type": 2, "path": 2, "time": 1.5, "stagger": 0, "order": 0, "root": True},
                            **(st.get("chord") or {}))
+        if not self.achord.get("v2"):            # played like Brickchord now: chords glide in about a second
+            self.achord.update(time=1.5, stagger=0, order=0, path=2, v2=True)
         # a chord progression that steps by itself: every voice glides into each chord
         self.aprog = dict({"steps": [5, 0, 4, 3, None, None, None, None], "time": 4}, **(st.get("prog") or {}))
         self.aprog.update(run=False, i=-1, next=0.0)
@@ -216,74 +211,41 @@ class AmbientMixin:
 
     # ------------------------------------------------------------ input
     def amb_handle(self, name, down):
-        held = self.inp.held
+        """Brickchord's controls: the seven chord buttons play chords (L1 7th, R1 sus4,
+        L1+R1 9th, Y flips major and minor), the voices gliding from chord to chord."""
+        mm = M()
         if name == "R2":
             if down:
                 self.r2_used = False
             elif not self.r2_used:
-                self.amb_evolve()                       # a tap: evolve
+                self.amb_bloom()                        # R2: bloom from one note
             return True
         if not down:
-            if name in DRONE_BTNS:
-                i = DRONE_BTNS.index(name)
-                e = self.aexp.pop(i, None)
-                if e is not None:
-                    if e["moved"]:
-                        self.amb_commit_bend(i, e)       # a bend: the voice settles where you left it
-                    elif e["was_on"]:
-                        self.amb_toggle(i)               # a plain tap on a sounding voice: off
-            return name in DRONE_BTNS + MEL_BTNS + ["START", "L3"]
-        if name in DRONE_BTNS or name in MEL_BTNS:
-            i = (DRONE_BTNS + MEL_BTNS).index(name)
-            if "L1" in held:
-                self.asel = i
-                self.flash("SELECTED %s   SELECT EDITS IT" % (("VOICE %d" % (i + 1)) if i < 6 else "MELODY %s" % "AB"[i - 6]))
+            return name in mm.CHORD_BUTTONS + ["START", "L3", "Y"]
+        if name in mm.CHORD_BUTTONS:
+            if "SELECT" in self.inp.held:
+                s = mm.CHORD_BUTTONS.index(name)
+                if s < 6:
+                    self.sel_combo = True
+                    self.amb_save_scene(s)
                 return True
-            if "R2" in held and i < 6:
+            if "R2" in self.inp.held:
+                s = mm.CHORD_BUTTONS.index(name)
                 self.r2_used = True
-                self.amb_chord(i)                       # R2 + a drone button: glide into a chord on that degree
+                if s < 6:
+                    self.amb_recall(s)
                 return True
-            if "R2" in held and name == "A":
-                self.r2_used = True
-                self.amb_prog_toggle()                  # R2 + A: the progression runs (or stops)
-                return True
-            if "R2" in held and name == "B":
-                self.r2_used = True
-                self.amb_bloom()                        # R2 + B: every voice from one note, fanning out
-                return True
-            if "R1" in held and i < 6:
-                self.amb_recall(i)
-                return True
-            if "SELECT" in held and i < 6:
-                self.sel_combo = True                    # SELECT was part of a combo: no menu on release
-                self.amb_save_scene(i)
-                return True
-            if i < 6:
-                # press: an off voice starts now; hold it and the left stick bends and swells
-                # just this voice (MPE-style); a plain tap on a sounding voice turns it off
-                was_on = self.av[i]["on"]
-                if not was_on:
-                    self.amb_toggle(i)
-                self.aexp[i] = {"bend": 0.0, "press": 0.0, "moved": False, "was_on": was_on, "sent": None}
-            else:
-                self.amb_toggle(i)
-            self.asel = i
+            self.amb_press_chord(name)
             return True
         if name == "START":
-            self.afreeze = not self.afreeze
-            if self.afreeze:
-                self.amb_prev_cloud = list(self.rack.get("Cloud") or [False, 0.5, 3])
-                self.set_cloud(True, 0.85, 7)
-            else:
-                pc = getattr(self, "amb_prev_cloud", [False, 0.5, 3])
-                self.set_cloud(pc[0], pc[1], pc[2])
-            self.flash("FREEZE " + ("ON: THE CLOUD HOLDS WHAT IS SOUNDING" if self.afreeze else "OFF"))
+            self.amb_prog_toggle()                      # the progression plays by itself
             return True
         if name == "L3":
             self.aview = "spectrum" if getattr(self, "aview", "guides") == "guides" else "guides"
-            self.flash("VIEW: " + ("SPECTROGRAM  (the real sound, every harmonic)" if self.aview == "spectrum"
-                                   else "GLIDE GUIDES"))
+            self.flash("VIEW: " + ("SPECTROGRAM" if self.aview == "spectrum" else "GLIDE GUIDES"))
             return True
+        if name == "Y":
+            return True                                 # Y is the flip modifier, held with a chord
         return False
 
     def amb_stick(self, x, y):
@@ -294,6 +256,8 @@ class AmbientMixin:
         if self.aexp:
             self.amb_express(x, y)
             return
+        self.amb_bend_all(x, y)
+        return
         dz = 0.15
         sx = 0.0 if abs(x) < dz else x
         sy = 0.0 if abs(y) < dz else y
@@ -418,7 +382,8 @@ class AmbientMixin:
             v["note"], v["cents"] = int(note), 0
             via = self.amb_steps_via(frm, note * 100.0) if ch["path"] == 4 else None
             self.amb_push(i, glide=ch["time"], shape=shape, delay=delays.get(i, 0.0), via=via)
-        self.flash(label)
+        if label:
+            self.flash(label)
 
     def amb_chord(self, deg):
         """Glide the sounding drones into a chord on scale degree deg (0..5), each
@@ -434,6 +399,17 @@ class AmbientMixin:
         else:
             root = (self.key + sc[deg % 7]) % 12
             pcs = {(root + s) % 12 for s in steps}
+        roman = ["I", "II", "III", "IV", "V", "VI", "VII"][deg % 7]
+        self.acur_deg = deg % 7
+        self.acur_name = "%s %s" % (roman, name)
+        self.amb_glide_all(self.amb_voicelead(on, pcs, (self.key + sc[deg % 7]) % 12),
+                           "%s %s   %s PATH   %gs" % (roman, name.upper(), PATHS[self.achord["path"]].upper(),
+                                                     self.achord["time"]))
+
+    def amb_voicelead(self, on, pcs, root_pc):
+        """Each sounding voice to a tone of the chord (pcs): the lowest to the root, as
+        a bass would, the rest, low to high, to the nearest chord tone above the one
+        below, preferring tones not used yet so the chord is complete."""
         cand = [n for n in range(24, 97) if n % 12 in pcs]
         cur = sorted(((self.aui[i]["cur"] or self.av[i]["note"] * 100.0) / 100.0, i) for i in on)
         # the lowest voice takes the root (as a bass would), then each voice, low to high,
@@ -442,7 +418,6 @@ class AmbientMixin:
         best, used, prev = [], set(), 0
         rest = cur
         if self.achord.get("root") and len(cur) > 1:
-            root_pc = (self.key + sc[deg % 7]) % 12
             c0 = cur[0][0]
             b = min((n for n in range(24, 97) if n % 12 == root_pc), key=lambda n: abs(n - c0))
             best, used, prev, rest = [b], {root_pc}, b, cur[1:]
@@ -452,10 +427,70 @@ class AmbientMixin:
             best.append(n)
             used.add(n % 12)
             prev = n
-        moves = {i: n for n, (_, i) in zip(best, cur)}
-        roman = ["I", "II", "III", "IV", "V", "VI", "VII"][deg % 7]
-        self.amb_glide_all(moves, "%s %s   %s PATH   %ds" % (roman, name.upper(),
-                                                            PATHS[self.achord["path"]].upper(), self.achord["time"]))
+        return {i: n for n, (_, i) in zip(best, cur)}
+
+    # ------------------------------------------------------------ playing chords, Brickchord-style
+    NCH = 5                     # how many drone voices a chord button plays
+
+    def amb_press_chord(self, btn):
+        """A chord button: the voices glide into that chord (Brickchord's chord, with
+        its L1 / R1 / Y modifiers) and hold it. The same chord again lets it fade."""
+        mm = M()
+        deg = mm.CHORD_BUTTONS.index(btn)
+        m = self.mods()
+        pc, iv, name = mm.build_chord(self.key, self.scale, deg, m)
+        key = (deg, tuple(sorted(k for k, v in m.items() if v)))
+        sounding = [i for i in range(self.NCH) if self.av[i]["on"]]
+        if sounding and getattr(self, "acur_key", None) == key:
+            for i in sounding:                       # the same chord again: let it go
+                self.av[i]["on"] = False
+                self.amb_push(i)
+            self.acur_key = self.acur_deg = None
+            self.acur_name = ""
+            self.flash("RELEASED   PRESS A CHORD")
+            return
+        root_pc = (self.key + pc) % 12
+        pcs = {(root_pc + i) % 12 for i in iv}
+        fresh = [i for i in range(self.NCH) if not self.av[i]["on"]]
+        if len(fresh) == self.NCH:
+            # starting from silence: lay the chord out across the voices' registers and fade in
+            notes = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
+            for i, n in notes.items():
+                v = self.av[i]
+                v["note"], v["cents"], v["on"] = int(n), 0, True
+                if v["base"] is None or abs(v["note"] - v["base"]) > 24:
+                    self.amb_render(i)
+                self.amb_push(i, jump=True)
+        else:
+            for i in fresh:
+                self.av[i]["on"] = True
+                self.amb_push(i, jump=True)
+            ch = self.achord
+            moves = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
+            self.amb_glide_all(moves, "")
+        self.acur_key, self.acur_deg = key, deg
+        self.acur_name = mm.roman_for(deg, iv) + "  " + name
+        self.hit_t, self.hit_big = time.perf_counter(), True
+
+    def amb_bend_all(self, x, y):
+        """Left stick with nothing held: bend the whole chord and swell it; it springs
+        back when you let go."""
+        dz = 0.1
+        bx = 0.0 if abs(x) < dz else (x - math.copysign(dz, x)) / (1 - dz)
+        py = 0.0 if abs(y) < dz else (y - math.copysign(dz, y)) / (1 - dz)
+        state = (round(bx * 40), round(py * 20))
+        if state == getattr(self, "abend_state", (0, 0)):
+            return
+        self.abend_state = state
+        bend = bx * self.aexpr["range"] * 100.0
+        self.abend = bend
+        for i in range(6):
+            v = self.av[i]
+            if not v["on"] or v["base"] is None:
+                continue
+            self.eng.post("amb", i, {"tgt": self.amb_tgt(i) + bend, "glide": 0.12 if (bx or py) else 0.5, "shape": 1,
+                                     "level": max(0.0, min(1.0, v["level"] * (1 + 0.6 * py))), "on": True,
+                                     "vib": v["vib"] * (1 + 3 * max(0.0, py))})
 
     def amb_bloom(self, secs=None, swell=True):
         """Unison bloom: every sounding drone jumps to one note (the lowest voice's)
@@ -834,8 +869,9 @@ class AmbientMixin:
     # ------------------------------------------------------------ drawing
     def amb_header_info(self):
         n = sum(1 for v in self.av if v["on"])
-        return "%s %s   %d voice%s%s" % (M().NOTE_NAMES[self.key], self.scale, n, "" if n == 1 else "s",
-                                         "   FREEZE" if self.afreeze else "")
+        chord = getattr(self, "acur_name", "") if n else ""
+        return "%s%s %s%s" % ((chord + "   ") if chord else "", M().NOTE_NAMES[self.key], self.scale,
+                              "   PROGRESSION" if self.aprog.get("run") else "")
 
     # ------------------------------------------------------------ spectrogram view (L3)
     SPEC_LO, SPEC_HI = 45.0, 4000.0
@@ -982,37 +1018,28 @@ class AmbientMixin:
             pygame.draw.circle(c, mm.ACCENT if full else self.mix(mm.BG, mm.DIM, 0.5), (sx + 4, gy1 + 2), 3)
 
     def draw_amb_tiles(self, c, now):
+        """Seven chord tiles, like Brickchord's: the chord you are on lit."""
         mm = M()
         L = mm.L
         W = mm.BASE_W
-        # voice tiles
-        tw, gap = 70, 6
-        x0 = (W - (NV * tw + (NV - 1) * gap)) // 2
-        ty0, th = L["tiles_y"], L["tile_h"]
-        for i in range(NV):
-            v = self.av[i]
-            u = self.aui[i]
-            col = VCOL[i]
-            r = pygame.Rect(x0 + i * (tw + gap) + (8 if i >= 6 else 0) - (8 if i < 6 else 0), ty0, tw, th)
-            lv = u["lvl"] / max(0.05, v["level"]) if v["level"] else 0.0
-            pygame.draw.rect(c, self.mix(mm.PANEL, col, 0.28 * min(1.0, lv)), r, border_radius=10)
-            if i == self.asel:
-                pygame.draw.rect(c, mm.INK, r, 2, border_radius=10)
-            btn = (DRONE_BTNS + MEL_BTNS)[i]
-            self.text(c, GLYPH[btn], self.f_med, col if v["on"] else mm.DIM, (r.centerx, r.y + th * 20 // 100),
+        tw, gap = 82, 6
+        x0 = (W - (7 * tw + 6 * gap)) // 2
+        th = L["tile_h"]
+        m = self.mods()
+        ck = (self.key, self.scale, tuple(sorted(k for k, v in m.items() if v)))
+        if getattr(self, "_amb_ck", None) != ck:
+            self._amb_ck = ck
+            self._amb_chords = [mm.build_chord(self.key, self.scale, i, m) for i in range(7)]
+        cur = getattr(self, "acur_deg", None)
+        for i, btn in enumerate(mm.CHORD_BUTTONS):
+            pc, iv, name = self._amb_chords[i]
+            active = cur == i and any(self.av[k]["on"] for k in range(6))
+            lv = self.sm("atile%d" % i, 1.0 if active else 0.0, 20 if active else 4)
+            r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"], tw, th)
+            pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT, lv), r, border_radius=10)
+            self.text(c, mm.roman_for(i, iv), self.f_med, self.mix(mm.ACCENT2, mm.BG, lv), (r.centerx, r.y + th * 21 // 100),
                       center=True)
-            nm = self.amb_patch(i)["name"]
-            self.text(c, nm if len(nm) <= 9 else nm[:8] + ".", self.f_small, mm.INK if v["on"] else mm.DIM,
-                      (r.centerx, r.y + th * 48 // 100), center=True)
-            note = mm.NOTE_NAMES[v["note"] % 12] + str(v["note"] // 12 - 1)
-            if v["cents"]:
-                note += " %+d" % v["cents"]
-            if i >= 6:
-                m = self.amel[i - 6]
-                note = ("step %d" % (m["i"] + 1)) if m["run"] and m["i"] >= 0 else "steps"
-            self.text(c, note, self.f_small, self.mix(mm.DIM, col, 0.5), (r.centerx, r.y + th * 70 // 100),
+            self.text(c, name, self.f_med if len(name) < 6 else self.f_small, self.mix(mm.INK, mm.BG, lv),
+                      (r.centerx, r.y + th * 54 // 100), center=True)
+            self.text(c, mm.BUTTON_GLYPH[btn], self.f_small, self.mix(mm.DIM, mm.BG, lv), (r.centerx, r.y + th * 83 // 100),
                       center=True)
-            bw = int((tw - 16) * min(1.0, u["lvl"]))
-            pygame.draw.rect(c, mm.BG, (r.x + 8, r.bottom - 9, tw - 16, 4), border_radius=2)
-            if bw:
-                pygame.draw.rect(c, col, (r.x + 8, r.bottom - 9, bw, 4), border_radius=2)
