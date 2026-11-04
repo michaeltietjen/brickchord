@@ -222,7 +222,7 @@ class AmbientMixin:
                 self.amb_recall(i)
                 return True
             if "SELECT" in held and i < 6:
-                self.select_used = True
+                self.sel_combo = True                    # SELECT was part of a combo: no menu on release
                 self.amb_save_scene(i)
                 return True
             self.amb_toggle(i)

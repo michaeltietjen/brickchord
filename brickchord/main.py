@@ -1091,7 +1091,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             self.beat_pick = b if b else self.beat_pick
         self.menu_i %= max(1, len(self.menu_items()))
 
-    AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn", "Learn sticks", "Quit"]
+    AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
 
     def menu_items(self):
         if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
@@ -1503,7 +1503,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
                 self.wheel_open = False
             return
         # SELECT: tap = settings, hold = looper controls from any mode
-        if name == "SELECT" and not edition.LAB:
+        if name == "SELECT" and not (edition.LAB or edition.AMBIENT):
             if down:
                 self.open_menu()
             return
