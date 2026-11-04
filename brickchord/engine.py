@@ -277,6 +277,16 @@ class Engine:
         self._sel_chain().rack = {k: tuple(v) for k, v in rack.items()}
 
     _CL_WIN = {}
+    _RAMPS = {}
+
+    @classmethod
+    def _ramp(cls, N):
+        """0..1 across a block, shaped (N, 1): built once, not every block."""
+        r = cls._RAMPS.get(N)
+        if r is None:
+            r = cls._RAMPS[N] = np.linspace(0, 1, N, dtype=np.float32)[:, None]
+            r.setflags(write=False)
+        return r
 
     def _cloud_alive(self, ch):
         """Keep a silent track's chain running only while its Cloud still has
@@ -477,7 +487,7 @@ class Engine:
             S_new = self.flt_flat if ch.flt_t == flat else self._flt_design(*ch.flt_t)
             y_new = np.fft.irfft(X * S_new[:, None], nf, axis=0)[L - 1:L - 1 + N]
             ch.flt_S = S_new
-            ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
+            ramp = self._ramp(N)
             y = y * (1 - ramp) + y_new * ramp
         return y.astype(np.float32)
 
@@ -1983,7 +1993,7 @@ class Engine:
                 self._drone_render(mix, N, sr)
 
         # smoothed fx amounts (linear ramp across the block = no zipper noise)
-        ramp = np.linspace(0, 1, N, dtype=np.float32)[:, None]
+        ramp = self._ramp(N)
         rv = self.rev + (self.rev_t - self.rev) * ramp
         dv = self.dly + (self.dly_t - self.dly) * ramp
         mv = self.master + (self.master_t - self.master) * ramp

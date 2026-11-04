@@ -59,6 +59,13 @@ def main():
     import host as H
     h = H.LocalHost(sr, block)
     conn.send(("ready", h.eng.sink))
+    # The garbage collector can pause for milliseconds at a random moment, which on
+    # the Brick is enough to make an audio block late. Everything built at startup
+    # is frozen out of its view, and it runs far less often.
+    import gc
+    gc.collect()
+    gc.freeze()
+    gc.set_threshold(20000, 50, 100)
     print("audio process: pid %d sink %s block %d" % (os.getpid(), h.eng.sink, block), flush=True)
     parent = os.getppid()
     last_snap = last_poll = 0.0
