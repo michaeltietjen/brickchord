@@ -34,6 +34,7 @@ Bricklab is the groovebox built on the same engine. It adds:
 - **A drum machine** on track 1: 16-step grid, five built-in kits plus your own WAV kits, swing, accents, ghosts, humanize, per-lane level and tune (Settings > Drums).
 - **Per-track effects**: every track has its own rack, live filter, level, pan, sends and one of two FX buses, each bus with its own reverb and delay type (Settings > FX). The track page is Effects on the mode wheel or SONG > X.
 - **Sequencing**: step grid, song page that chains patterns, count-in, record and length quantize, a metronome, and Drone slide.
+- **Demo songs**: Settings > Global > Demo song loads one of four songs (synthwave, lo-fi, acid, ambient) to hear what it does and pull apart.
 
 It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`, add a file `edition.txt` containing `lab`, and copy `Bricklab.sh` into `ports`. It shares Brickchord's sound cache when both are installed.
 

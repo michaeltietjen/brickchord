@@ -152,6 +152,13 @@ class SongMixin:
             # the earlier looper becomes pattern 1
             lp = self.cfg["loop"]
             data = {"bars": [lp.get("bars", 2)], "pats": [{"tracks": lp.get("tracks") or []}]}
+        self.song_apply(data)
+
+    def song_apply(self, data):
+        """Fill the song (tracks, lengths, chain) from saved data, a demo or None."""
+        self.pm = [[new_track(k) for k in range(NT)] for _ in range(NP)]
+        self.pbars = [2] * NP
+        self.song_rows, self.song_on, self.start_p = [[0, 1]], False, 0
         self._saved = data or {}
         for p, b in enumerate((data or {}).get("bars") or []):
             if p < NP and b in BARS:
@@ -181,6 +188,61 @@ class SongMixin:
 
     def lp_e(self):
         return getattr(self.eng, "eng", None)
+
+    # ------------------------------------------------------------ demo songs
+    DEMO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demos")
+
+    def demo_names(self):
+        try:
+            files = sorted(f for f in os.listdir(self.DEMO_DIR) if f.endswith(".json"))
+        except OSError:
+            return []
+        out = []
+        for f in files:
+            try:
+                with open(os.path.join(self.DEMO_DIR, f)) as fh:
+                    out.append((json.load(fh).get("demo") or f[:-5], f))
+            except Exception:
+                pass
+        return out
+
+    def load_demo(self, fname):
+        """Load a demo song. The current song is kept in brickchord_song.backup.json."""
+        e = self.lp_e()
+        if e is None:
+            return
+        try:
+            with open(os.path.join(self.DEMO_DIR, fname)) as f:
+                data = json.load(f)
+        except Exception as ex:
+            self.flash("DEMO FAILED TO LOAD")
+            print("demo load failed", ex, flush=True)
+            return
+        try:
+            with open(SONG_FILE.replace(".json", ".backup.json"), "w") as f:
+                json.dump(self.song_snapshot(), f, separators=(",", ":"))
+        except Exception:
+            pass
+        if e.lp_on:
+            self.lp_toggle_play()
+        self.eng.post("lp", "arm", None)
+        for p in range(NP):
+            self.eng.post("lp", "clearpat", p)
+        if data.get("bpm"):
+            self.bpm = int(data["bpm"])
+        if "key" in data:
+            self.key = int(data["key"]) % 12
+        if data.get("scale") in M().SCALES:
+            self.scale = data["scale"]
+        self.song_apply(data)
+        self.lp_sel = 1
+        self.sel_key = None
+        self.push_params()
+        self.queue_precache()
+        self.lp_load()
+        self.lp_select(1)
+        self.lp_dirty = True
+        self.flash("DEMO: %s   START PLAYS   (YOUR SONG IS BACKED UP)" % (data.get("demo") or fname).upper())
 
     def song_snapshot(self):
         e = self.lp_e()

@@ -64,7 +64,8 @@ DELAY_TIMES = [("1/16", 0.25), ("1/8", 0.5), ("1/8 dotted", 0.75), ("1/4", 1.0),
                ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
 # Settings pages (L1/R1 flips between them). Drums is Bricklab only.
 MENU_PAGES = {
-    "Global": ["Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome", "Click sound",
+    "Global": ["Demo song", "Key", "Scale", "Tempo", "Beat", "Quantize", "Count-in", "Rec quantize", "Metronome",
+               "Click sound",
                "Click level",
                "Volume", "Latency",
                "Relearn buttons", "Learn sticks", "Quit"],
@@ -305,6 +306,7 @@ class App(modes.ModesMixin):
         self.metro_snd = s.get("metro_snd") if s.get("metro_snd") in synth.METRO_SOUNDS else "Click"
         self.metro_lvl = clamp(float(s.get("metro_lvl", 0.7)), 0.0, 1.0)
         self.drone_slide = s.get("drone_slide", 1.0) if s.get("drone_slide", 1.0) in DRONE_SLIDES else 1.0
+        self.demo_pick = 0
         self.bass = s.get("bass", 0) if 0 <= s.get("bass", 0) < len(synth.BASS_MODES) else 0
         self.bass_lvl = s.get("bass_lvl", 1.0)
         self.arp_oct = s.get("arp_oct", 2)
@@ -1078,6 +1080,8 @@ class App(modes.ModesMixin):
         ] + ([("Count-in", ("%d bar%s" % (self.countin, "" if self.countin == 1 else "s")) if self.countin
                             else "Off, starts on first note"),
              ("Rec quantize", REC_QUANT[self.rec_quant]),
+             ("Demo song", (self.demo_names()[self.demo_pick % max(1, len(self.demo_names()))][0] + "   A loads")
+              if self.demo_names() else "none installed"),
              ("Metronome", METRO_MODES[self.metro]),
              ("Click sound", self.metro_snd),
              ("Click level", "%d%%" % round(self.metro_lvl * 100))] if edition.LAB else []) + [
@@ -1181,6 +1185,8 @@ class App(modes.ModesMixin):
             self.push_params()
         elif name == "Count-in":
             self.countin = (self.countin + d) % 3
+        elif name == "Demo song":
+            self.demo_pick = (self.demo_pick + d) % max(1, len(self.demo_names()))
         elif name == "Rec quantize":
             ks = list(REC_QUANT)
             self.rec_quant = ks[(ks.index(self.rec_quant) + d) % len(ks)]
@@ -1217,6 +1223,12 @@ class App(modes.ModesMixin):
             return
         if self.menu_pg == "Sample":
             self.smp_menu_change(name, 1)
+            return
+        if name == "Demo song" and edition.LAB:
+            names = self.demo_names()
+            if names:
+                self.menu = False
+                self.load_demo(names[self.demo_pick % len(names)][1])
             return
         if name == "Quit":
             self.running = False
