@@ -46,7 +46,12 @@ CHORDS = [("Triad", "deg", [0, 2, 4]), ("Seventh", "deg", [0, 2, 4, 6]), ("Ninth
           ("Quartal", "semi", [0, 5, 10, 15, 20]), ("Lydian", "semi", [0, 4, 6, 11, 14, 18]),
           ("Minor 11", "semi", [0, 3, 7, 10, 14, 17]), ("Major 9", "semi", [0, 4, 7, 11, 14]),
           ("Fifths", "semi", [0, 7, 14, 21]), ("Cluster", "semi", [0, 2, 3, 5, 7]), ("Open", "semi", [0, 7, 16, 19, 26])]
-PATHS = ["Smooth", "Linear", "Ease", "Swell", "Steps"]       # Steps walks the scale notes on the way
+# Glide paths: the curve each voice draws between two notes (the engine's shape number is
+# the index, except Scale steps, which walks the notes of the scale on the way)
+PATHS = ["Smooth", "Linear", "Ease", "Swell", "Bounce", "Late", "Snap", "Wobble", "Semitones", "Scale steps"]
+SCALE_STEPS = 9
+# Glide timing: how long each voice takes
+TIMINGS = ["Together", "By distance", "Bass lags", "Bass leads", "Loose"]
 # Moves: how the voices travel into the next chord when you ask for more than a plain glide
 MOVES = ["Bloom", "Cascade up", "Cascade down", "Spiral", "Swoop", "Scatter", "Converge", "Fall"]
 ORDERS = ["Together", "Low first", "High first", "Outside in", "Random"]
@@ -152,6 +157,11 @@ class AmbientMixin:
         self.achord.setdefault("move", 0)
         if not self.achord.get("v3"):            # chord buttons and the progression agree: plain triads by default
             self.achord.update(type=0, v3=True)
+        if not self.achord.get("v4"):            # more paths: the old Steps (4) is now Scale steps
+            if self.achord.get("path") == 4:
+                self.achord["path"] = SCALE_STEPS
+            self.achord.update(v4=True)
+        self.achord.setdefault("timing", 0)
         self.achord.setdefault("sub", True)      # a sub voice an octave under the bass
         # a chord progression that steps by itself: every voice glides into each chord
         self.aprog = dict({"steps": [5, 0, 4, 3, None, None, None, None], "time": 4}, **(st.get("prog") or {}))
@@ -546,7 +556,8 @@ class AmbientMixin:
         or from an octave above (Fall)."""
         import random
         ch = self.achord
-        shape = min(3, ch["path"])
+        path = ch["path"] % len(PATHS)
+        shape = 2 if path == SCALE_STEPS else path
         secs = float(ch["time"]) * float(glide_x)
         items = [(i, self.aui[i]["cur"] or self.av[i]["note"] * 100.0) for i in moves]
         delays = self.amb_route(ch["order"], items)
@@ -578,13 +589,27 @@ class AmbientMixin:
                 vias = {i: [mid] for i in moves}
             elif name == "Fall":
                 vias = {i: [moves[i] * 100.0 + 1200.0] for i in moves}
-            shape = 2
+            if path in (SCALE_STEPS, 8):
+                shape = 2                               # through a Move's turning points, an ease reads best
+        timing = TIMINGS[ch.get("timing", 0) % len(TIMINGS)]
+        rank = sorted(moves, key=lambda i: moves[i])
         for i, note in moves.items():
             v = self.av[i]
             frm = self.aui[i]["cur"] or v["note"] * 100.0
             v["note"], v["cents"] = int(note), 0
-            via = vias.get(i) or (self.amb_steps_via(frm, note * 100.0) if ch["path"] == 4 else None)
-            self.amb_push(i, glide=secs, shape=shape, delay=delays.get(i, 0.0), via=via)
+            via = vias.get(i) or (self.amb_steps_via(frm, note * 100.0) if path == SCALE_STEPS else None)
+            g = secs
+            k = rank.index(i) / max(1, len(rank) - 1)           # 0 = bass .. 1 = top
+            if timing == "By distance":                          # a big leap takes longer than a step
+                g = secs * max(0.35, min(2.5, abs(note * 100.0 - frm) / 500.0))
+            elif timing == "Bass lags":
+                g = secs * (1.8 - 0.9 * k)
+            elif timing == "Bass leads":
+                g = secs * (0.6 + 0.9 * k)
+            elif timing == "Loose":
+                import random
+                g = secs * random.uniform(0.6, 1.6)
+            self.amb_push(i, glide=g, shape=shape, delay=delays.get(i, 0.0), via=via)
         self.amb_sub_follow(moves, secs)
         if label:
             self.flash(label)
@@ -693,6 +718,8 @@ class AmbientMixin:
             moves = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
             self.amb_glide_all(moves, MOVES[move % len(MOVES)].upper() if move is not None else "",
                                move=move, glide_x=glide_x)
+        if getattr(self, "acur_deg", None) is not None and self.acur_deg != deg:
+            self.aprev_deg = self.acur_deg
         self.acur_key, self.acur_deg, self.acur_name = key, deg, label
         self.hit_t, self.hit_big = time.perf_counter(), True
 
@@ -708,6 +735,17 @@ class AmbientMixin:
             self.amb_play(deg, self.mods(), True, move=sel[0], glide_x=sel[1])
         else:
             self.amb_play(deg, self.mods(), with_move, toggle=True)
+
+    def amb_preview_path(self):
+        """While a chord is sounding, changing the path or timing replays the move to
+        the same chord from the one before, so you hear the new curve at once."""
+        if getattr(self, "acur_deg", None) is None or not self.amb_sounding():
+            return
+        prev = getattr(self, "aprev_deg", None)
+        cur = self.acur_deg
+        other = prev if prev is not None and prev != cur else (cur + 3) % 7
+        self.amb_play(other)
+        self._preview_back = (time.perf_counter() + max(0.6, float(self.achord["time"]) * 1.2), cur)
 
     def amb_stop(self, why="STOPPED"):
         """Everything fades out: the voices, the sub, the progression."""
@@ -880,6 +918,10 @@ class AmbientMixin:
     # ------------------------------------------------------------ time
     def amb_tick(self, now):
         self.amb_tutorial_tick(now)
+        pb = getattr(self, "_preview_back", None)
+        if pb and now >= pb[0]:
+            self._preview_back = None
+            self.amb_play(pb[1])                        # back to the chord you were on
         dt = min(0.25, now - self.alast)
         self.alast = now
         sw = getattr(self, "aswell", None)
@@ -980,7 +1022,8 @@ class AmbientMixin:
         if pg == "Chords":
             ch = self.achord
             return [("Bend range", "%d semitones" % self.aexpr["range"]), ("Bend settles on", SNAPS[self.aexpr["snap"]]),
-                    ("Chord", CHORDS[ch["type"] % len(CHORDS)][0]), ("Path", PATHS[ch["path"]]),
+                    ("Chord", CHORDS[ch["type"] % len(CHORDS)][0]), ("Path", PATHS[ch["path"] % len(PATHS)]),
+                    ("Glide timing", TIMINGS[ch.get("timing", 0) % len(TIMINGS)]),
                     ("Glide time", "%g s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
                     ("Order", ORDERS[ch["order"]]),
                     ("Bass on root", "On" if ch.get("root") else "Off"),
@@ -1090,12 +1133,16 @@ class AmbientMixin:
                 ch["type"] = (ch["type"] + d) % len(CHORDS)
             elif name == "Path":
                 ch["path"] = (ch["path"] + d) % len(PATHS)
+                self.amb_preview_path()
             elif name == "Glide time":
                 ch["time"] = self._amb_step(CHORD_TIMES, ch["time"], d)
             elif name == "Stagger":
                 ch["stagger"] = self._amb_step(STAGGERS, ch["stagger"], d)
             elif name == "Order":
                 ch["order"] = (ch["order"] + d) % len(ORDERS)
+            elif name == "Glide timing":
+                ch["timing"] = (ch.get("timing", 0) + d) % len(TIMINGS)
+                self.amb_preview_path()
             elif name == "Bass on root":
                 ch["root"] = not ch.get("root")
             elif name == "Sub bass":

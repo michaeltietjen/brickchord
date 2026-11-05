@@ -1,37 +1,40 @@
-BRICKCHORD for R36Max (and R36S / other ArkOS-family handhelds)
-================================================================
+BRICKCHORD, BRICKLAB and BRICKGLIDE for the R36S, R36Max and other ArkOS-family handhelds
+=======================================================================================
 
 INSTALL
-1. Turn the R36Max off and take out the SD card (if it has two slots, use
-   the one with your games, usually labeled EASYROMS on a computer).
-2. Open the "ports" folder on the card. If there isn't one, look inside
-   "roms" for it, or create "ports" next to the other system folders.
-3. Copy "Brickchord.sh" and the "brickchord" folder from this zip into it:
-       ports/Brickchord.sh
-       ports/brickchord/...
+1. Turn the handheld off and take out the SD card. If it has two slots, use the
+   one with your games (on a computer it is usually called EASYROMS).
+2. Open the "ports" folder on the card. If there isn't one, look inside "roms",
+   or create "ports" next to the other system folders.
+3. Copy everything from this zip's "ports" folder into it:
+       ports/Brickchord.sh     ports/brickchord/
+       ports/Bricklab.sh       ports/bricklab/
+       ports/Brickglide.sh     ports/brickglide/
+       ports/brick_vendor/     (the libraries all three share: keep it)
+   You can leave out an app you don't want; keep brick_vendor either way.
 4. Put the card back, turn it on, then Start > Quit > Restart EmulationStation
-   (or just reboot). Brickchord appears under Ports.
-5. First launch takes a little longer: it unpacks the libraries that match
-   this device, then asks you to press each button and push each stick once.
+   (or reboot). The apps appear under Ports.
+5. The first launch takes a little longer: it unpacks the libraries for this
+   device once, then asks you to press each button and push each stick once.
 
-PLAY: same as the TrimUI Brick version (see brickchord/README.txt).
-D-pad + X/A/B play chords, hold Y/L1/R1 for flip/7th/sus4, left stick bends
-the chord, right stick does reverb/delay/filter, Start = beat, Select = menu,
-Select+Start = quit.
-
-The screen layout adapts to the square 720x720 display automatically.
+THE THREE APPS
+- Brickchord: the simple one. Seven chord buttons, a beat, effects.
+- Bricklab: the groovebox. A looper, patterns, songs, drums, samples, machines.
+- Brickglide: chords that glide. Press a chord and the voices slide into it;
+  it opens with a guided demo of its controls.
 
 IF IT DOESN'T START
-Look at ports/brickchord/brickchord.log on the card. It says which Python
-the device has and what went wrong. Common causes:
+Look at the .log file inside the app's folder (for example
+ports/brickglide/brickglide.log). It says which Python the device has and
+what went wrong.
  - "python3 not found": the stock firmware has no Python. Install ArkOS
-   (AeolusUX build for R36Max) or dArkOS on a fresh card, then try again.
+   (or dArkOS) on a fresh card, then try again.
  - Black screen or no sound: send the log to whoever gave you this.
- - Crackles: Settings > Latency > Safe, then relaunch.
+ - Crackles: Settings > Global > Latency > Safe, then relaunch.
 
-The R36Max's chip is slower than the Brick's, so a sound you haven't used
-before takes a few seconds to build in the background (it plays a stand-in
-until then) and loads instantly after that.
+These chips are slower than the TrimUI Brick's, so a sound you haven't used
+before takes a few seconds to build the first time, and loads instantly after.
 
 Bundled: NumPy (BSD-3-Clause) and pygame (LGPL) wheels for 64-bit ARM,
-Python 3.7 to 3.12. The bundled pygame is only used if the firmware has none.
+Python 3.7 to 3.12; the Inter font (SIL OFL). The bundled pygame is only used
+if the firmware has none.

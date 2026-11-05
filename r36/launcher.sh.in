@@ -1,0 +1,33 @@
+#!/bin/bash
+# @NAME@: @DESC@
+# R36Max / R36S / ArkOS-family port. Copy this file, the @DIR@ folder and the
+# brick_vendor folder into the ports folder of the SD card, then restart EmulationStation.
+
+PORTDIR="$(cd "$(dirname "$0")" && pwd)"
+APPDIR="$PORTDIR/@DIR@"
+LOG="$APPDIR/@DIR@.log"
+cd "$APPDIR" || exit 1
+[ -f "$LOG" ] && mv -f "$LOG" "$APPDIR/@DIR@.prev.log"
+
+{
+  printf '=== @NAME@ (R36) %s ===\n' "$(date)"
+  uname -a
+  PY="$(command -v python3)"
+  if [ -z "$PY" ]; then
+    echo "python3 not found on this firmware. Install ArkOS or dArkOS, which include Python 3."
+    exit 127
+  fi
+  echo "python3: $PY ($("$PY" --version 2>&1))"
+  # steady CPU for audio while we run (ignored if not allowed)
+  OLDGOV="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)"
+  echo performance | sudo -n tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1
+  "$PY" -u -B "$APPDIR/launch.py"
+  RC=$?
+  if [ $RC -ne 0 ] && grep -q "No available video device\|video system not initialized" "$LOG" 2>/dev/null; then
+    echo "retrying with SDL_VIDEODRIVER=kmsdrm"
+    SDL_VIDEODRIVER=kmsdrm "$PY" -u -B "$APPDIR/launch.py"
+    RC=$?
+  fi
+  [ -n "$OLDGOV" ] && echo "$OLDGOV" | sudo -n tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1
+  echo "exit $RC"
+} > "$LOG" 2>&1

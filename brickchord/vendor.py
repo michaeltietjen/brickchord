@@ -14,6 +14,10 @@ import zipfile
 
 APP = os.path.dirname(os.path.abspath(__file__))
 VENDOR = os.path.join(APP, "_vendor")
+# The R36 family zip holds all three apps; their libraries sit once, next to them.
+_SHARED = os.path.join(os.path.dirname(APP), "brick_vendor")
+if not os.path.isdir(VENDOR) and os.path.isdir(_SHARED):
+    VENDOR = _SHARED
 
 
 def _log(*a):

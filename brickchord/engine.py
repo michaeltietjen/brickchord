@@ -789,6 +789,19 @@ class Engine:
         if shape == 3:
             e = p * p * (3 - 2 * p)
             return e + 0.45 * math.sin(math.pi * p) * p
+        if shape == 4:                                  # Bounce: lands, overshoots, settles in two swings
+            return 1.0 - (1.0 - p) ** 4 * math.cos(3.0 * math.pi * p)
+        if shape == 5:                                  # Late: holds the old note, then slides at the end
+            q = max(0.0, (p - 0.65) / 0.35)
+            return q * q * (3 - 2 * q)
+        if shape == 6:                                  # Snap: slides at once, then sits on the new note
+            q = min(1.0, p / 0.25)
+            return q * q * (3 - 2 * q)
+        if shape == 7:                                  # Wobble: wavers around the way, like a hand on a ribbon
+            e = p * p * (3 - 2 * p)
+            return e + 0.09 * math.sin(6 * math.pi * p) * math.sin(math.pi * p)
+        if shape == 8:                                  # Semitones: linear; the steps are made in amb_path_at
+            return p
         return (1 - math.exp(-5 * p)) / (1 - math.exp(-5))
 
     @classmethod
@@ -802,7 +815,10 @@ class Engine:
             return path[-1]
         n = len(path) - 1
         if n == 1:
-            return path[0] + (path[1] - path[0]) * cls.amb_shape(el / dur, shape)
+            v = path[0] + (path[1] - path[0]) * cls.amb_shape(el / dur, shape)
+            if shape == 8:                              # Semitones: a staircase, every semitone on the way
+                v = path[0] + round((v - path[0]) / 100.0) * 100.0
+            return v
         q = el / dur * n
         i = min(n - 1, int(q))
         return path[i] + (path[i + 1] - path[i]) * cls.amb_shape(q - i, 2)
