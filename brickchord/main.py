@@ -719,10 +719,17 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             secs = self.LAB_T0 + 16 * self.LAB_STEP + 1.0
             hits = sorted((self.LAB_T0 + s * self.LAB_STEP, part) for s, part in self.LAB_HITS.items())
             hits.append((self.LAB_T0 + 16 * self.LAB_STEP, "kick"))
+        if edition.AMBIENT:
+            # Brickglide's film: five voices on one note bloom into the home chord
+            secs = self.INTRO_SECS
+            struck = True                     # no chime: the bloom is the sound
+            self.amb_intro_start()
         while True:
             t = time.perf_counter() - self.t0
             if hasattr(self.eng, "pump"):
                 self.eng.pump()          # keep draining the audio process, or the pipes wedge
+            if edition.AMBIENT:
+                self.amb_intro_tick(t)
             if edition.LAB:
                 while hits and t >= hits[0][0]:
                     _, part = hits.pop(0)
@@ -734,10 +741,14 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
                 self.chime()
                 struck = True
             if t >= secs:
+                if edition.AMBIENT and not getattr(self, "_intro_done", False):
+                    self.amb_intro_end()
                 return
             for ev in pygame.event.get():
                 if ev.type in (pygame.KEYDOWN, pygame.JOYBUTTONDOWN):
-                    if not struck:
+                    if edition.AMBIENT:
+                        self.amb_intro_end()
+                    elif not struck:
                         self.chime()
                     return
                 if ev.type == pygame.QUIT:
@@ -747,7 +758,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
                 self.ensure_bass(self.bass_range(), budget=0.008)   # a few notes per frame
             c = self.canvas
             c.fill(BG)
-            if edition.LAB:
+            if edition.AMBIENT:
+                self.draw_amb_intro(c, t)
+            elif edition.LAB:
                 self.draw_mark(c, BASE_W // 2, 96 + L["dy"], 27, t)
                 self.draw_title(c, 196 + L["dy"], t)
             else:
@@ -761,10 +774,14 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         c.fill(BG)
         t = time.perf_counter() - getattr(self, "t0", time.perf_counter() - 9)
         d = L["dy"]
-        if edition.LAB:
+        if edition.AMBIENT:
+            self.draw_amb_intro(c, 3.3)
+        elif edition.LAB:
             self.draw_mark(c, BASE_W // 2, 96 + d, 27)
             self.draw_title(c, 196 + d)
-        else:
+        if edition.AMBIENT:
+            pass
+        elif not edition.LAB:
             self.draw_mark(c, BASE_W // 2, 105 + d, 34, max(t, 1.5))
             self.draw_title(c, 180 + d)
         self.text(c, "preparing %s" % self.bank[self.patch]["name"], self.f_small, DIM, (BASE_W // 2, 218 + d), center=True)

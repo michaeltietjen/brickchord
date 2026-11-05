@@ -1339,3 +1339,118 @@ class AmbientMixin:
                       (r.centerx, r.y + th * 54 // 100), center=True)
             self.text(c, mm.BUTTON_GLYPH[btn], self.f_small, self.mix(mm.DIM, mm.BG, lv), (r.centerx, r.y + th * 83 // 100),
                       center=True)
+
+    # ------------------------------------------------------------ the intro film
+    INTRO_SECS = 4.6
+
+    def amb_intro_wave(self):
+        """A soft band-limited saw, made right here (no render wait): one second that
+        loops exactly, at 131 Hz, the base note C3 and a little."""
+        import numpy as np
+        sr = 22050
+        n = np.arange(sr)
+        x = sum(np.sin(2 * np.pi * 131 * k * n / sr) / k * (0.92 ** k) for k in range(1, 14))
+        x = (x / np.abs(x).max() * 0.11).astype(np.float32)
+        st = np.repeat(x[:, None], 2, axis=1)
+        return np.ascontiguousarray(st[:1024]), np.ascontiguousarray(np.concatenate([st[1024:], st[:1024]]))
+
+    def amb_intro_notes(self):
+        """The home chord of the key, laid out over two octaves, and the note they all start on."""
+        mm = M()
+        pc, iv, _ = mm.build_chord(self.key, self.scale, 0, {})
+        r = 48 + (pc % 12)
+        if r > 54:
+            r -= 12
+        notes = [r - 12, r, r + 12 + iv[1], r + 12 + iv[2], r + 24]
+        return r + iv[2], notes          # they all start on the fifth and fan out both ways
+
+    def amb_intro_start(self):
+        """Five voices on one note, about to bloom: the same sound the app is about."""
+        base = 48 + 12 * 0      # the wave's own pitch is 131 Hz ~ C3 (48) + 3 cents
+        r, notes = self.amb_intro_notes()
+        snd = self.amb_intro_wave()
+        self._intro = {"r": r, "notes": notes, "bloomed": False, "out": False}
+        for i in range(5):
+            self.eng.post("amb_snd", i, snd, True)
+            self.eng.post("amb", i, {"tgt": (r - base) * 100.0 - 3, "on": True, "level": 0.55 if i else 0.7,
+                                     "pan": [0.0, -0.55, 0.55, -0.3, 0.3][i], "fade": 0.5, "glide": 0.0,
+                                     "vib": 3.0, "rate": 0.3 + 0.07 * i, "trem": 0.0, "drift": 0.0, "jump": True})
+
+    def amb_intro_tick(self, t):
+        st = getattr(self, "_intro", None)
+        if st is None:
+            return
+        if not st["bloomed"] and t >= 0.8:
+            st["bloomed"] = True
+            for i, n in enumerate(st["notes"]):
+                self.eng.post("amb", i, {"tgt": (n - 48) * 100.0 - 3, "glide": 2.4, "shape": 2,
+                                         "delay": 0.08 * i})
+        if not st["out"] and t >= 3.4:
+            st["out"] = True
+            self.amb_intro_end(fade=1.4)
+
+    def amb_intro_end(self, fade=0.4):
+        """Let the intro voices go; the slots are rendered with the real sounds when played."""
+        for i in range(5):
+            self.eng.post("amb", i, {"on": False, "fade": float(fade)})
+        self._intro_done = True
+
+    def draw_amb_intro(self, c, t):
+        """The film: five lines leave one point and bloom into the chord across the
+        screen, the mark settles above them, and the name types in."""
+        mm = M()
+        W, H = mm.BASE_W, mm.BASE_H
+        st = getattr(self, "_intro", None)
+        r, notes = (st["r"], st["notes"]) if st else self.amb_intro_notes()
+        x0, x1 = 50, W - 50
+        lo, hi = min(notes) - 3, max(notes) + 3
+        ytop, ybot = H * 0.42, H * 0.93
+
+        def ypos(m):
+            return ybot - (m - lo) / float(hi - lo) * (ybot - ytop)
+        span = 3.3
+        head = min(1.0, t / span)
+        fade_out = max(0.0, min(1.0, (t - 3.6) / 0.8))
+        for i, n in enumerate(notes):
+            col = VCOL[i]
+            col = self.mix(col, mm.BG, 0.55 * fade_out)
+            pts = []
+            steps = max(2, int(80 * head))
+            for s in range(steps + 1):
+                tt = span * head * s / steps
+                d = 0.08 * i
+                p = 0.0 if tt < 0.8 + d else min(1.0, (tt - 0.8 - d) / 2.4)
+                e = p * p * (3 - 2 * p)
+                m = r + (n - r) * e
+                pts.append((x0 + (x1 - x0) * tt / span, ypos(m)))
+            if len(pts) > 1:
+                pygame.draw.lines(c, col, False, [(int(x), int(y)) for x, y in pts], 3)
+                hx, hy = pts[-1]
+                if head < 1.0:
+                    pygame.draw.circle(c, col, (int(hx), int(hy)), 5)
+        # the mark: 4 x 4 keys, the first lit, dropping in once the bloom is under way
+        k, g = 20, 6
+        mx = W // 2 - (4 * k + 3 * g) // 2
+        my = int(H * 0.08)
+        for i in range(16):
+            ti = 1.6 + 0.035 * i
+            p = max(0.0, min(1.0, (t - ti) / 0.25))
+            if p <= 0:
+                continue
+            drop = int((1 - p) ** 2 * -18)
+            col = mm.ACCENT if i == 0 else mm.INK
+            col = self.mix(mm.BG, col, p)
+            x = mx + (i % 4) * (k + g)
+            y = my + (i // 4) * (k + g) + drop
+            pygame.draw.rect(c, col, (x, y, k, k), border_radius=4)
+        # the name types in under the mark
+        word = "brickglide"
+        n = 0 if t < 2.3 else min(len(word), int((t - 2.3) / 0.055) + 1)
+        if n:
+            full = self.f_big.render(word, True, mm.INK)
+            part = self.f_big.render(word[:n], True, mm.INK)
+            x = W // 2 - full.get_width() // 2
+            y = my + 4 * k + 3 * g + 22
+            c.blit(part, (x, y))
+            if n < len(word) or int(t * 6) % 2 == 0:
+                pygame.draw.rect(c, mm.ACCENT, (x + part.get_width() + 3, y + 8, 4, full.get_height() - 14))
