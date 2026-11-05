@@ -3,14 +3,17 @@
 #   < ^ > v X A B            the seven chords of the key (I to VII): the voices glide into it
 #                            and hold it; the same chord again lets it fade
 #   L1 / R1 / L1+R1 / Y      with a chord: 7th / sus4 / 9th / flip major-minor (as in Brickchord)
-#   left stick               bend the whole chord (X) and swell it (Y); it springs back
+#   left stick               hold a direction while pressing a chord: that direction's Move
+#                            (up Fall, up-right Spiral, right Cascade up, down-right Bloom,
+#                            down Swoop, down-left Converge, left Cascade down, up-left Scatter);
+#                            further out = longer glide
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
 #   right stick              filter and space, as in Brickchord
 #   R2                       bloom: every voice from one note, fanning out into the chord
 #   R2 + chord               that chord with the chosen Move (Settings > Chords): Bloom, Cascade,
 #                            Spiral, Swoop, Scatter, Swap, Rise
 #   L2 + chord button        recall a scene (SELECT + chord button saves one)
-#   START                    the progression plays by itself (Settings > Chords)
+#   START                    stop everything; from silence, the progression plays by itself
 #   L3                       glide guides / spectrogram
 #   SELECT                   Settings (sounds, glide time and path, the progression, scenes)
 #   SELECT + chord button    save a scene
@@ -97,14 +100,15 @@ TUTORIAL = [
     ("Hold  L1  and press  X :  the fifth chord with a 7th", 4, lambda s: s.acur_deg == 4 and "seventh" in (s.acur_key or (0, ()))[1]),
     ("Hold  Y  and press  ^ :  Y flips major and minor", 1,
      lambda s: s.acur_deg == 1 and "flip" in (s.acur_key or (0, ()))[1]),
-    ("Push the LEFT STICK sideways to bend the chord", None,
-     lambda s: abs(getattr(s, "abend", 0.0)) > 150),
+    ("Hold the LEFT STICK in a direction and press a chord: a Move", None,
+     lambda s: s.atut_flags.get("compass")),
     ("Press  R2 :  bloom, every voice from one note", None, lambda s: s.atut_flags.get("bloom")),
-    ("Press  START :  the chords play by themselves", None, lambda s: s.aprog.get("run")),
+    ("Press  START :  everything stops", None, lambda s: not s.amb_sounding() and not s.aprog.get("run")),
+    ("Press  START  again:  the chords play by themselves", None, lambda s: s.aprog.get("run")),
     ("Click  L3  (press the left stick in)  to see the sound", None,
      lambda s: getattr(s, "aview", "guides") == "spectrum"),
-    ("Press  START  to stop.  SELECT opens Settings", None,
-     lambda s: not s.aprog.get("run")),
+    ("Press  START  to stop everything.  SELECT opens Settings", None,
+     lambda s: not s.aprog.get("run") and not s.amb_sounding()),
 ]
 
 
@@ -146,6 +150,8 @@ class AmbientMixin:
         if not self.achord.get("v2"):            # played like Brickchord now: chords glide in about a second
             self.achord.update(time=1.5, stagger=0, order=0, path=2, v2=True)
         self.achord.setdefault("move", 0)
+        if not self.achord.get("v3"):            # chord buttons and the progression agree: plain triads by default
+            self.achord.update(type=0, v3=True)
         self.achord.setdefault("sub", True)      # a sub voice an octave under the bass
         # a chord progression that steps by itself: every voice glides into each chord
         self.aprog = dict({"steps": [5, 0, 4, 3, None, None, None, None], "time": 4}, **(st.get("prog") or {}))
@@ -397,7 +403,10 @@ class AmbientMixin:
             self.amb_press_chord(name)
             return True
         if name == "START":
-            self.amb_prog_toggle()                      # the progression plays by itself
+            if self.aprog.get("run") or any(self.av[i]["on"] for i in range(6)):
+                self.amb_stop()                          # START stops everything, progression and voices
+            else:
+                self.amb_prog_toggle()                   # from silence: the progression plays by itself
             return True
         if name == "L3":
             self.aview = "spectrum" if getattr(self, "aview", "guides") == "guides" else "guides"
@@ -415,7 +424,7 @@ class AmbientMixin:
         if self.aexp:
             self.amb_express(x, y)
             return
-        self.amb_bend_all(x, y)
+        self.amb_compass(x, y)
         return
         dz = 0.15
         sx = 0.0 if abs(x) < dz else x
@@ -529,7 +538,7 @@ class AmbientMixin:
             notes.reverse()
         return notes[:10]
 
-    def amb_glide_all(self, moves, label, move=None):
+    def amb_glide_all(self, moves, label, move=None, glide_x=1.0):
         """moves: {voice: new midi}. Every voice glides there along the chord path.
         With a move (see MOVES), the voices travel a longer way: through one note
         (Bloom), one after another (Cascade), round an octave (Spiral), dipping
@@ -538,7 +547,7 @@ class AmbientMixin:
         import random
         ch = self.achord
         shape = min(3, ch["path"])
-        secs = float(ch["time"])
+        secs = float(ch["time"]) * float(glide_x)
         items = [(i, self.aui[i]["cur"] or self.av[i]["note"] * 100.0) for i in moves]
         delays = self.amb_route(ch["order"], items)
         vias = {}
@@ -601,28 +610,8 @@ class AmbientMixin:
         self.amb_push(5, jump=not was_on, glide=secs, shape=2)
 
     def amb_chord(self, deg, with_move=False):
-        """Glide the sounding drones into a chord on scale degree deg (0..5), each
-        voice to the nearest chord tone so the voices lead smoothly."""
-        on = [i for i in range(6) if self.av[i]["on"]]
-        if not on:
-            self.flash("TURN SOME VOICES ON FIRST")
-            return
-        name, kind, steps = CHORDS[self.achord["type"] % len(CHORDS)]
-        sc = M().SCALES[self.scale]
-        if kind == "deg":
-            pcs = {(self.key + sc[(deg + s) % 7]) % 12 for s in steps}
-        else:
-            root = (self.key + sc[deg % 7]) % 12
-            pcs = {(root + s) % 12 for s in steps}
-        mm = M()
-        _, iv0, cname = mm.build_chord(self.key, self.scale, deg % 7, {})
-        roman = mm.roman_for(deg % 7, iv0)
-        self.acur_deg = deg % 7
-        self.acur_name = "%s  %s" % (roman, cname)
-        self.amb_glide_all(self.amb_voicelead(on, pcs, (self.key + sc[deg % 7]) % 12),
-                           "%s %s   %s" % (roman, name.upper(), MOVES[self.achord["move"] % len(MOVES)].upper()
-                                           if with_move else PATHS[self.achord["path"]].upper() + " PATH"),
-                           move=self.achord["move"] if with_move else None)
+        """The progression's chord: exactly what pressing that chord button plays."""
+        self.amb_play(deg % 7, None, with_move)
 
     def amb_voicelead(self, on, pcs, root_pc):
         """Each sounding voice to a tone of the chord (pcs): the lowest to the root, as
@@ -650,28 +639,43 @@ class AmbientMixin:
     # ------------------------------------------------------------ playing chords, Brickchord-style
     NCH = 5                     # how many drone voices a chord button plays
 
-    def amb_press_chord(self, btn, with_move=False):
-        """A chord button: the voices glide into that chord (Brickchord's chord, with
-        its L1 / R1 / Y modifiers) and hold it. The same chord again lets it fade."""
+    # the left stick as a Move compass: hold a direction while you press a chord
+    COMPASS_MOVES = [7, 3, 1, 0, 4, 6, 2, 5]   # up Fall, up-right Spiral, right Cascade up, down-right Bloom,
+                                               # down Swoop, down-left Converge, left Cascade down, up-left Scatter
+
+    def amb_chord_tones(self, deg, held):
+        """The chord on a degree, the same way for the buttons and the progression: the
+        held modifiers (L1 / R1 / Y) if any, otherwise the Chord setting."""
         mm = M()
-        deg = mm.CHORD_BUTTONS.index(btn)
-        m = self.mods()
-        pc, iv, name = mm.build_chord(self.key, self.scale, deg, m)
-        key = (deg, tuple(sorted(k for k, v in m.items() if v)))
+        name = CHORDS[self.achord["type"] % len(CHORDS)][0]
+        m = dict(held or {})
+        if not any(m.values()):
+            m = {"Seventh": {"seventh": True}, "Ninth": {"ninth": True}, "Sus4": {"sus": True}}.get(name, {})
+        pc, iv, cname = mm.build_chord(self.key, self.scale, deg, m)
+        root_pc = pc % 12                          # build_chord's root is already in the key
+        if any((held or {}).values()) or name in ("Triad", "Seventh", "Ninth", "Sus4"):
+            pcs = {(root_pc + i) % 12 for i in iv}
+        else:                                       # the colour chords: Eleventh, Quartal, Lydian and the rest
+            _, kind, steps = CHORDS[self.achord["type"] % len(CHORDS)]
+            sc = mm.SCALES[self.scale]
+            pcs = ({(self.key + sc[(deg + s) % 7]) % 12 for s in steps} if kind == "deg"
+                   else {(root_pc + s) % 12 for s in steps})
+            cname = cname + " " + name
+        key = (deg, tuple(sorted(k for k, v in m.items() if v)), name)
+        return root_pc, pcs, mm.roman_for(deg, iv) + "  " + cname, key
+
+    def amb_play(self, deg, held=None, with_move=False, move=None, glide_x=1.0, toggle=False):
+        """Play the chord on a degree: from silence the voices lay it out and fade in;
+        otherwise every voice glides there (straight, or with a Move)."""
+        root_pc, pcs, label, key = self.amb_chord_tones(deg, held)
         sounding = [i for i in range(self.NCH) if self.av[i]["on"]]
-        if sounding and getattr(self, "acur_key", None) == key and not with_move:
-            for i in sounding + ([5] if self.av[5]["on"] else []):       # the same chord again: let it go
-                self.av[i]["on"] = False
-                self.amb_push(i)
-            self.acur_key = self.acur_deg = None
-            self.acur_name = ""
-            self.flash("RELEASED   PRESS A CHORD")
+        if toggle and sounding and getattr(self, "acur_key", None) == key and not with_move:
+            self.amb_stop("RELEASED")                  # the same chord again: let it go
             return
-        root_pc = (self.key + pc) % 12
-        pcs = {(root_pc + i) % 12 for i in iv}
+        if move is None and with_move:
+            move = self.achord["move"]
         fresh = [i for i in range(self.NCH) if not self.av[i]["on"]]
         if len(fresh) == self.NCH:
-            # starting from silence: lay the chord out across the voices' registers and fade in
             notes = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
             for i, n in notes.items():
                 v = self.av[i]
@@ -680,18 +684,56 @@ class AmbientMixin:
                     self.amb_render(i)
                 self.amb_push(i, jump=True)
             self.amb_sub_follow(notes, 0.5)
-            if with_move:
-                self.amb_bloom(secs=max(3.0, self.achord["time"] * 2))
+            if move is not None:
+                self.amb_bloom(secs=max(3.0, self.achord["time"] * 2 * glide_x))
         else:
             for i in fresh:
                 self.av[i]["on"] = True
                 self.amb_push(i, jump=True)
             moves = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
-            self.amb_glide_all(moves, MOVES[self.achord["move"] % len(MOVES)].upper() if with_move else "",
-                               move=self.achord["move"] if with_move else None)
-        self.acur_key, self.acur_deg = key, deg
-        self.acur_name = mm.roman_for(deg, iv) + "  " + name
+            self.amb_glide_all(moves, MOVES[move % len(MOVES)].upper() if move is not None else "",
+                               move=move, glide_x=glide_x)
+        self.acur_key, self.acur_deg, self.acur_name = key, deg, label
         self.hit_t, self.hit_big = time.perf_counter(), True
+
+    def amb_press_chord(self, btn, with_move=False):
+        """A chord button: Brickchord's chord (L1 7th, R1 sus4, L1+R1 9th, Y flip). The
+        left stick, held in a direction, picks a Move for this change; R2 uses the
+        Move from Settings."""
+        mm = M()
+        deg = mm.CHORD_BUTTONS.index(btn)
+        sel = getattr(self, "acompass", None)
+        if sel is not None:
+            self.atut_flags["compass"] = True
+            self.amb_play(deg, self.mods(), True, move=sel[0], glide_x=sel[1])
+        else:
+            self.amb_play(deg, self.mods(), with_move, toggle=True)
+
+    def amb_stop(self, why="STOPPED"):
+        """Everything fades out: the voices, the sub, the progression."""
+        for i in range(6):
+            if self.av[i]["on"]:
+                self.av[i]["on"] = False
+                self.amb_push(i)
+        self.aprog["run"] = False
+        self.acur_key = self.acur_deg = None
+        self.acur_name = ""
+        self.flash(why + "   PRESS A CHORD")
+
+    def amb_compass(self, x, y):
+        """Left stick: hold a direction and the next chord you press travels there with
+        that direction's Move; push further for a longer glide (up to 4x)."""
+        r = math.hypot(x, y)
+        if r < 0.4:
+            if getattr(self, "acompass", None) is not None:
+                self.acompass = None
+            return
+        sector = int(((math.degrees(math.atan2(x, y)) + 360 + 22.5) % 360) // 45)
+        mv = self.COMPASS_MOVES[sector]
+        gx = round((1.0 + 3.0 * min(1.0, (r - 0.4) / 0.55)) * 2) / 2.0
+        if getattr(self, "acompass", None) != (mv, gx):
+            self.acompass = (mv, gx)
+            self.flash("MOVE: %s   %gx GLIDE   PRESS A CHORD" % (MOVES[mv].upper(), gx))
 
     def amb_bend_all(self, x, y):
         """Left stick with nothing held: bend the whole chord and swell it; it springs
