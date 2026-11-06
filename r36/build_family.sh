@@ -16,6 +16,8 @@ app() {   # app <dir> <Name> <edition or empty> <description>
     cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$P/$D/"
     cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$P/$D/"
     cp "$ROOT"/brickchord/samples/*.wav "$P/$D/samples/" 2>/dev/null || true
+    [ -d "$ROOT/brickchord/samples/textures" ] && cp -R "$ROOT/brickchord/samples/textures" "$P/$D/samples/"
+    [ -f "$ROOT/brickchord/samples/samples.json" ] && cp "$ROOT/brickchord/samples/samples.json" "$P/$D/samples/"
     cp "$ROOT/LICENSE" "$P/$D/LICENSE.txt"
     [ -n "$E" ] && printf '%s\n' "$E" > "$P/$D/edition.txt"
     sed -e "s/@NAME@/$N/g" -e "s/@DIR@/$D/g" -e "s/@DESC@/$DESC/g" "$ROOT/r36/launcher.sh.in" > "$P/$N.sh"
