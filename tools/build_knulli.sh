@@ -21,6 +21,8 @@ build() {   # build <folder name> <launcher> <edition or empty> <image prefix>
     cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$ROOT/brickchord/samples_README.txt" "$APP/"
     cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$APP/"
     cp "$ROOT"/brickchord/samples/*.wav "$APP/samples/" 2>/dev/null || true
+    [ -d "$ROOT/brickchord/samples/textures" ] && cp -R "$ROOT/brickchord/samples/textures" "$APP/samples/"
+    [ -f "$ROOT/brickchord/samples/samples.json" ] && cp "$ROOT/brickchord/samples/samples.json" "$APP/samples/"
     cp "$ROOT/LICENSE" "$APP/LICENSE.txt"
     [ -n "$ED" ] && printf '%s\n' "$ED" > "$APP/edition.txt"
     (cd "$APP/_vendor" && unzip -q "$WHL"/numpy-*.whl -x 'numpy/*/tests/*' 'numpy/tests/*' 'numpy/typing/tests/*')

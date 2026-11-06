@@ -26,5 +26,5 @@ _RAW = ""
 EDITION = _read()
 LAB = EDITION == "lab"
 AMBIENT = EDITION == "ambient"           # Brickglide: drones, long glides, chords, scenes
-PLAY = AMBIENT and _RAW.startswith("glideplay")   # the Brickglide Play fork: melody over the progression
-NAME = "Bricklab" if LAB else (("Brickglide Play" if PLAY else "Brickglide") if AMBIENT else "Brickchord")
+PLAY = AMBIENT   # Brickglide plays melody over the progression, strums, arps, samples and MIDI (was the Play fork)
+NAME = "Bricklab" if LAB else ("Brickglide" if AMBIENT else "Brickchord")
