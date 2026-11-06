@@ -92,22 +92,53 @@ def amb_bank():
         except StopIteration:
             pass
     if edition.PLAY:
-        # any WAV in samples/ as a pad that follows the chords, and the texture beds
-        # in samples/textures/ (unpitched room sounds under everything)
+        # any WAV in samples/ (this app's, and Bricklab's and Brickchord's next to it)
+        # as a pad that follows the chords, and the texture beds in samples/textures/
         d = synth.SAMPLE_DIR
+        ports = os.path.dirname(os.path.dirname(d))
+        dirs = [d] + [os.path.join(ports, app, "samples") for app in ("bricklab", "brickchord", "brickglide")]
+        seen = set()
+        for k, sd in enumerate(dirs):
+            try:
+                files = sorted(os.listdir(sd))
+            except OSError:
+                continue
+            for f in files:
+                if not f.lower().endswith(".wav") or f.startswith(".") or f in seen:
+                    continue
+                seen.add(f)
+                out.append({"name": "Sample " + sample_title(f), "sample": f if k == 0 else os.path.join(sd, f),
+                            "root": sample_root(f), "pad": True})
         try:
-            for f in sorted(os.listdir(d)):
-                if f.lower().endswith(".wav"):
-                    out.append({"name": "Sample " + os.path.splitext(f)[0].replace("_", " ").title(),
-                                "sample": f, "root": 60, "pad": True})
             for f in sorted(os.listdir(os.path.join(d, "textures"))):
-                if f.lower().endswith(".wav"):
+                if f.lower().endswith(".wav") and not f.startswith("."):
                     out.append({"name": "Texture " + os.path.splitext(f)[0], "sample": "textures/" + f,
                                 "root": 60, "pad": True, "texture": True})
         except OSError:
             pass
     return out
 
+
+
+def sample_title(f):
+    """A readable sound name from a sample's file name."""
+    s = os.path.splitext(f)[0].replace("_", " ").replace("-", " ")
+    s = " ".join(w for w in s.split() if not w.isdigit())
+    return (s[:22] + "\u2026") if len(s) > 23 else s
+
+
+def sample_root(f):
+    """The note a sample is in, read from its file name (Em, C#m, Fmin, Cmaj, A3...),
+    so it plays in tune; C4 when the name doesn't say."""
+    import re
+    s = os.path.splitext(f)[0]
+    m = re.findall(r"(?:^|[\s_\-(])([A-G])([#b]?)(?:m(?:in(?:or)?)?|maj(?:or)?|M)?(-?\d)?(?=$|[\s_\-)])", s)
+    if not m:
+        return 60
+    note, acc, octv = m[-1]
+    pc = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}[note] + (1 if acc == "#" else -1 if acc == "b" else 0)
+    octave = int(octv) if octv else 4
+    return 12 * (octave + 1) + pc % 12
 
 def struck(p):
     return p.get("macro") is not None and int(p.get("macro", 0)) in synth.MACRO_STRUCK
