@@ -568,7 +568,10 @@ class AmbientMixin:
         return False
 
     def amb_stick(self, x, y):
-        if self.amb_melody_mode() and "L2" not in self.inp.held and "R2" not in self.inp.held:
+        if (edition.PLAY and "L2" not in self.inp.held and "R2" not in self.inp.held
+                and getattr(self, "ascrub", None) is None):
+            # Brickglide Play: the left stick strums and arpeggiates whatever chord is
+            # sounding, from the progression, the chord buttons or the Orchid
             self.amb_strum(x, y)
             return
         if "L2" in self.inp.held:
@@ -873,6 +876,7 @@ class AmbientMixin:
         if getattr(self, "acur_deg", None) is not None and self.acur_deg != deg:
             self.aprev_deg = self.acur_deg
         self.acur_key, self.acur_deg, self.acur_name = key, deg, label
+        self.amidi_pcs = None
         self.hit_t, self.hit_big = time.perf_counter(), True
 
     def amb_press_chord(self, btn, with_move=False):
@@ -1029,8 +1033,8 @@ class AmbientMixin:
 
     def amb_strum_tones(self):
         deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else None
-        if deg is None and getattr(self, "acur_name", "") and getattr(self, "amidi_applied", None):
-            pcs = {n % 12 for n in self.amidi_applied}       # a chord from MIDI has no degree
+        if deg is None and getattr(self, "amidi_pcs", None):
+            pcs = self.amidi_pcs                            # a chord from MIDI (the Orchid) has no degree
         else:
             _, pcs, _, _ = self.amb_chord_tones(deg or 0, None)
         return [n for n in range(55, 89) if n % 12 in pcs][:12]
@@ -1067,12 +1071,17 @@ class AmbientMixin:
             for j in run[-6:]:
                 self.eng.post("pluck", int(tones[j]), 0.5 + 0.35 * min(1.0, abs(x)),
                               -0.6 + 1.2 * j / max(1, len(tones) - 1))
+            n = getattr(self, "_strum_logged", 0)
+            if n < 8:
+                self._strum_logged = n + 1
+                print("strum:", [int(tones[j]) for j in run[-6:]], flush=True)
         else:
             k = max(0.0, (abs(y) - 0.18) / 0.82)
             rate = 3.0 + 13.0 * k ** 1.3                      # notes a second: 3 near the middle, 16 at the rim
             d = 1 if y > 0 else -1
             if getattr(self, "aarp", None) is None:
                 self.aarp = {"dir": d, "rate": rate, "i": 0 if d > 0 else len(tones) - 1, "next": now}
+                print("arp: %s at %.1f notes/s over %s" % ("up" if d > 0 else "down", rate, tones), flush=True)
             else:
                 if self.aarp["dir"] != d:                    # turn round from the note just played
                     self.aarp["i"] = (self.aarp["i"] - self.aarp["dir"] + d) % len(tones)
@@ -1236,6 +1245,7 @@ class AmbientMixin:
         mm = M()
         pcs = {n % 12 for n in notes}
         root_pc = notes[0] % 12
+        self.amidi_pcs = set(pcs)
         iv = sorted({(p - root_pc) % 12 for p in pcs})
         try:
             nm = mm.chord_name(root_pc, iv, False, False, self.key, self.scale)
