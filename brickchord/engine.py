@@ -1919,11 +1919,24 @@ class Engine:
             self._voice((np.repeat(x[:, None], 2, 1), None), 1.0, pan, self.t + int(i * 0.045 * sr),
                         "chime", srev=1.0, sdly=0.6, rel=int(0.05 * sr))
 
-    def _pluck_wave(self, midi):
+    # strum and arp instruments: (frequency ratio, level, decay per second) per partial
+    PLUCKS = [
+        ("Harp", [(1, 1.0, 1.6), (2, 0.45, 3.2), (3, 0.18, 5.5), (4.02, 0.08, 9.0)], 0.25),
+        ("Kalimba", [(1, 1.0, 3.0), (5.9, 0.35, 18.0), (10.2, 0.1, 40.0)], 0.5),
+        ("Bell", [(1, 1.0, 1.2), (2.76, 0.5, 2.0), (5.4, 0.3, 3.5), (8.93, 0.12, 6.0)], 0.15),
+        ("Marimba", [(1, 1.0, 4.5), (3.9, 0.45, 12.0), (10.0, 0.12, 30.0)], 0.35),
+        ("Glass", [(1, 1.0, 0.9), (3.0, 0.25, 1.8), (5.0, 0.08, 3.0)], 0.05),
+        ("Music Box", [(2, 1.0, 2.2), (6.0, 0.4, 5.0), (12.4, 0.15, 9.0)], 0.2),
+        ("Pluck Synth", [(k, 1.0 / k, 2.0 + 1.3 * k) for k in range(1, 11)], 0.1),
+        ("Nylon", [(1, 1.0, 1.9), (2, 0.6, 2.6), (3, 0.35, 3.6), (4, 0.2, 5.0), (5, 0.1, 6.5)], 0.4),
+    ]
+
+    def _pluck_wave(self, midi, inst=0):
         """The harp note for midi, built once and kept: building it while you strum
         cost a block of audio per note on the Brick, which stuttered."""
+        inst = int(inst) % len(self.PLUCKS)
         cache = self.__dict__.setdefault("_pluck_cache", {})
-        w = cache.get(midi)
+        w = cache.get((inst, midi))
         if w is not None:
             return w
         sr = self.sr
@@ -1931,31 +1944,39 @@ class Engine:
         if env is None:
             n = int(1.8 * sr)
             t = (np.arange(n) / sr).astype(np.float32)
-            env = self._pluck_env = (t, [np.exp(-t * k).astype(np.float32) for k in (1.6, 3.2, 5.5, 9.0)],
-                                     np.minimum(1.0, t / 0.002).astype(np.float32))
-        t, (e1, e2, e3, e4), att = env
+            env = self._pluck_env = (t, {}, np.minimum(1.0, t / 0.002).astype(np.float32))
+        t, decays, att = env
+        _, parts, noise = self.PLUCKS[inst]
         ph = (2 * np.pi * 440.0 * 2 ** ((midi - 69) / 12.0)) * t
-        x = (np.sin(ph) * e1 + 0.45 * np.sin(2 * ph) * e2 + 0.18 * np.sin(3 * ph) * e3
-             + 0.08 * np.sin(4.02 * ph) * e4)
+        x = np.zeros_like(t)
+        nyq = 0.45 * sr
+        for ratio, lv, dk in parts:
+            if 440.0 * 2 ** ((midi - 69) / 12.0) * ratio >= nyq:
+                continue
+            e = decays.get(dk)
+            if e is None:
+                e = decays[dk] = np.exp(-t * dk).astype(np.float32)
+            x += np.sin(ratio * ph).astype(np.float32) * (lv * e)
         k = int(0.012 * sr)
-        x[:k] += np.random.RandomState(int(midi)).uniform(-0.25, 0.25, k).astype(np.float32) * np.linspace(1, 0, k,
-                                                                                                         dtype=np.float32)
+        x[:k] += (np.random.RandomState(int(midi)).uniform(-noise, noise, k).astype(np.float32)
+                  * np.linspace(1, 0, k, dtype=np.float32))
         x = (x * att * 0.16).astype(np.float32)
-        w = cache[midi] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
+        w = cache[(inst, midi)] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
         return w
 
-    def c_pluck_warm(self, midis):
+    def c_pluck_warm(self, midis, inst=0):
         """Queue harp notes to build ahead, one per audio block, so the first strum
         is as smooth as the rest."""
         todo = self.__dict__.setdefault("_pluck_todo", [])
         cache = self.__dict__.setdefault("_pluck_cache", {})
         for m in midis:
-            if int(m) not in cache and int(m) not in todo:
-                todo.append(int(m))
+            key = (int(inst) % len(self.PLUCKS), int(m))
+            if key not in cache and key not in todo:
+                todo.append(key)
 
-    def c_pluck(self, midi, vel=0.8, pan=0.0):
-        """One harp-like plucked note, for the strum, through the reverb and delay."""
-        w = self._pluck_wave(int(midi))
+    def c_pluck(self, midi, vel=0.8, pan=0.0, inst=0):
+        """One plucked note for the strum and arp, through the reverb and delay."""
+        w = self._pluck_wave(int(midi), inst)
         self._voice((w, None), float(vel), float(pan), self.t, "pluck", srev=1.0, sdly=0.7,
                     rel=int(0.05 * self.sr))
 
@@ -2121,7 +2142,8 @@ class Engine:
         N, t, sr = self.N, self.t, self.sr
         todo = self.__dict__.get("_pluck_todo")
         if todo:
-            self._pluck_wave(todo.pop(0))                 # one harp note built ahead per block
+            inst_, m_ = todo.pop(0)
+            self._pluck_wave(m_, inst_)                   # one strum note built ahead per block
         while self.cmds:
             name, args = self.cmds.popleft()
             try:

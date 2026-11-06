@@ -259,6 +259,8 @@ class AmbientMixin:
         self.acompass = self.ascrub = None
         # Brickglide Play: the melody over the progression, the strum, the texture bed
         self.amel_oct, self.amel_held, self.astrum_idx = 0, [], None
+        # the strum and arp: instrument, level, arp pattern, range in octaves
+        self.astrum = dict({"inst": 0, "level": 1.0, "style": 0, "range": 2}, **(st.get("strum") or {}))
         self.atexture = dict({"name": "", "level": 0.45}, **(st.get("texture") or {})) if edition.PLAY else None
         if edition.PLAY:
             lv = self.av[6]
@@ -415,7 +417,8 @@ class AmbientMixin:
                 "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
                 "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord, "expr": self.aexpr,
                 "prog": {"steps": self.aprog["steps"], "time": self.aprog["time"]},
-                "texture": getattr(self, "atexture", None), "play_v1": getattr(self, "aplay_v1", False)}
+                "texture": getattr(self, "atexture", None), "play_v1": getattr(self, "aplay_v1", False),
+                "strum": getattr(self, "astrum", None)}
 
     # ------------------------------------------------------------ talking to the engine
     def amb_next_sound(self, cur, d):
@@ -1031,13 +1034,16 @@ class AmbientMixin:
             v["on"] = False
             self.amb_push(6)
 
+    ARP_STYLES = ["By stick", "Bounce", "Random", "Root and up"]
+
     def amb_strum_tones(self):
         deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else None
         if deg is None and getattr(self, "amidi_pcs", None):
             pcs = self.amidi_pcs                            # a chord from MIDI (the Orchid) has no degree
         else:
             _, pcs, _, _ = self.amb_chord_tones(deg or 0, None)
-        return [n for n in range(55, 89) if n % 12 in pcs][:12]
+        lo, hi = {1: (60, 72), 2: (55, 79), 3: (48, 84), 4: (43, 91)}[int(self.astrum.get("range", 2))]
+        return [n for n in range(lo, hi + 1) if n % 12 in pcs]
 
     def amb_strum(self, x, y):
         """Left stick, the way a harp or an Omnichord plate is played:
@@ -1069,8 +1075,8 @@ class AmbientMixin:
             run = [idx] if prev is None else (list(range(prev + 1, idx + 1)) if idx > prev
                                               else list(range(prev - 1, idx - 1, -1)))
             for j in run[-6:]:
-                self.eng.post("pluck", int(tones[j]), 0.5 + 0.35 * min(1.0, abs(x)),
-                              -0.6 + 1.2 * j / max(1, len(tones) - 1))
+                self.eng.post("pluck", int(tones[j]), (0.5 + 0.35 * min(1.0, abs(x))) * self.astrum["level"],
+                              -0.6 + 1.2 * j / max(1, len(tones) - 1), self.astrum["inst"])
             n = getattr(self, "_strum_logged", 0)
             if n < 8:
                 self._strum_logged = n + 1
@@ -1083,7 +1089,8 @@ class AmbientMixin:
                 self.aarp = {"dir": d, "rate": rate, "i": 0 if d > 0 else len(tones) - 1, "next": now}
                 print("arp: %s at %.1f notes/s over %s" % ("up" if d > 0 else "down", rate, tones), flush=True)
             else:
-                if self.aarp["dir"] != d:                    # turn round from the note just played
+                by_stick = self.ARP_STYLES[self.astrum.get("style", 0) % len(self.ARP_STYLES)] == "By stick"
+                if by_stick and self.aarp["dir"] != d:       # turn round from the note just played
                     self.aarp["i"] = (self.aarp["i"] - self.aarp["dir"] + d) % len(tones)
                     self.aarp["dir"] = d
                 self.aarp["rate"] = rate
@@ -1095,9 +1102,27 @@ class AmbientMixin:
         tones = self.amb_strum_tones()
         if not tones:
             return
-        i = ap["i"] % len(tones)
-        self.eng.post("pluck", int(tones[i]), 0.6, -0.6 + 1.2 * i / max(1, len(tones) - 1))
-        ap["i"] = (i + ap["dir"]) % len(tones)
+        n = len(tones)
+        i = ap["i"] % n
+        self.eng.post("pluck", int(tones[i]), 0.6 * self.astrum["level"], -0.6 + 1.2 * i / max(1, n - 1),
+                      self.astrum["inst"])
+        style = self.ARP_STYLES[self.astrum.get("style", 0) % len(self.ARP_STYLES)]
+        if style == "Bounce":                            # up then down, never repeating the ends
+            nxt = i + ap["dir"]
+            if nxt < 0 or nxt >= n:
+                ap["dir"] = -ap["dir"]
+                nxt = i + ap["dir"]
+            ap["i"] = max(0, min(n - 1, nxt))
+        elif style == "Random":
+            import random
+            ap["i"] = random.choice([k for k in range(n) if k != i] or [i])
+        elif style == "Root and up":                     # back to the lowest note between each step up
+            ap["step"] = ap.get("step", 0) + 1
+            ap["i"] = 0 if ap["step"] % 2 else (ap.get("hi", 0) % (n - 1)) + 1
+            if not ap["step"] % 2:
+                ap["hi"] = ap.get("hi", 0) + 1
+        else:
+            ap["i"] = (i + ap["dir"]) % n
         ap["next"] = max(now, ap["next"]) + 1.0 / ap["rate"]
 
     def amb_texture_names(self):
@@ -1452,7 +1477,7 @@ class AmbientMixin:
             self._tex_started = True
             self.amb_midi_start()
             self.amb_set_texture()                         # the texture bed you left playing comes back
-            self.eng.post("pluck_warm", list(range(55, 89)))   # every strum note, built ahead
+            self.eng.post("pluck_warm", list(range(43, 101)), self.astrum["inst"])   # every strum note, built ahead
         pb = getattr(self, "_preview_back", None)
         if pb and now >= pb[0]:
             self._preview_back = None
@@ -1575,7 +1600,14 @@ class AmbientMixin:
             self.amel_sel = j
             m = self.amel[j]
             sc = mm.SCALES[self.scale]
-            rows = [("Melody", "Melody %s   %s" % ("AB"[j], "running" if m["run"] else "stopped"))]
+            rows = []
+            if edition.PLAY:
+                sa = self.astrum
+                rows += [("Strum sound", engine.Engine.PLUCKS[sa["inst"] % len(engine.Engine.PLUCKS)][0]),
+                         ("Strum level", "%d%%" % round(sa["level"] * 100)),
+                         ("Arp pattern", self.ARP_STYLES[sa["style"] % len(self.ARP_STYLES)]),
+                         ("Strum range", "%d octave%s" % (sa["range"], "" if sa["range"] == 1 else "s"))]
+            rows += [("Melody", "Melody %s   %s" % ("AB"[j], "running" if m["run"] else "stopped"))]
             for s in range(5):
                 d = m["steps"][s]
                 rows.append(("Step %d" % (s + 1), "rest" if d is None else
@@ -1633,6 +1665,21 @@ class AmbientMixin:
             elif name == "Drift":
                 v["drift"] = max(0, min(100, v["drift"] + 2 * d))
             self.amb_push(i)
+            return
+        if pg == "Melody" and name in ("Strum sound", "Strum level", "Arp pattern", "Strum range"):
+            sa = self.astrum
+            if name == "Strum sound":
+                sa["inst"] = (sa["inst"] + d) % len(engine.Engine.PLUCKS)
+                self.eng.post("pluck_warm", list(range(43, 101)), sa["inst"])
+            elif name == "Strum level":
+                sa["level"] = round(max(0.1, min(2.5, sa["level"] + 0.1 * d)), 2)
+            elif name == "Arp pattern":
+                sa["style"] = (sa["style"] + d) % len(self.ARP_STYLES)
+            else:
+                sa["range"] = max(1, min(4, sa["range"] + d))
+            tones = self.amb_strum_tones()                 # hear it: a quick strum of the chord
+            for k, n in enumerate(tones[:: max(1, len(tones) // 5)][:5]):
+                self.eng.post("pluck", int(n), 0.6 * sa["level"], -0.4 + 0.2 * k, sa["inst"])
             return
         if pg == "Melody":
             j = getattr(self, "amel_sel", 0)
