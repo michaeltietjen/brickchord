@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta property="og:title" content="Brickglide">
+<meta property="og:description" content="Chords that glide. An ambient machine for the TrimUI Brick Pro running KNULLI: seven chord buttons, voices that slide between chords, blooms, moves, a sub bass, and a live spectrogram.">
+<meta property="og:image" content="https://michaeltietjen.github.io/brickchord/brickglide-card.png">
+<link rel="icon" href="../bricklab-image.png" type="image/png">
+<title>Brickglide</title>
+<meta name="description" content="Brickglide: an ambient machine for the TrimUI Brick Pro running KNULLI. Press a chord and the voices glide into it and hold it. Blooms, moves, a sub bass, progressions that play themselves, and a live spectrogram.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Dusk: the app's violet on deep navy. Same chassis as the Bricklab page, one lit key. */
+:root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
+  --chassis: #15122a; --plate: #1f1a3a; --ink: #ece4d6; --dim: #9f9ac0; --seam: #2e2850;
+  --lit: #9682eb; --gold: #f0c878; --screen: #0c0b14; --screen-ink: #ece4d6; --key-shadow: #0a0818;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; background: var(--chassis); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--lit); outline-offset: 3px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.label { font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); }
+
+.strip { border-bottom: 1px solid var(--seam); }
+.strip .wrap { display: flex; align-items: center; gap: 24px; padding-block: 14px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand b { font-family: var(--display); font-weight: 800; font-size: 21px; letter-spacing: -.01em; font-variation-settings: "wdth" 112; }
+.mark { display: grid; grid-template-columns: repeat(4, 9px); gap: 2px; }
+.mark i { width: 9px; height: 9px; border-radius: 2px; background: var(--ink); }
+.mark i:first-child { background: var(--lit); }
+.strip nav { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; }
+.strip nav a { text-decoration: none; color: var(--dim); }
+.strip nav a:hover { color: var(--ink); }
+
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 470px); gap: 56px; padding-block: 64px 72px; align-items: center; }
+.hero h1 { font-family: var(--display); font-weight: 850; line-height: .92; margin: 14px 0 22px; font-size: clamp(44px, 7.2vw, 88px); letter-spacing: -.025em; font-variation-settings: "wdth" 118; text-wrap: balance; }
+.hero h1 em { font-style: normal; color: var(--lit); }
+.hero p.lede { font-size: 19px; max-width: 34em; margin: 0 0 30px; }
+.ctas { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; padding: 13px 18px; border-radius: 6px; border: 1.5px solid var(--ink); color: var(--ink); background: transparent; cursor: pointer; box-shadow: 0 3px 0 var(--ink); transition: transform .08s ease, box-shadow .08s ease; }
+.btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+.btn.primary { background: var(--lit); color: #120f24; border-color: var(--lit); box-shadow: 0 3px 0 #5a4ab8; }
+.btn.primary:active { box-shadow: 0 0 0 #5a4ab8; }
+.fine { margin-top: 18px; font-size: 13.5px; color: var(--dim); }
+
+/* the playable unit: a screen of glide guides, seven chord keys */
+.unit { background: var(--plate); border-radius: 22px; padding: 22px; border: 1px solid var(--seam); box-shadow: 0 1px 0 var(--seam), 0 18px 40px -24px rgba(0,0,0,.6); }
+.screen { background: var(--screen); color: var(--screen-ink); border-radius: 12px; height: 200px; position: relative; overflow: hidden; }
+.screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.screen .top { position: absolute; top: 10px; left: 14px; right: 14px; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: #8a8392; letter-spacing: .06em; }
+.screen .top b { color: var(--gold); font-weight: 600; }
+.keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 18px; }
+.key { aspect-ratio: .78; border: 0; border-radius: 12px; cursor: pointer; background: var(--chassis); color: var(--ink); box-shadow: 0 5px 0 var(--key-shadow); display: grid; place-items: center; align-content: center; gap: 2px; font-family: var(--display); transition: transform .06s ease, box-shadow .06s ease, background .15s ease; touch-action: manipulation; -webkit-user-select: none; user-select: none; padding: 0; }
+.key .r { font-weight: 800; font-size: 18px; line-height: 1; color: var(--gold); }
+.key .n { font-weight: 700; font-size: 16px; line-height: 1; }
+.key .g { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+.key.on { transform: translateY(5px); box-shadow: 0 0 0 var(--key-shadow); background: var(--lit); color: #120f24; }
+.key.on .r, .key.on .g { color: #120f24; }
+.mods { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+.mods button, .mods select { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; background: transparent; color: var(--ink); border: 1.5px solid var(--seam); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+.mods button[aria-pressed="true"] { border-color: var(--lit); color: var(--lit); }
+.mods select { appearance: none; padding-right: 12px; }
+.hint { margin-top: 12px; font-size: 12.5px; color: var(--dim); font-family: var(--mono); }
+
+.module { border-top: 1px solid var(--seam); }
+.module .wrap { padding-block: 72px; }
+.module h2 { font-family: var(--display); font-weight: 800; font-size: clamp(30px, 4vw, 46px); line-height: 1.02; letter-spacing: -.02em; margin: 10px 0 18px; font-variation-settings: "wdth" 115; text-wrap: balance; }
+.module p.intro { max-width: 38em; font-size: 17.5px; margin: 0 0 36px; }
+.see { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.bezel { background: #0c0b14; border-radius: 18px; padding: 16px; border: 1px solid var(--seam); }
+.bezel img { display: block; width: 100%; height: auto; border-radius: 6px; }
+.bezel figcaption { font-family: var(--mono); font-size: 11px; color: #8f8996; margin-top: 10px; letter-spacing: .05em; }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.list li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; }
+.list li::before { content: ""; width: 12px; height: 12px; margin-top: 6px; border-radius: 3px; background: var(--ink); }
+.list li:nth-child(2)::before { background: var(--lit); }
+.list li:nth-child(3)::before { background: var(--gold); }
+.feat { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.feat div { background: var(--plate); border: 1px solid var(--seam); border-radius: 12px; padding: 1rem 1.1rem; }
+.feat h3 { margin: 0 0 .4rem; font-family: var(--display); font-weight: 800; font-size: 19px; }
+.feat p { margin: 0; color: var(--dim); font-size: 15px; }
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--seam); border-radius: 14px; overflow: hidden; background: var(--plate); }
+.controls > div { padding: 20px 24px; border-bottom: 1px solid var(--seam); }
+.controls > div:nth-child(odd) { border-right: 1px solid var(--seam); }
+.controls > div:nth-last-child(-n+2) { border-bottom: 0; }
+.controls .k { font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .04em; color: var(--gold); }
+.controls .v { margin-top: 4px; }
+.controls .v small { display: block; color: var(--dim); font-size: 14px; margin-top: 4px; }
+ol.steps { padding-left: 1.2em; max-width: 760px; }
+ol.steps li { margin-bottom: .6em; }
+code { font-family: var(--mono); font-size: .88em; background: var(--plate); border: 1px solid var(--seam); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.note { margin-top: 26px; max-width: 760px; font-size: 15px; color: var(--dim); }
+.xlink { display: inline-block; margin-top: 1rem; color: var(--dim); }
+footer { border-top: 1px solid var(--seam); }
+footer .wrap { padding-block: 36px 48px; display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; color: var(--dim); font-size: 13.5px; }
+footer p { margin: 0; max-width: 56em; }
+@media (max-width: 860px) {
+  .hero .wrap, .see { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .hero .wrap { padding-block: 40px 56px; }
+  .controls { grid-template-columns: minmax(0, 1fr); }
+  .controls > div:nth-child(odd) { border-right: 0; }
+  .controls > div:nth-last-child(2) { border-bottom: 1px solid var(--seam); }
+}
+@media (max-width: 480px) {
+  .strip nav { margin-left: 0; width: 100%; }
+  .unit { padding: 14px; border-radius: 18px; }
+  .keys { gap: 5px; }
+  .key .n { font-size: 13px; } .key .r { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .key, .btn { transition: none; } }
+</style>
+</head>
+<body>
+  <header class="strip">
+    <div class="wrap">
+      <a class="brand" href="#top" aria-label="Brickglide">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <b>Brickglide</b>
+      </a>
+      <nav>
+        <a href="#moves">Moves</a>
+        <a href="#controls">Controls</a>
+        <a href="#install">Install</a>
+        <a href="../bricklab/">Bricklab</a>
+        <a href="../">Brickchord</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero" id="top">
+    <div class="wrap">
+      <div>
+        <div class="label">For the TrimUI Brick Pro on KNULLI</div>
+        <h1>Chords that <em>glide.</em></h1>
+        <p class="lede">An ambient machine. Press a chord and five voices slide into it and hold it; press the next and every voice travels there. Blooms, cascades and spirals on the way, a sub bass underneath, progressions that play themselves, and a screen that draws every glide as it happens.</p>
+        <div class="ctas">
+          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/latest">Download Brickglide</a>
+          <a class="btn" href="#try">Try it here</a>
+        </div>
+        <p class="fine">Free and open source. Same engine and the same seven buttons as <a href="../">Brickchord</a>; the third app in the family after <a href="../bricklab/">Bricklab</a>.</p>
+      </div>
+      <div class="unit" id="try" aria-label="Playable Brickglide">
+        <div class="screen">
+          <canvas id="guides" aria-hidden="true"></canvas>
+          <div class="top"><span>GLIDE GUIDES</span><span><b id="cur"></b> <span id="keyname">C Major</span></span></div>
+        </div>
+        <div class="keys" id="keys" role="group" aria-label="Chords"></div>
+        <div class="mods">
+          <button type="button" id="bloom">Bloom</button>
+          <select id="move" aria-label="Move">
+            <option value="direct">Direct</option>
+            <option value="bloom">Bloom</option>
+            <option value="cascade">Cascade up</option>
+            <option value="spiral">Spiral</option>
+            <option value="swoop">Swoop</option>
+            <option value="fall">Fall</option>
+          </select>
+          <select id="glide" aria-label="Glide time">
+            <option value="0.4">0.4 s</option>
+            <option value="1.5" selected>1.5 s</option>
+            <option value="4">4 s</option>
+            <option value="8">8 s</option>
+          </select>
+          <button type="button" id="stop">Stop</button>
+        </div>
+        <p class="hint">Tap a chord. Tap another and listen to the voices slide. Headphones help.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="see">
+    <div class="wrap">
+      <div class="label">What you see</div>
+      <h2>Every glide, drawn as it happens</h2>
+      <div class="see">
+        <figure class="bezel" style="margin:0">
+          <img src="glide-guides.png" width="640" height="480" alt="The Brickglide screen: five coloured lines gliding between chords over guide lines for the scale, and seven chord tiles below">
+          <figcaption>The glide guides. Each line is a voice; the dashed mark at the right edge shows where it is headed.</figcaption>
+        </figure>
+        <ul class="list">
+          <li><div><b>The voices.</b> Five of them, each with its own sound, plus a sub an octave under the bass. The bass always takes the root.</div></li>
+          <li><div><b>The guides.</b> Faint lines for every note of your key, roots and fifths named, so you can see a voice land on a chord tone.</div></li>
+          <li><div><b>The spectrogram.</b> Click the left stick and the screen draws the real sound instead: every harmonic of every voice as a crisp line.</div></li>
+        </ul>
+      </div>
+      <div class="see" style="margin-top:48px">
+        <figure class="bezel" style="margin:0">
+          <img src="spectrogram.png" width="640" height="480" alt="The Brickglide spectrogram view: thin violet and gold lines, one per harmonic, bending as the chords change">
+          <figcaption>Spectrogram view, L3. Lines, not a heat map.</figcaption>
+        </figure>
+        <ul class="list">
+          <li><div><b>The Move compass.</b> Hold the left stick in a direction and press a chord: up falls in from above, right cascades upward, down-right blooms, down swoops. Push further for a longer glide.</div></li>
+          <li><div><b>Cloud.</b> Hold L2 and the left stick becomes a compass of granular textures, from Dust to Freeze.</div></li>
+          <li><div><b>Effects.</b> Big Hall and tape echo by default; chorus, wide, tape wobble, filter drift, drive and lo-fi in Settings.</div></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="moves">
+    <div class="wrap">
+      <div class="label">Hold R2 and press a chord</div>
+      <h2>Eight ways to get there</h2>
+      <p class="intro">A plain chord button glides straight to the next chord. Hold R2 and the voices take the long way, with whichever Move you have chosen. A progression can use them on every change.</p>
+      <div class="feat">
+        <div><h3>Bloom</h3><p>Every voice draws together on one low note, then fans out into the chord while the filter opens.</p></div>
+        <div><h3>Cascade</h3><p>The voices arrive one at a time, from the bottom up or the top down.</p></div>
+        <div><h3>Spiral</h3><p>Each voice goes round through an octave, alternating up and down, and settles.</p></div>
+        <div><h3>Swoop</h3><p>All the voices dip an octave, then rise into the chord.</p></div>
+        <div><h3>Scatter</h3><p>Each voice takes a detour through a random note of the scale.</p></div>
+        <div><h3>Converge</h3><p>The voices meet in the middle of the chord, then spread.</p></div>
+        <div><h3>Fall</h3><p>They come down from an octave above.</p></div>
+        <div><h3>And the paths</h3><p>Ten curves for every glide: Smooth, Linear, Ease, Swell, Bounce, Late, Snap, Wobble, Semitones and Scale steps. Five timings: together, by distance, bass lags, bass leads, loose. From a quarter of a second to a minute.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="controls">
+    <div class="wrap">
+      <div class="label">If you know Brickchord, you know this</div>
+      <h2>Seven buttons, one stick</h2>
+      <div class="controls">
+        <div><div class="k">&lt; ^ &gt; v X A B</div><div class="v">The seven chords of the key, I to VII. The voices glide in and hold. <small>The same chord again lets it fade.</small></div></div>
+        <div><div class="k">L1 / R1 / L1+R1 / Y</div><div class="v">7th, sus4, 9th, flip major and minor. <small>Held with a chord, as in Brickchord.</small></div></div>
+        <div><div class="k">LEFT STICK</div><div class="v">The Move compass: hold a direction while you press a chord. <small>Further out = longer glide. L2 + stick plays Cloud.</small></div></div>
+        <div><div class="k">RIGHT STICK</div><div class="v">Filter and space. <small>Same as Brickchord.</small></div></div>
+        <div><div class="k">R2</div><div class="v">Bloom. <small>R2 + a chord plays it with your chosen Move.</small></div></div>
+        <div><div class="k">START</div><div class="v">Stop everything. From silence, the progression plays by itself. <small>Up to eight chords, 1 to 16 seconds each.</small></div></div>
+        <div><div class="k">L3</div><div class="v">Glide guides or spectrogram.</div></div>
+        <div><div class="k">SELECT</div><div class="v">Settings: voices, chords, moves, melody, scenes, effects. <small>SELECT + a chord button saves a scene; L2 + it recalls one.</small></div></div>
+      </div>
+      <p class="note">New to it? Brickglide opens with a guided demo on first launch: ten moves, one at a time, each waiting until you have done it. Settings &gt; Scenes runs it again, and holds two starters: Glide Chords and Deep Bloom.</p>
+    </div>
+  </section>
+
+  <section class="module" id="install">
+    <div class="wrap">
+      <div class="label">Install</div>
+      <h2>Two minutes on KNULLI</h2>
+      <ol class="steps">
+        <li>Download the Brickglide zip from the <a href="https://github.com/michaeltietjen/brickchord/releases/latest">latest release</a>. On an R36S or R36 Max, get the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-r36">R36 family zip</a> instead: all three apps in one.</li>
+        <li>Unzip it. Copy the <code>brickglide</code> folder, <code>Brickglide.sh</code> and the <code>images</code> folder into <code>roms/ports</code> on the Brick's SD card (over the network share or with a card reader).</li>
+        <li>Update Gamelists on the Brick. Brickglide appears under Ports.</li>
+        <li>On first launch, press each button once and push each stick once so it learns your controls, then follow the guided demo.</li>
+      </ol>
+      <p class="note">Brickglide, Bricklab and Brickchord install side by side and share a sound cache. Tested on <code>knulli-a133-trimui-brick-pro-beta-20260921</code>.</p>
+      <p class="xlink">Source and issues: <a href="https://github.com/michaeltietjen/brickchord">github.com/michaeltietjen/brickchord</a> &middot; <a href="../bricklab/">Bricklab</a> &middot; <a href="../">Brickchord</a></p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>Brickglide is free and open source. Elta Music, Mutable Instruments and the other names used to describe the sound are trademarks of their owners; Brickglide is not affiliated with them.</p>
+      <p><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></p>
+    </div>
+  </footer>
+
+<script>
+(function () {
+  // A small Brickglide in the browser: five sawtooth voices through a filter and
+  // reverb, gliding between the chords of C major with the app's voice leading.
+  const NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+  const SCALE = [0, 2, 4, 5, 7, 9, 11], KEY = 0;
+  const ROMAN = ["I", "ii", "iii", "IV", "V", "vi", "vii°"];
+  const GLYPH = ["<", "^", ">", "v", "X", "A", "B"];
+  const COLS = ["#6ec8be", "#be8cff", "#ffaa6e", "#78c88c", "#ff78a0", "#9682eb"];
+  const keysEl = document.getElementById("keys"), curEl = document.getElementById("cur");
+  const canvas = document.getElementById("guides"), g2 = canvas.getContext("2d");
+  let ctx = null, master = null, voices = [], cur = null, hist = [], last = 0;
+  const N = 5;
+  function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function chordName(deg) {
+    const r = (KEY + SCALE[deg]) % 12, third = (SCALE[(deg + 2) % 7] - SCALE[deg] + 12) % 12, fifth = (SCALE[(deg + 4) % 7] - SCALE[deg] + 12) % 12;
+    return NAMES[r] + (fifth === 6 ? "dim" : third === 3 ? "m" : "");
+  }
+  function pcs(deg) { return [0, 2, 4].map(s => (KEY + SCALE[(deg + s) % 7]) % 12); }
+  function voicelead(deg, curNotes) {
+    const p = pcs(deg), root = (KEY + SCALE[deg]) % 12;
+    const cand = []; for (let n = 24; n < 97; n++) if (p.includes(n % 12)) cand.push(n);
+    const order = curNotes.map((c, i) => [c, i]).sort((a, b) => a[0] - b[0]);
+    const out = []; let prev = 0, used = new Set();
+    const bassRoots = []; for (let n = 36; n < 48; n++) if (n % 12 === root) bassRoots.push(n);
+    const b = bassRoots.reduce((a, n) => Math.abs(n - order[0][0]) < Math.abs(a - order[0][0]) ? n : a, bassRoots[0]);
+    out[order[0][1]] = b; prev = b; used.add(root);
+    for (let k = 1; k < order.length; k++) {
+      const c = order[k][0];
+      let best = null, bc = 1e9;
+      for (const n of cand) { if (n <= prev) continue; const cost = Math.abs(n - c) + (used.has(n % 12) && used.size < 3 ? 2.5 : 0); if (cost < bc) { bc = cost; best = n; } }
+      out[order[k][1]] = best; prev = best; used.add(best % 12);
+    }
+    return out;
+  }
+  function start() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0.0;
+    const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = 2600; filt.Q.value = 0.7;
+    // a cheap reverb: a few feedback delays
+    const wet = ctx.createGain(); wet.gain.value = 0.35;
+    [0.047, 0.071, 0.113, 0.157].forEach((t, i) => { const d = ctx.createDelay(1); d.delayTime.value = t; const fb = ctx.createGain(); fb.gain.value = 0.6 - i * 0.07; const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3200; master.connect(d); d.connect(lp).connect(fb).connect(d); d.connect(wet); });
+    filt.connect(ctx.destination); master.connect(filt); wet.connect(filt);
+    const startNotes = [36, 48, 52, 60, 67, 24];
+    for (let i = 0; i < N + 1; i++) {
+      const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), pan = ctx.createStereoPanner();
+      o1.type = i === N ? "sine" : "sawtooth"; o2.type = i === N ? "sine" : "sawtooth";
+      o1.detune.value = i === N ? 0 : -7; o2.detune.value = i === N ? 0 : 7;
+      g.gain.value = 0; pan.pan.value = [0, -0.5, 0.5, -0.25, 0.25, 0][i];
+      o1.frequency.value = o2.frequency.value = midiHz(startNotes[i]);
+      o1.connect(g); o2.connect(g); g.connect(pan).connect(master); o1.start(); o2.start();
+      voices.push({ o1, o2, g, note: startNotes[i], cur: startNotes[i], tgt: startNotes[i], t0: 0, dur: 0, from: startNotes[i], via: null, delay: 0, on: false });
+    }
+    master.gain.setTargetAtTime(0.22, ctx.currentTime, 0.1);
+  }
+  function glideTo(v, note, dur, delay, via) {
+    v.from = curPitch(v); v.tgt = note; v.note = note; v.t0 = ctx.currentTime + delay; v.dur = dur; v.via = via;
+    const t = v.t0;
+    v.o1.frequency.cancelScheduledValues(ctx.currentTime); v.o2.frequency.cancelScheduledValues(ctx.currentTime);
+    const f0 = midiHz(v.from); v.o1.frequency.setValueAtTime(f0, ctx.currentTime); v.o2.frequency.setValueAtTime(f0, ctx.currentTime);
+    v.o1.frequency.setValueAtTime(f0, t); v.o2.frequency.setValueAtTime(f0, t);
+    const pts = via ? [via, note] : [note];
+    const seg = dur / pts.length;
+    pts.forEach((p, i) => { const f = midiHz(p); v.o1.frequency.exponentialRampToValueAtTime(f, t + seg * (i + 1)); v.o2.frequency.exponentialRampToValueAtTime(f, t + seg * (i + 1)); });
+  }
+  function curPitch(v) {
+    if (!ctx || v.dur === 0) return v.cur;
+    const el = ctx.currentTime - v.t0;
+    if (el <= 0) return v.from;
+    const pts = v.via != null ? [v.via, v.tgt] : [v.tgt], seg = v.dur / pts.length;
+    const k = Math.min(pts.length - 1, Math.floor(el / seg)), p = Math.min(1, (el - k * seg) / seg);
+    const a = k === 0 ? v.from : pts[k - 1], b = pts[k];
+    const e = p * p * (3 - 2 * p);
+    return a + (b - a) * e;
+  }
+  function setOn(v, on, fade) { v.on = on; v.g.gain.cancelScheduledValues(ctx.currentTime); v.g.gain.setTargetAtTime(on ? 0.25 : 0, ctx.currentTime, fade || 0.4); }
+  function play(deg, withMove) {
+    start(); if (ctx.state === "suspended") ctx.resume();
+    const dur = parseFloat(document.getElementById("glide").value);
+    const move = withMove ? document.getElementById("move").value : "direct";
+    const wasOn = voices.slice(0, N).some(v => v.on);
+    if (wasOn && cur === deg && move === "direct") { voices.forEach(v => setOn(v, false, 0.8)); cur = null; curEl.textContent = ""; keysEl.querySelectorAll(".key").forEach(k => k.classList.remove("on")); return; }
+    const notes = voicelead(deg, voices.slice(0, N).map(v => curPitch(v)));
+    const rank = notes.map((n, i) => [n, i]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+    const low = Math.min(...notes);
+    voices.slice(0, N).forEach((v, i) => {
+      let via = null, delay = 0, d = dur;
+      if (move !== "direct") d = Math.max(dur, 2.5) * (move === "cascade" ? 1 : 2);
+      if (move === "bloom") via = low; else if (move === "spiral") via = notes[i] + (rank.indexOf(i) % 2 ? 12 : -12);
+      else if (move === "swoop") via = notes[i] - 12; else if (move === "fall") via = notes[i] + 12;
+      else if (move === "cascade") delay = rank.indexOf(i) * d * 0.6 / N;
+      if (!wasOn) { v.cur = notes[i]; v.o1.frequency.setValueAtTime(midiHz(notes[i]), ctx.currentTime); v.o2.frequency.setValueAtTime(midiHz(notes[i]), ctx.currentTime); v.from = v.tgt = v.note = notes[i]; v.dur = 0; }
+      else glideTo(v, notes[i], d, delay, via);
+      setOn(v, true, wasOn ? 0.3 : 0.9);
+    });
+    const sub = voices[N]; const bass = low - 12;
+    if (!wasOn) { sub.o1.frequency.setValueAtTime(midiHz(bass), ctx.currentTime); sub.o2.frequency.setValueAtTime(midiHz(bass), ctx.currentTime); sub.cur = sub.from = sub.tgt = sub.note = bass; sub.dur = 0; } else glideTo(sub, bass, dur, 0, null);
+    setOn(sub, true, 0.9);
+    cur = deg; curEl.textContent = ROMAN[deg] + "  " + chordName(deg);
+    keysEl.querySelectorAll(".key").forEach((k, i) => k.classList.toggle("on", i === deg));
+  }
+  for (let i = 0; i < 7; i++) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "key";
+    b.innerHTML = '<span class="r">' + ROMAN[i] + '</span><span class="n">' + chordName(i) + '</span><span class="g">' + GLYPH[i] + "</span>";
+    b.addEventListener("click", () => play(i, document.getElementById("move").value !== "direct"));
+    keysEl.appendChild(b);
+  }
+  document.getElementById("bloom").addEventListener("click", () => { if (cur === null) { play(0, false); } const ns = voices.slice(0, N).map(v => v.note), low = Math.min(...ns); voices.slice(0, N).forEach((v, i) => glideTo(v, ns[i], 5, 0, low)); });
+  document.getElementById("stop").addEventListener("click", () => { if (!ctx) return; voices.forEach(v => setOn(v, false, 0.8)); cur = null; curEl.textContent = ""; keysEl.querySelectorAll(".key").forEach(k => k.classList.remove("on")); });
+  // the screen: pitch of each voice over the last 20 seconds, on guide lines
+  function resize() { const r = canvas.getBoundingClientRect(); canvas.width = Math.floor(r.width * devicePixelRatio); canvas.height = Math.floor(r.height * devicePixelRatio); }
+  resize(); addEventListener("resize", resize);
+  const SPAN = 20;
+  function draw(ts) {
+    requestAnimationFrame(draw);
+    const now = ts / 1000, W = canvas.width, H = canvas.height, s = devicePixelRatio;
+    if (now - last > 0.08) { last = now; hist.push([now, voices.map(v => v.on ? curPitch(v) : null)]); while (hist.length && now - hist[0][0] > SPAN) hist.shift(); voices.forEach(v => { v.cur = curPitch(v); }); }
+    g2.clearRect(0, 0, W, H);
+    const lo = 22, hi = 74, y = m => H - 14 * s - (m - lo) / (hi - lo) * (H - 44 * s);
+    for (let n = lo; n <= hi; n++) { if (!SCALE.includes((n - KEY + 12) % 12)) continue; const root = (n - KEY) % 12 === 0; g2.strokeStyle = root ? "#3a3360" : "#241f3c"; g2.lineWidth = s; g2.beginPath(); g2.moveTo(0, y(n)); g2.lineTo(W, y(n)); g2.stroke(); if (root) { g2.fillStyle = "#5a5280"; g2.font = (10 * s) + "px 'IBM Plex Mono', monospace"; g2.fillText(NAMES[n % 12] + (Math.floor(n / 12) - 1), 8 * s, y(n) - 3 * s); } }
+    for (let i = 0; i < N + 1; i++) {
+      g2.strokeStyle = COLS[i]; g2.lineWidth = (i === N ? 2 : 2.5) * s; g2.beginPath(); let pen = false;
+      for (const [t, ps] of hist) { const p = ps[i]; if (p == null) { pen = false; continue; } const x = W - (now - t) / SPAN * W; if (!pen) { g2.moveTo(x, y(p)); pen = true; } else g2.lineTo(x, y(p)); }
+      g2.stroke();
+      const v = voices[i]; if (v && v.on) { g2.fillStyle = COLS[i]; g2.beginPath(); g2.arc(W - 2 * s, y(curPitch(v)), 4 * s, 0, 7); g2.fill(); }
+    }
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
