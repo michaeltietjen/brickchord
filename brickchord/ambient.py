@@ -3,10 +3,10 @@
 #   < ^ > v X A B            the seven chords of the key (I to VII): the voices glide into it
 #                            and hold it; the same chord again lets it fade
 #   L1 / R1 / L1+R1 / Y      with a chord: 7th / sus4 / 9th / flip major-minor (as in Brickchord)
-#   left stick               hold a direction while pressing a chord: that direction's Move
-#                            (up Fall, up-right Spiral, right Cascade up, down-right Bloom,
-#                            down Swoop, down-left Converge, left Cascade down, up-left Scatter);
-#                            further out = longer glide
+#   hold a chord + left stick  Scrub: the stick plays the glide to that chord, as far as you
+#                            push it; hold halfway for an in-between chord; let go to finish
+#                            (or go back, or stay: Settings > Chords > Scrub release)
+#   R2 + left stick          the Move compass: hold a direction and press a chord
 #   L2 + left stick          Cloud compass (direction = texture, distance = amount)
 #   right stick              filter and space, as in Brickchord
 #   R2                       bloom: every voice from one note, fanning out into the chord
@@ -105,8 +105,8 @@ TUTORIAL = [
     ("Hold  L1  and press  X :  the fifth chord with a 7th", 4, lambda s: s.acur_deg == 4 and "seventh" in (s.acur_key or (0, ()))[1]),
     ("Hold  Y  and press  ^ :  Y flips major and minor", 1,
      lambda s: s.acur_deg == 1 and "flip" in (s.acur_key or (0, ()))[1]),
-    ("Hold the LEFT STICK in a direction and press a chord: a Move", None,
-     lambda s: s.atut_flags.get("compass")),
+    ("HOLD  X  and push the LEFT STICK slowly: you play the glide", 4,
+     lambda s: s.atut_flags.get("scrub")),
     ("Press  R2 :  bloom, every voice from one note", None, lambda s: s.atut_flags.get("bloom")),
     ("Press  START :  everything stops", None, lambda s: not s.amb_sounding() and not s.aprog.get("run")),
     ("Press  START  again:  the chords play by themselves", None, lambda s: s.aprog.get("run")),
@@ -180,6 +180,7 @@ class AmbientMixin:
         self.atut = 0 if not self.cfg.get("glide_tutorial_done") else None   # the guided demo, on first launch
         self.atut_seen, self.atut_flags, self.atut_t = set(), {}, time.perf_counter()
         self.acur_deg = self.acur_key = None
+        self.acompass = self.ascrub = None
         self.acur_name = ""
         self.eng.post("amb_global", 0.0, 1.0)
 
@@ -392,6 +393,14 @@ class AmbientMixin:
                 self.amb_bloom()                        # R2: bloom from one note
             return True
         if not down:
+            sc = getattr(self, "ascrub", None)
+            if sc is not None and name == sc["btn"]:
+                self.ascrub = None
+                if sc["active"]:
+                    self.amb_scrub_finish(sc)
+                else:                                    # a tap: the chord plays as always
+                    self.amb_play(sc["deg"], sc["mods"], False, toggle=True)
+                return True
             return name in mm.CHORD_BUTTONS + ["START", "L3", "Y"]
         if name in mm.CHORD_BUTTONS:
             if "SELECT" in self.inp.held:
@@ -410,6 +419,8 @@ class AmbientMixin:
                 self.r2_used = True
                 self.amb_press_chord(name, with_move=True)   # R2 + chord: travel there with the chosen Move
                 return True
+            if self.amb_scrub_begin(name):
+                return True                              # held: the left stick steers the glide (Scrub)
             self.amb_press_chord(name)
             return True
         if name == "START":
@@ -434,7 +445,15 @@ class AmbientMixin:
         if self.aexp:
             self.amb_express(x, y)
             return
-        self.amb_compass(x, y)
+        if "R2" in self.inp.held:
+            if math.hypot(x, y) > 0.4:
+                self.r2_used = True                      # R2 + stick picks a Move; no bloom on release
+            self.amb_compass(x, y)
+            return
+        if getattr(self, "acompass", None) is not None:
+            self.acompass = None
+        if getattr(self, "ascrub", None) is not None:
+            self.amb_scrub(x, y)
         return
         dz = 0.15
         sx = 0.0 if abs(x) < dz else x
@@ -747,6 +766,91 @@ class AmbientMixin:
         self.amb_play(other)
         self._preview_back = (time.perf_counter() + max(0.6, float(self.achord["time"]) * 1.2), cur)
 
+    # ------------------------------------------------------------ Scrub: play the glide yourself
+    SCRUB_RELEASE = ["Complete", "Return", "Stay"]
+
+    def amb_scrub_begin(self, btn):
+        """Pressing a chord while voices sound arms a scrub: nothing moves until the
+        left stick does. A tap (no stick) plays the chord on release, as before."""
+        mm = M()
+        if not self.amb_sounding() or self.aprog.get("run"):
+            return False
+        deg = mm.CHORD_BUTTONS.index(btn)
+        held = self.mods()
+        root_pc, pcs, label, key = self.amb_chord_tones(deg, held)
+        if key == getattr(self, "acur_key", None):
+            return False                                 # the same chord: a tap releases it
+        frm = {i: (self.aui[i]["cur"] if self.aui[i]["cur"] is not None else self.av[i]["note"] * 100.0)
+               for i in range(6)}
+        to = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
+        tgt = {i: n * 100.0 for i, n in to.items()}
+        if self.av[5]["on"] and self.achord.get("sub"):
+            tgt[5] = (min(to.values()) - 12) * 100.0
+        self.ascrub = {"btn": btn, "deg": deg, "mods": held, "key": key, "label": label, "from": frm,
+                       "to": tgt, "notes": to, "p": 0.0, "active": False, "sent": None}
+        return True
+
+    def amb_scrub(self, x, y):
+        """The stick's distance from centre is how far along the glide you are: push
+        slowly to travel slowly, hold halfway for an in-between chord, ease back
+        and the harmony slides back."""
+        sc = self.ascrub
+        r = math.hypot(x, y)
+        p = 0.0 if r < 0.12 else min(1.0, (r - 0.12) / 0.8)
+        p = p * p * (3 - 2 * p) * 0.25 + p * 0.75        # a little ease at both ends
+        if p > 0.04:
+            sc["active"] = True
+        sc["p"] = p
+        sent = round(p * 200)
+        if sent == sc["sent"]:
+            return
+        sc["sent"] = sent
+        for i, t in sc["to"].items():
+            v = self.av[i]
+            if v["base"] is None:
+                continue
+            f = sc["from"][i]
+            c = f + (t - f) * p
+            self.aui[i]["cur"] = c
+            self.aui[i]["path"] = None
+            self.eng.post("amb", i, {"tgt": c - v["base"] * 100.0, "glide": 0.06, "shape": 1, "on": True})
+        if sc["active"]:
+            self.flash("SCRUB  %d%%   TO %s" % (round(p * 100), sc["label"]))
+
+    def amb_scrub_finish(self, sc):
+        """Let go of the chord button: finish the move, go back, or stay in between
+        (Settings > Chords > Scrub release)."""
+        how = self.SCRUB_RELEASE[self.achord.get("scrub_release", 0) % 3]
+        p = sc["p"]
+        rest = max(0.15, float(self.achord["time"]) * (1.0 - p))
+        for i, t in sc["to"].items():
+            v = self.av[i]
+            f = sc["from"][i]
+            if how == "Complete":
+                v["note"], v["cents"] = int(round(t / 100.0)), 0
+                self.amb_push(i, glide=rest, shape=2)
+            elif how == "Return":
+                n = int(round(f / 100.0))
+                v["note"], v["cents"] = n, int(round(f - n * 100))
+                self.amb_push(i, glide=max(0.15, float(self.achord["time"]) * p), shape=2)
+            else:                                        # Stay: the in-between chord is the new chord
+                c = f + (t - f) * p
+                n = int(round(c / 100.0))
+                v["note"], v["cents"] = n, int(round(c - n * 100))
+                self.amb_push(i, glide=0.1, shape=1)
+        if how == "Complete":
+            if getattr(self, "acur_deg", None) is not None and self.acur_deg != sc["deg"]:
+                self.aprev_deg = self.acur_deg
+            self.acur_key, self.acur_deg, self.acur_name = sc["key"], sc["deg"], sc["label"]
+            self.flash(sc["label"])
+        elif how == "Stay":
+            self.acur_key = None
+            self.acur_name = "between"
+            self.flash("IN BETWEEN   %d%% OF THE WAY TO %s" % (round(p * 100), sc["label"]))
+        else:
+            self.flash("BACK")
+        self.atut_flags["scrub"] = True
+
     def amb_stop(self, why="STOPPED"):
         """Everything fades out: the voices, the sub, the progression."""
         for i in range(6):
@@ -1028,6 +1132,7 @@ class AmbientMixin:
                     ("Order", ORDERS[ch["order"]]),
                     ("Bass on root", "On" if ch.get("root") else "Off"),
                     ("Sub bass", "On" if ch.get("sub") else "Off"),
+                    ("Scrub release", self.SCRUB_RELEASE[ch.get("scrub_release", 0) % 3]),
                     ("Move", "%s   (R2 + chord)" % MOVES[ch["move"] % len(MOVES)]),
                     ("Progression moves", "On" if ch.get("prog_move") else "Off"),
                     ("Progression", "playing   START stops" if self.aprog["run"] else "START plays it"),
@@ -1150,6 +1255,8 @@ class AmbientMixin:
                 if not ch["sub"] and self.av[5]["on"]:
                     self.av[5]["on"] = False
                     self.amb_push(5)
+            elif name == "Scrub release":
+                ch["scrub_release"] = (ch.get("scrub_release", 0) + d) % 3
             elif name == "Move":
                 ch["move"] = (ch["move"] + d) % len(MOVES)
             elif name == "Progression moves":
@@ -1420,6 +1527,12 @@ class AmbientMixin:
             pc, iv, name = self._amb_chords[i]
             active = cur == i and any(self.av[k]["on"] for k in range(6))
             lv = self.sm("atile%d" % i, 1.0 if active else 0.0, 20 if active else 4)
+            sc = getattr(self, "ascrub", None)
+            if sc is not None and sc["active"]:              # scrubbing: the tiles cross-fade with the stick
+                if i == sc["deg"]:
+                    lv = max(lv * 0, sc["p"])
+                elif active:
+                    lv = 1.0 - sc["p"]
             r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"], tw, th)
             pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT, lv), r, border_radius=10)
             self.text(c, mm.roman_for(i, iv), self.f_med, self.mix(mm.ACCENT2, mm.BG, lv), (r.centerx, r.y + th * 21 // 100),
