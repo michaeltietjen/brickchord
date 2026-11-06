@@ -205,7 +205,16 @@ class AmbientMixin:
                  "glide": 4 if i < 6 else 2, "fade": 4 if i < 6 else 1, "vib": 4, "rate": 0.15 + 0.05 * i,
                  "trem": 0.0, "drift": 8 if i < 6 else 0, "base": None}
             if i < len(st.get("voices", [])):
-                d.update({kk: vv for kk, vv in st["voices"][i].items() if kk in d})
+                sv = st["voices"][i]
+                d.update({kk: vv for kk, vv in sv.items() if kk in d})
+                # sounds are kept by name: when your samples change, the list shifts, and an
+                # index would land on a different sound (a loop where a pad should be)
+                nm = sv.get("snd_name")
+                names_ = [p["name"] for p in self.amb_sounds]
+                if nm in names_:
+                    d["snd"] = names_.index(nm)
+                elif i != 7 and self.amb_sounds[d["snd"] % len(self.amb_sounds)].get("texture"):
+                    d["snd"] = default_snd[i] if i < 6 else ix("Bowed String" if edition.PLAY else "Kalimba")
                 d["on"] = False
                 d["base"] = None
             self.av.append(d)
@@ -401,13 +410,25 @@ class AmbientMixin:
 
     def amb_state(self):
         keys = ("snd", "note", "cents", "level", "pan", "glide", "fade", "vib", "rate", "trem", "drift")
-        return {"voices": [{k: v[k] for k in keys} for v in self.av],
+        return {"voices": [dict({k: v[k] for k in keys}, snd_name=self.amb_sounds[v["snd"] % len(self.amb_sounds)]["name"])
+                           for v in self.av],
                 "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
                 "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord, "expr": self.aexpr,
                 "prog": {"steps": self.aprog["steps"], "time": self.aprog["time"]},
                 "texture": getattr(self, "atexture", None), "play_v1": getattr(self, "aplay_v1", False)}
 
     # ------------------------------------------------------------ talking to the engine
+    def amb_next_sound(self, cur, d):
+        """The next sound a voice can take: beds, beats and textures are for the
+        texture layer (Settings > FX), not for a voice."""
+        n = len(self.amb_sounds)
+        s = cur
+        for _ in range(n):
+            s = (s + d) % n
+            if not self.amb_sounds[s].get("texture"):
+                return s
+        return cur
+
     def amb_patch(self, i):
         return self.amb_sounds[self.av[i]["snd"] % len(self.amb_sounds)]
 
@@ -1394,7 +1415,7 @@ class AmbientMixin:
                 self.asel = (i + d) % NV
                 return
             if name == "Sound":
-                v["snd"] = (v["snd"] + d) % len(self.amb_sounds)
+                v["snd"] = self.amb_next_sound(v["snd"], d)
                 v["base"] = None
                 if v["on"]:
                     self.amb_render(i)
@@ -1440,7 +1461,7 @@ class AmbientMixin:
                 m["time"] = self._amb_step(STEP_TIMES, m["time"], d)
             elif name == "Sound":
                 v = self.av[6 + j]
-                v["snd"] = (v["snd"] + d) % len(self.amb_sounds)
+                v["snd"] = self.amb_next_sound(v["snd"], d)
                 v["base"] = None
                 if v["on"]:
                     self.amb_render(6 + j)
