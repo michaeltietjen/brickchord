@@ -1180,6 +1180,7 @@ class AmbientMixin:
         if edition.PLAY and not getattr(self, "_tex_started", False):
             self._tex_started = True
             self.amb_set_texture()                         # the texture bed you left playing comes back
+            self.eng.post("pluck_warm", list(range(55, 89)))   # every strum note, built ahead
         pb = getattr(self, "_preview_back", None)
         if pb and now >= pb[0]:
             self._preview_back = None

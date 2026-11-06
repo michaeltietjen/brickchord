@@ -1919,23 +1919,45 @@ class Engine:
             self._voice((np.repeat(x[:, None], 2, 1), None), 1.0, pan, self.t + int(i * 0.045 * sr),
                         "chime", srev=1.0, sdly=0.6, rel=int(0.05 * sr))
 
-    def c_pluck(self, midi, vel=0.8, pan=0.0):
-        """One harp-like plucked note, for the strum: a few decaying partials and a
-        breath of noise at the start, through the reverb and delay."""
+    def _pluck_wave(self, midi):
+        """The harp note for midi, built once and kept: building it while you strum
+        cost a block of audio per note on the Brick, which stuttered."""
+        cache = self.__dict__.setdefault("_pluck_cache", {})
+        w = cache.get(midi)
+        if w is not None:
+            return w
         sr = self.sr
-        n = int(2.2 * sr)
-        t = np.arange(n) / sr
-        f = 440.0 * 2 ** ((midi - 69) / 12.0)
-        x = (np.sin(2 * np.pi * f * t) * np.exp(-t * 1.6)
-             + 0.45 * np.sin(2 * np.pi * 2 * f * t) * np.exp(-t * 3.2)
-             + 0.18 * np.sin(2 * np.pi * 3 * f * t) * np.exp(-t * 5.5)
-             + 0.08 * np.sin(2 * np.pi * 4.02 * f * t) * np.exp(-t * 9.0))
+        env = self.__dict__.get("_pluck_env")
+        if env is None:
+            n = int(1.8 * sr)
+            t = (np.arange(n) / sr).astype(np.float32)
+            env = self._pluck_env = (t, [np.exp(-t * k).astype(np.float32) for k in (1.6, 3.2, 5.5, 9.0)],
+                                     np.minimum(1.0, t / 0.002).astype(np.float32))
+        t, (e1, e2, e3, e4), att = env
+        ph = (2 * np.pi * 440.0 * 2 ** ((midi - 69) / 12.0)) * t
+        x = (np.sin(ph) * e1 + 0.45 * np.sin(2 * ph) * e2 + 0.18 * np.sin(3 * ph) * e3
+             + 0.08 * np.sin(4.02 * ph) * e4)
         k = int(0.012 * sr)
-        x[:k] += np.random.RandomState(int(midi)).uniform(-0.25, 0.25, k) * np.linspace(1, 0, k)
-        x *= np.minimum(1.0, t / 0.002)
-        x = (x * 0.16 * float(vel)).astype(np.float32)
-        self._voice((np.repeat(x[:, None], 2, 1), None), 1.0, float(pan), self.t, "pluck", srev=1.0, sdly=0.7,
-                    rel=int(0.05 * sr))
+        x[:k] += np.random.RandomState(int(midi)).uniform(-0.25, 0.25, k).astype(np.float32) * np.linspace(1, 0, k,
+                                                                                                         dtype=np.float32)
+        x = (x * att * 0.16).astype(np.float32)
+        w = cache[midi] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
+        return w
+
+    def c_pluck_warm(self, midis):
+        """Queue harp notes to build ahead, one per audio block, so the first strum
+        is as smooth as the rest."""
+        todo = self.__dict__.setdefault("_pluck_todo", [])
+        cache = self.__dict__.setdefault("_pluck_cache", {})
+        for m in midis:
+            if int(m) not in cache and int(m) not in todo:
+                todo.append(int(m))
+
+    def c_pluck(self, midi, vel=0.8, pan=0.0):
+        """One harp-like plucked note, for the strum, through the reverb and delay."""
+        w = self._pluck_wave(int(midi))
+        self._voice((w, None), float(vel), float(pan), self.t, "pluck", srev=1.0, sdly=0.7,
+                    rel=int(0.05 * self.sr))
 
     def c_click(self):
         lvl = self.metro_lvl
@@ -2097,6 +2119,9 @@ class Engine:
     def process(self):
         t0 = time.perf_counter()
         N, t, sr = self.N, self.t, self.sr
+        todo = self.__dict__.get("_pluck_todo")
+        if todo:
+            self._pluck_wave(todo.pop(0))                 # one harp note built ahead per block
         while self.cmds:
             name, args = self.cmds.popleft()
             try:
