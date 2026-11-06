@@ -1541,6 +1541,7 @@ class AmbientMixin:
                       (r.centerx, r.y + th * 54 // 100), center=True)
             self.text(c, mm.BUTTON_GLYPH[btn], self.f_small, self.mix(mm.DIM, mm.BG, lv), (r.centerx, r.y + th * 83 // 100),
                       center=True)
+        self.draw_amb_scrub(c, now)
 
     # ------------------------------------------------------------ the intro film
     INTRO_SECS = 4.6
@@ -1656,3 +1657,34 @@ class AmbientMixin:
             c.blit(part, (x, y))
             if n < len(word) or int(t * 6) % 2 == 0:
                 pygame.draw.rect(c, mm.ACCENT, (x + part.get_width() + 3, y + 8, 4, full.get_height() - 14))
+
+
+    def draw_amb_scrub(self, c, now):
+        """While a chord button is held: a slider from the chord you are on to the one
+        you are holding, its marker where the voices are, so you can see the stick is
+        what moves them."""
+        sc = getattr(self, "ascrub", None)
+        if sc is None:
+            return
+        mm = M()
+        W = mm.BASE_W
+        p = sc["p"]
+        w, h = 440, 66
+        r = pygame.Rect((W - w) // 2, mm.L["tiles_y"] - h - 10, w, h)
+        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.96), r, border_radius=14)
+        pygame.draw.rect(c, mm.ACCENT, r, 2, border_radius=14)
+        frm = getattr(self, "acur_name", "") or "here"
+        self.text(c, frm, self.f_small, self.mix(mm.INK, mm.DIM, p), (r.x + 16, r.y + 8))
+        self.text(c, sc["label"], self.f_small, self.mix(mm.DIM, mm.ACCENT2, p), (r.right - 16, r.y + 8), right=True)
+        tx0, tx1, ty = r.x + 24, r.right - 24, r.y + 42
+        pygame.draw.line(c, self.mix(mm.BG, mm.DIM, 0.6), (tx0, ty), (tx1, ty), 4)
+        mx = int(tx0 + (tx1 - tx0) * p)
+        pygame.draw.line(c, mm.ACCENT, (tx0, ty), (mx, ty), 4)
+        pygame.draw.circle(c, mm.ACCENT2, (mx, ty), 9)
+        pygame.draw.circle(c, mm.BG, (mx, ty), 4)
+        if not sc["active"]:
+            b = 0.55 + 0.45 * math.sin(now * 6)
+            self.text(c, "push the left stick", self.f_small, self.mix(mm.BG, mm.INK, b), (r.centerx, r.y + 8),
+                      center=True)
+        else:
+            self.text(c, "%d%%" % round(p * 100), self.f_small, mm.INK, (r.centerx, r.y + 8), center=True)
