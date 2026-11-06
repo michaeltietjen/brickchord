@@ -1086,6 +1086,141 @@ class AmbientMixin:
         self.amb_render(7)
         self.amb_push(7, jump=True)
 
+    # ------------------------------------------------------------ MIDI in (Brickglide Play)
+    def amb_midi_start(self):
+        """Watch for USB MIDI devices (an Orchid, an OP-Z, a keyboard) and read them on
+        a thread: notes arrive in a queue the UI drains every frame. Plug in or out
+        at any time; what is found is written to the log."""
+        import collections
+        import glob
+        import select
+        import threading
+        self._midi_q = collections.deque()
+        self.amidi_held, self.amidi_applied, self.amidi_due = set(), frozenset(), 0.0
+
+        def card_name(path):
+            try:
+                n = os.path.basename(path)[5:].split("D")[0]
+                return open("/proc/asound/card%s/id" % n).read().strip()
+            except Exception:
+                return os.path.basename(path)
+
+        def run():
+            fds, status, logged = {}, {}, [0]
+            while True:
+                try:
+                    for p in glob.glob("/dev/snd/midiC*D*"):
+                        if p not in fds.values():
+                            try:
+                                fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+                                fds[fd] = p
+                                status[fd] = 0
+                                nm = card_name(p)
+                                print("MIDI in: opened %s (%s)" % (p, nm), flush=True)
+                                self._midi_q.append(("connect", nm))
+                            except OSError as ex:
+                                print("MIDI in: cannot open %s: %s" % (p, ex), flush=True)
+                    if not fds:
+                        time.sleep(1.0)
+                        continue
+                    r, _, _ = select.select(list(fds), [], [], 1.0)
+                    for fd in r:
+                        try:
+                            data = os.read(fd, 256)
+                        except OSError:
+                            data = b""
+                        if not data:
+                            print("MIDI in: %s went away" % fds[fd], flush=True)
+                            self._midi_q.append(("disconnect", card_name(fds[fd])))
+                            os.close(fd)
+                            del fds[fd]
+                            continue
+                        msg = []
+                        for b in data:
+                            if b >= 0xF8:
+                                continue                  # clock and other real-time bytes
+                            if b & 0x80:
+                                status[fd] = b
+                                msg = []
+                                continue
+                            msg.append(b)
+                            st = status[fd] & 0xF0
+                            if st in (0x80, 0x90) and len(msg) == 2:
+                                note, vel = msg
+                                on = st == 0x90 and vel > 0
+                                self._midi_q.append(("on" if on else "off", note, vel))
+                                if logged[0] < 40:
+                                    logged[0] += 1
+                                    print("MIDI in: note %s %d vel %d" % ("on" if on else "off", note, vel),
+                                          flush=True)
+                                msg = []
+                            elif st in (0xA0, 0xB0, 0xE0) and len(msg) == 2:
+                                msg = []
+                            elif st in (0xC0, 0xD0) and len(msg) == 1:
+                                msg = []
+                except Exception as ex:
+                    print("MIDI in: error %s" % ex, flush=True)
+                    time.sleep(1.0)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def amb_midi_tick(self, now):
+        q = getattr(self, "_midi_q", None)
+        if q is None:
+            return
+        while q:
+            ev = q.popleft()
+            if ev[0] == "connect":
+                self.flash("MIDI IN: %s   PLAY A CHORD" % ev[1].upper())
+            elif ev[0] == "disconnect":
+                self.flash("MIDI IN: %s UNPLUGGED" % ev[1].upper())
+            elif ev[0] == "on":
+                self.amidi_held.add(ev[1])
+                self.amidi_due = now + 0.035            # the notes of a chord arrive one by one
+            elif ev[0] == "off":
+                self.amidi_held.discard(ev[1])
+                self.amidi_due = now + 0.035
+        if self.amidi_due and now >= self.amidi_due:
+            self.amidi_due = 0.0
+            held = frozenset(self.amidi_held)
+            if len(held) >= 2 and held != self.amidi_applied:
+                self.amidi_applied = held
+                self.amb_follow(sorted(held))
+            elif len(held) == 1 and not self.amidi_applied:
+                pass
+            elif not held:
+                self.amidi_applied = frozenset()        # let go: the chord holds until the next one
+
+    def amb_follow(self, notes):
+        """A chord from MIDI (the Orchid): every voice glides to it, the bass to its
+        lowest note's pitch class, with the sub underneath. Let go and it holds."""
+        mm = M()
+        pcs = {n % 12 for n in notes}
+        root_pc = notes[0] % 12
+        iv = sorted({(p - root_pc) % 12 for p in pcs})
+        try:
+            nm = mm.chord_name(root_pc, iv, False, False, self.key, self.scale)
+        except Exception:
+            nm = mm.note_name(root_pc, self.key, self.scale)
+        fresh = [i for i in range(self.NCH) if not self.av[i]["on"]]
+        if len(fresh) == self.NCH:
+            to = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
+            for i, n in to.items():
+                v = self.av[i]
+                v["note"], v["cents"], v["on"] = int(n), 0, True
+                if v["base"] is None or abs(v["note"] - v["base"]) > 24:
+                    self.amb_render(i)
+                self.amb_push(i, jump=True)
+            self.amb_sub_follow(to, 0.5)
+        else:
+            for i in fresh:
+                self.av[i]["on"] = True
+                self.amb_push(i, jump=True)
+            self.amb_glide_all(self.amb_voicelead(list(range(self.NCH)), pcs, root_pc), "")
+        self.acur_key, self.acur_deg = None, None
+        self.acur_name = nm
+        self.flash("MIDI CHORD  %s" % nm)
+
     def amb_stop(self, why="STOPPED"):
         """Everything fades out: the voices, the sub, the progression."""
         for i in range(7):
@@ -1261,8 +1396,11 @@ class AmbientMixin:
     # ------------------------------------------------------------ time
     def amb_tick(self, now):
         self.amb_tutorial_tick(now)
+        if edition.PLAY:
+            self.amb_midi_tick(now)
         if edition.PLAY and not getattr(self, "_tex_started", False):
             self._tex_started = True
+            self.amb_midi_start()
             self.amb_set_texture()                         # the texture bed you left playing comes back
             self.eng.post("pluck_warm", list(range(55, 89)))   # every strum note, built ahead
         pb = getattr(self, "_preview_back", None)
