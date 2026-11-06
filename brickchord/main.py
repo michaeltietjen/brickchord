@@ -1860,7 +1860,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2 if self.eng.load <= 0.8 else (230, 90, 80),
                        (20, L["status_y"]))
-        hint = ("chords <^>vXAB  hold + L-stick scrub  L1 7th  R1 sus4  Y flip  R2 bloom  START stop"
+        hint = (("buttons = melody   L-stick strum   L1/R1 octave   R2+button chord   START stop"
+                 if edition.PLAY and self.aprog.get("run") else
+                 "chords <^>vXAB  hold + L-stick scrub  L1 7th  R1 sus4  Y flip  R2 bloom  START play")
                 if edition.AMBIENT else None) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")

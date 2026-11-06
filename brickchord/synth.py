@@ -789,6 +789,22 @@ def render_sample(midi, p, arrays=False):
         y[-int(0.01 * SR):] *= np.linspace(1, 0, int(0.01 * SR))
     st = np.repeat(y[:, None], 2, axis=1) * (GAIN * 2.5)
     loop = None
+    if p.get("pad") and len(y) > int(0.6 * SR):
+        # a sample as a pad: a steady stretch from its middle, looped with a long
+        # crossfade so it sustains under a chord without a click or a restart
+        seg_len = min(len(y) - int(0.1 * len(y)), int(3.0 * SR))
+        s0 = int(0.15 * (len(y) - seg_len))
+        xf = min(int(0.5 * SR), seg_len // 3)
+        seg = st[s0:s0 + seg_len]
+        ramp = np.linspace(0, 1, xf)[:, None]
+        loop = seg[xf:].copy()
+        loop[-xf:] = loop[-xf:] * (1 - ramp) + seg[:xf] * ramp
+        att = st[:s0 + xf].copy()
+        k = min(len(att), int(0.08 * SR))
+        att[:k] *= np.linspace(0, 1, k)[:, None]
+        if arrays:
+            return np.ascontiguousarray(att, np.float32), np.ascontiguousarray(loop, np.float32)
+        return _to_bytes(att), _to_bytes(loop), len(att) / SR
     if p.get("loop"):
         # the loop is the sample from a few samples in, wrapped: the same audio once,
         # not an attack copy plus a loop copy

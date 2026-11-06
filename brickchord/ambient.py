@@ -18,6 +18,7 @@
 #   SELECT                   Settings (sounds, glide time and path, the progression, scenes)
 #   SELECT + chord button    save a scene
 import json
+import os
 import math
 import time
 
@@ -25,6 +26,7 @@ import numpy as np
 import pygame
 
 import engine
+import edition
 import synth  # noqa
 
 DRONE_BTNS = ["UP", "RIGHT", "DOWN", "LEFT", "X", "Y"]
@@ -88,6 +90,21 @@ def amb_bank():
         try:
             out.append(_find(synth.PATCHES, n))
         except StopIteration:
+            pass
+    if edition.PLAY:
+        # any WAV in samples/ as a pad that follows the chords, and the texture beds
+        # in samples/textures/ (unpitched room sounds under everything)
+        d = synth.SAMPLE_DIR
+        try:
+            for f in sorted(os.listdir(d)):
+                if f.lower().endswith(".wav"):
+                    out.append({"name": "Sample " + os.path.splitext(f)[0].replace("_", " ").title(),
+                                "sample": f, "root": 60, "pad": True})
+            for f in sorted(os.listdir(os.path.join(d, "textures"))):
+                if f.lower().endswith(".wav"):
+                    out.append({"name": "Texture " + os.path.splitext(f)[0], "sample": "textures/" + f,
+                                "root": 60, "pad": True, "texture": True})
+        except OSError:
             pass
     return out
 
@@ -181,6 +198,16 @@ class AmbientMixin:
         self.atut_seen, self.atut_flags, self.atut_t = set(), {}, time.perf_counter()
         self.acur_deg = self.acur_key = None
         self.acompass = self.ascrub = None
+        # Brickglide Play: the melody over the progression, the strum, the texture bed
+        self.amel_oct, self.amel_held, self.astrum_idx = 0, [], None
+        self.atexture = dict({"name": "", "level": 0.45}, **(st.get("texture") or {})) if edition.PLAY else None
+        if edition.PLAY:
+            lv = self.av[6]
+            names = [p["name"] for p in self.amb_sounds]
+            if not st.get("play_v1"):
+                lv.update(snd=names.index("Bowed String") if "Bowed String" in names else lv["snd"], level=0.7,
+                          fade=0.12, vib=9, rate=5.0, drift=0, glide=0.12, pan=0.1)
+            self.aplay_v1 = True
         self.acur_name = ""
         self.eng.post("amb_global", 0.0, 1.0)
 
@@ -256,6 +283,9 @@ class AmbientMixin:
     def amb_fx_items(self):
         mm = M()
         out = []
+        if edition.PLAY:
+            out += [("Texture", (self.atexture.get("name") or "Off").replace("Texture ", "")),
+                    ("Texture level", "%d%%" % round(self.atexture.get("level", 0.45) * 100))]
         for label, key in self.FX_ROWS:
             if label == "Space":
                 v = "%d%%" % round(self.base_rev * 100)
@@ -278,6 +308,18 @@ class AmbientMixin:
 
     def amb_fx_change(self, name, d):
         mm = M()
+        if name == "Texture":
+            opts = [""] + self.amb_texture_names()
+            cur = self.atexture.get("name") or ""
+            self.atexture["name"] = opts[(opts.index(cur) + d) % len(opts) if cur in opts else 0]
+            self.amb_set_texture()
+            return
+        if name == "Texture level":
+            self.atexture["level"] = round(max(0.0, min(1.0, self.atexture.get("level", 0.45) + 0.05 * d)), 2)
+            self.av[7]["level"] = self.atexture["level"]
+            if self.av[7]["on"]:
+                self.amb_push(7)
+            return
         key = dict(self.FX_ROWS).get(name)
         if name == "Space":
             self.base_rev = round(max(0.0, min(1.0, self.base_rev + 0.05 * d)), 2)
@@ -312,7 +354,8 @@ class AmbientMixin:
         return {"voices": [{k: v[k] for k in keys} for v in self.av],
                 "mel": [{"steps": m["steps"], "time": m["time"]} for m in self.amel],
                 "scenes": self.ascenes, "morph": self.amorph, "chord": self.achord, "expr": self.aexpr,
-                "prog": {"steps": self.aprog["steps"], "time": self.aprog["time"]}}
+                "prog": {"steps": self.aprog["steps"], "time": self.aprog["time"]},
+                "texture": getattr(self, "atexture", None), "play_v1": getattr(self, "aplay_v1", False)}
 
     # ------------------------------------------------------------ talking to the engine
     def amb_patch(self, i):
@@ -392,6 +435,22 @@ class AmbientMixin:
             elif not self.r2_used:
                 self.amb_bloom()                        # R2: bloom from one note
             return True
+        if self.amb_melody_mode():
+            if name in mm.CHORD_BUTTONS and not ({"SELECT", "L2"} & set(self.inp.held)):
+                k = mm.CHORD_BUTTONS.index(name)
+                if down and "R2" in self.inp.held:
+                    self.r2_used = True
+                    self.amb_play(k)                     # R2 + button: change the chord by hand
+                elif down:
+                    self.amb_mel_on(k)
+                else:
+                    self.amb_mel_off(k)
+                return True
+            if name in ("L1", "R1"):
+                if down:
+                    self.amel_oct = max(-2, min(2, self.amel_oct + (1 if name == "R1" else -1)))
+                    self.flash("MELODY OCTAVE %+d" % self.amel_oct)
+                return True
         if not down:
             sc = getattr(self, "ascrub", None)
             if sc is not None and name == sc["btn"]:
@@ -438,6 +497,9 @@ class AmbientMixin:
         return False
 
     def amb_stick(self, x, y):
+        if self.amb_melody_mode() and "L2" not in self.inp.held and "R2" not in self.inp.held:
+            self.amb_strum(x, y)
+            return
         if "L2" in self.inp.held:
             self.l2_moved = getattr(self, "l2_moved", False) or math.hypot(x, y) > 0.3
             self.drone_cloud(x, y)
@@ -854,12 +916,99 @@ class AmbientMixin:
             self.flash("BACK")
         self.atut_flags["scrub"] = True
 
+    # ------------------------------------------------------------ Brickglide Play
+    def amb_melody_mode(self):
+        return bool(edition.PLAY and self.aprog.get("run"))
+
+    def amb_mel_note(self, k):
+        """Button k (0..6) is the k-th note of the scale above the current chord's
+        root: buttons 1, 3 and 5 (< > v) are always the chord's own tones."""
+        mm = M()
+        sc = mm.SCALES[self.scale]
+        deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else 0
+        r = 60 + (self.key + sc[deg % 7]) % 12
+        if r > 66:
+            r -= 12
+        iv = (sc[(deg + k) % 7] - sc[deg % 7]) % 12
+        return r + iv + 12 * self.amel_oct
+
+    def amb_mel_on(self, k):
+        """A melody note on the lead voice; pressed while another is held, it glides
+        there (legato), which is the whole point of Brickglide."""
+        v = self.av[6]
+        legato = v["on"] and len(self.amel_held) > 0
+        self.amel_held = [h for h in self.amel_held if h != k] + [k]
+        v["note"], v["cents"] = self.amb_mel_note(k), 0
+        if not legato:
+            v["on"] = True
+            self.amb_push(6, jump=True, glide=0.0)
+        else:
+            self.amb_push(6, glide=float(v["glide"]), shape=2)
+        self.amel_lit = time.perf_counter()
+
+    def amb_mel_off(self, k):
+        self.amel_held = [h for h in self.amel_held if h != k]
+        v = self.av[6]
+        if self.amel_held:                               # back to the note still held
+            v["note"], v["cents"] = self.amb_mel_note(self.amel_held[-1]), 0
+            self.amb_push(6, glide=float(v["glide"]), shape=2)
+        elif v["on"]:
+            v["on"] = False
+            self.amb_push(6)
+
+    def amb_strum(self, x, y):
+        """Left stick: roll it round the rim and it plucks through the current chord's
+        tones, low on the left, over the top, to high on the right, like an
+        Omnichord's strum plate."""
+        r = math.hypot(x, y)
+        if r < 0.35:
+            self.astrum_idx = None
+            return
+        deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else 0
+        _, pcs, _, _ = self.amb_chord_tones(deg, None)
+        tones = [n for n in range(55, 89) if n % 12 in pcs][:12]
+        if not tones:
+            return
+        # the stick's direction, not its position: rolling it round the rim from left,
+        # over the top, to right sweeps low to high (and back), never through the centre
+        ang = math.atan2(abs(y), x)                      # 0 = right .. pi = left
+        idx = int(round((1.0 - ang / math.pi) * (len(tones) - 1)))
+        prev = self.astrum_idx
+        self.astrum_idx = idx
+        if prev == idx:
+            return
+        run = [idx] if prev is None else (list(range(prev + 1, idx + 1)) if idx > prev else list(range(prev - 1, idx - 1, -1)))
+        for j in run[-6:]:
+            self.eng.post("pluck", int(tones[j]), 0.55 + 0.3 * min(1.0, r), -0.6 + 1.2 * j / max(1, len(tones) - 1))
+
+    def amb_texture_names(self):
+        return [p["name"] for p in self.amb_sounds if p.get("texture")]
+
+    def amb_set_texture(self):
+        """The texture bed lives on voice 8: a room sound at its own pitch, under
+        everything, not following the chords."""
+        if not edition.PLAY:
+            return
+        v = self.av[7]
+        names = [p["name"] for p in self.amb_sounds]
+        nm = self.atexture.get("name") or ""
+        if nm not in names:
+            if v["on"]:
+                v["on"] = False
+                self.amb_push(7)
+            return
+        v.update(snd=names.index(nm), note=60, cents=0, level=float(self.atexture.get("level", 0.45)), pan=0.0,
+                 vib=0.0, trem=0.0, drift=0.0, fade=2.5, on=True, base=None)
+        self.amb_render(7)
+        self.amb_push(7, jump=True)
+
     def amb_stop(self, why="STOPPED"):
         """Everything fades out: the voices, the sub, the progression."""
-        for i in range(6):
+        for i in range(7):
             if self.av[i]["on"]:
                 self.av[i]["on"] = False
                 self.amb_push(i)
+        self.amel_held = []
         self.aprog["run"] = False
         self.acur_key = self.acur_deg = None
         self.acur_name = ""
@@ -998,7 +1147,10 @@ class AmbientMixin:
         p["run"] = not p["run"]
         p["i"], p["next"] = -1, 0.0
         steps = "  ".join(ROMAN[s % 7] for s in p["steps"] if s is not None)
-        self.flash(("PROGRESSION  %s   EVERY %gs" % (steps, p["time"])) if p["run"] else "PROGRESSION STOPPED")
+        if p["run"] and edition.PLAY:
+            self.flash("PLAY A MELODY:  BUTTONS ARE NOTES   ROLL THE LEFT STICK TO STRUM")
+        else:
+            self.flash(("PROGRESSION  %s   EVERY %gs" % (steps, p["time"])) if p["run"] else "PROGRESSION STOPPED")
 
     def amb_evolve(self):
         """Every sounding drone glides to a nearby note of the scale: the slow
@@ -1025,6 +1177,9 @@ class AmbientMixin:
     # ------------------------------------------------------------ time
     def amb_tick(self, now):
         self.amb_tutorial_tick(now)
+        if edition.PLAY and not getattr(self, "_tex_started", False):
+            self._tex_started = True
+            self.amb_set_texture()                         # the texture bed you left playing comes back
         pb = getattr(self, "_preview_back", None)
         if pb and now >= pb[0]:
             self._preview_back = None
@@ -1526,6 +1681,9 @@ class AmbientMixin:
             self._amb_ck = ck
             self._amb_chords = [mm.build_chord(self.key, self.scale, i, m) for i in range(7)]
         cur = getattr(self, "acur_deg", None)
+        if self.amb_melody_mode():
+            self.draw_amb_melody_tiles(c, now, x0, tw, gap, th)
+            return
         for i, btn in enumerate(mm.CHORD_BUTTONS):
             pc, iv, name = self._amb_chords[i]
             active = cur == i and any(self.av[k]["on"] for k in range(6))
@@ -1691,3 +1849,22 @@ class AmbientMixin:
                       center=True)
         else:
             self.text(c, "%d%%" % round(p * 100), self.f_small, mm.INK, (r.centerx, r.y + 8), center=True)
+
+    def draw_amb_melody_tiles(self, c, now, x0, tw, gap, th):
+        """Brickglide Play: the seven buttons as melody notes over the current chord.
+        The chord's own tones (1, 3, 5) are marked; a held note is lit."""
+        mm = M()
+        names = ["1", "2", "3", "4", "5", "6", "7"]
+        for k, btn in enumerate(mm.CHORD_BUTTONS):
+            n = self.amb_mel_note(k)
+            held = k in self.amel_held
+            lv = self.sm("amel%d" % k, 1.0 if held else 0.0, 30 if held else 6)
+            r = pygame.Rect(x0 + k * (tw + gap), mm.L["tiles_y"], tw, th)
+            base = self.mix(mm.PANEL, mm.ACCENT2, 0.22) if k in (0, 2, 4) else mm.PANEL
+            pygame.draw.rect(c, self.mix(base, mm.ACCENT, lv), r, border_radius=10)
+            self.text(c, names[k], self.f_med, self.mix(mm.ACCENT2 if k in (0, 2, 4) else mm.DIM, mm.BG, lv),
+                      (r.centerx, r.y + th * 21 // 100), center=True)
+            self.text(c, mm.note_name(n % 12, self.key, self.scale) + str(n // 12 - 1), self.f_med,
+                      self.mix(mm.INK, mm.BG, lv), (r.centerx, r.y + th * 54 // 100), center=True)
+            self.text(c, mm.BUTTON_GLYPH[btn], self.f_small, self.mix(mm.DIM, mm.BG, lv),
+                      (r.centerx, r.y + th * 83 // 100), center=True)

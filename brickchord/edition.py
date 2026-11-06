@@ -15,10 +15,16 @@ def _read():
         except Exception:
             v = "chord"
     v = v.lower()
+    global _RAW
+    _RAW = v
     return "lab" if v.startswith("lab") else ("ambient" if v.startswith(("amb", "glide")) else "chord")
+
+
+_RAW = ""
 
 
 EDITION = _read()
 LAB = EDITION == "lab"
 AMBIENT = EDITION == "ambient"           # Brickglide: drones, long glides, chords, scenes
-NAME = "Bricklab" if LAB else ("Brickglide" if AMBIENT else "Brickchord")
+PLAY = AMBIENT and _RAW.startswith("glideplay")   # the Brickglide Play fork: melody over the progression
+NAME = "Bricklab" if LAB else (("Brickglide Play" if PLAY else "Brickglide") if AMBIENT else "Brickchord")
