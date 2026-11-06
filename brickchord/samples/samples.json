@@ -1,0 +1,83 @@
+{
+ "004_a__Synth_Loop_1_130bpm_Em_-_PSYBREAKS_Zenhiser (1).wav": {
+  "role": "bed",
+  "name": "Psybreaks Em",
+  "loop": true,
+  "end_s": 11.0769,
+  "tonic": 4,
+  "minor": true
+ },
+ "AB_ER_ohu_144_synth_bass_peat_C#m.wav": {
+  "role": "bed",
+  "name": "Peat Bass C#m",
+  "loop": true,
+  "end_s": 11.6667,
+  "tonic": 1,
+  "minor": true
+ },
+ "Hallusynation.wav": {
+  "role": "bed",
+  "name": "Hallusynation F",
+  "loop": true,
+  "end_s": 11.5862,
+  "tonic": 5,
+  "minor": false
+ },
+ "NH_SBSL_133_synth_lead_beachdrive_Cmaj.wav": {
+  "role": "bed",
+  "name": "Beachdrive C",
+  "loop": true,
+  "end_s": 10.8271,
+  "tonic": 0,
+  "minor": false
+ },
+ "NH_SBSL_synth_disco_bb_Abmin.wav": {
+  "role": "bed",
+  "name": "Disco Abm",
+  "loop": true,
+  "tonic": 8,
+  "minor": true
+ },
+ "NH_SBSL_synth_dream_Amaj.wav": {
+  "role": "bed",
+  "name": "Dream A",
+  "loop": true,
+  "tonic": 9,
+  "minor": false
+ },
+ "NH_SBSL_synth_twirl_Amaj.wav": {
+  "role": "bed",
+  "name": "Twirl A",
+  "loop": true,
+  "tonic": 9,
+  "minor": false
+ },
+ "RKU_NA_120_drum_loop_full_she.wav": {
+  "role": "beat",
+  "name": "She 120",
+  "loop": true,
+  "end_s": 8.0
+ },
+ "DUBSYN 1 (Fmin).wav": {
+  "role": "pad",
+  "name": "Dubsyn Fm",
+  "root": 65,
+  "pad_len": 1.6,
+  "pad_xf": 0.4
+ },
+ "DUBSYN 2 (F#min).wav": {
+  "role": "pad",
+  "name": "Dubsyn F#m",
+  "root": 66,
+  "pad_len": 1.6,
+  "pad_xf": 0.4
+ },
+ "drift_choir.wav": {
+  "role": "pad",
+  "name": "Drift Choir",
+  "root": 72
+ },
+ "drift_vox.wav": {
+  "role": "skip"
+ }
+}

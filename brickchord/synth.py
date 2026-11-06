@@ -762,6 +762,8 @@ def render_sample(midi, p, arrays=False):
         x = np.zeros(int(0.05 * SR), np.float32)
     n = len(x)
     a, b = int(max(0.0, min(1.0, p.get("start", 0.0))) * n), int(max(0.0, min(1.0, p.get("end", 1.0))) * n)
+    if p.get("end_s"):                                   # a loop's exact length, in seconds (whole bars)
+        a, b = int(float(p.get("start_s", 0.0)) * SR), min(n, int(float(p["end_s"]) * SR))
     if b - a < 16:
         a, b = 0, n
     x = x[a:b]
@@ -792,9 +794,9 @@ def render_sample(midi, p, arrays=False):
     if p.get("pad") and len(y) > int(0.6 * SR):
         # a sample as a pad: a steady stretch from its middle, looped with a long
         # crossfade so it sustains under a chord without a click or a restart
-        seg_len = min(len(y) - int(0.1 * len(y)), int(3.0 * SR))
+        seg_len = min(len(y) - int(0.1 * len(y)), int(float(p.get("pad_len", 3.0)) * SR))
         s0 = int(0.15 * (len(y) - seg_len))
-        xf = min(int(0.5 * SR), seg_len // 3)
+        xf = min(int(float(p.get("pad_xf", 0.5)) * SR), seg_len // 3)
         seg = st[s0:s0 + seg_len]
         ramp = np.linspace(0, 1, xf)[:, None]
         loop = seg[xf:].copy()

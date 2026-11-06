@@ -98,6 +98,12 @@ def amb_bank():
         ports = os.path.dirname(os.path.dirname(d))
         dirs = [d] + [os.path.join(ports, app, "samples") for app in ("bricklab", "brickchord", "brickglide")]
         seen = set()
+        try:                                             # what each of your samples is best used as
+            with open(os.path.join(d, "samples.json")) as fh:
+                manifest = json.load(fh)
+        except Exception:
+            manifest = {}
+        beds = []
         for k, sd in enumerate(dirs):
             try:
                 files = sorted(os.listdir(sd))
@@ -107,8 +113,21 @@ def amb_bank():
                 if not f.lower().endswith(".wav") or f.startswith(".") or f in seen:
                     continue
                 seen.add(f)
-                out.append({"name": "Sample " + sample_title(f), "sample": f if k == 0 else os.path.join(sd, f),
-                            "root": sample_root(f), "pad": True})
+                path = f if k == 0 else os.path.join(sd, f)
+                info = manifest.get(f, {})
+                role = info.get("role", "pad")
+                title = info.get("name") or sample_title(f)
+                if role == "skip":
+                    continue
+                if role in ("bed", "beat"):
+                    # a loop in its own key, under everything; it is moved into yours
+                    beds.append(dict({"name": ("Beat " if role == "beat" else "Bed ") + title, "sample": path, "root": 60,
+                                      "texture": True, "bed": role == "bed"},
+                                     **{k2: v for k2, v in info.items() if k2 not in ("role", "name")}))
+                    continue
+                out.append(dict({"name": "Sample " + title, "sample": path, "root": sample_root(f), "pad": True},
+                                **{k2: v for k2, v in info.items() if k2 not in ("role", "name")}))
+        out += beds
         try:
             for f in sorted(os.listdir(os.path.join(d, "textures"))):
                 if f.lower().endswith(".wav") and not f.startswith("."):
@@ -1013,7 +1032,7 @@ class AmbientMixin:
             self.eng.post("pluck", int(tones[j]), 0.55 + 0.3 * min(1.0, r), -0.6 + 1.2 * j / max(1, len(tones) - 1))
 
     def amb_texture_names(self):
-        return [p["name"] for p in self.amb_sounds if p.get("texture")]
+        return [p["name"] for p in self.amb_sounds if p.get("texture")]   # beds and beats, then textures
 
     def amb_set_texture(self):
         """The texture bed lives on voice 8: a room sound at its own pitch, under
@@ -1028,7 +1047,20 @@ class AmbientMixin:
                 v["on"] = False
                 self.amb_push(7)
             return
-        v.update(snd=names.index(nm), note=60, cents=0, level=float(self.atexture.get("level", 0.45)), pan=0.0,
+        p = self.amb_sounds[names.index(nm)]
+        note = 60
+        if p.get("bed"):
+            # move the loop from its key to yours (a minor loop to your key's minor, a major
+            # loop to its major), by the smallest step either way
+            minor_key = self.scale in ("Minor", "Dorian", "Phrygian", "Harmonic Minor", "Melodic Minor")
+            home = self.key % 12
+            if bool(p.get("minor")) and not minor_key:
+                home = (home + 9) % 12                   # the relative minor of a major key
+            elif not p.get("minor") and minor_key:
+                home = (home + 3) % 12                   # the relative major of a minor key
+            sh = (home - int(p.get("tonic", 0))) % 12
+            note = 60 + (sh - 12 if sh > 6 else sh)
+        v.update(snd=names.index(nm), note=note, cents=0, level=float(self.atexture.get("level", 0.45)), pan=0.0,
                  vib=0.0, trem=0.0, drift=0.0, fade=2.5, on=True, base=None)
         self.amb_render(7)
         self.amb_push(7, jump=True)
