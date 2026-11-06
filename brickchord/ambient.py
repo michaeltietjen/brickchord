@@ -1027,30 +1027,69 @@ class AmbientMixin:
             v["on"] = False
             self.amb_push(6)
 
+    def amb_strum_tones(self):
+        deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else None
+        if deg is None and getattr(self, "acur_name", "") and getattr(self, "amidi_applied", None):
+            pcs = {n % 12 for n in self.amidi_applied}       # a chord from MIDI has no degree
+        else:
+            _, pcs, _, _ = self.amb_chord_tones(deg or 0, None)
+        return [n for n in range(55, 89) if n % 12 in pcs][:12]
+
     def amb_strum(self, x, y):
-        """Left stick: roll it round the rim and it plucks through the current chord's
-        tones, low on the left, over the top, to high on the right, like an
-        Omnichord's strum plate."""
+        """Left stick, the way a harp or an Omnichord plate is played:
+        LEFT / RIGHT strums: the stick's position across is the string you're on, so a
+        sweep plays every chord tone it crosses, low on the left, high on the right.
+        UP / DOWN arpeggiates: up climbs the chord tones over and over, down falls,
+        faster the further you push. Whichever way the stick moves first decides which,
+        until it comes back to the middle."""
+        now = time.perf_counter()
         r = math.hypot(x, y)
-        if r < 0.35:
-            self.astrum_idx = None
+        if r < 0.18:
+            if getattr(self, "astick_center_t", None) is None:
+                self.astick_center_t = now
+            elif now - self.astick_center_t > 0.15:          # resting in the middle: let go
+                self.astick_mode, self.astrum_idx, self.aarp = None, None, None
             return
-        deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else 0
-        _, pcs, _, _ = self.amb_chord_tones(deg, None)
-        tones = [n for n in range(55, 89) if n % 12 in pcs][:12]
+        self.astick_center_t = None
+        if getattr(self, "astick_mode", None) is None:
+            self.astick_mode = "strum" if abs(x) >= abs(y) else "arp"
+        tones = self.amb_strum_tones()
         if not tones:
             return
-        # the stick's direction, not its position: rolling it round the rim from left,
-        # over the top, to right sweeps low to high (and back), never through the centre
-        ang = math.atan2(abs(y), x)                      # 0 = right .. pi = left
-        idx = int(round((1.0 - ang / math.pi) * (len(tones) - 1)))
-        prev = self.astrum_idx
-        self.astrum_idx = idx
-        if prev == idx:
+        if self.astick_mode == "strum":
+            idx = int(round((max(-1.0, min(1.0, x)) + 1) / 2 * (len(tones) - 1)))
+            prev = getattr(self, "astrum_idx", None)
+            self.astrum_idx = idx
+            if prev == idx:
+                return
+            run = [idx] if prev is None else (list(range(prev + 1, idx + 1)) if idx > prev
+                                              else list(range(prev - 1, idx - 1, -1)))
+            for j in run[-6:]:
+                self.eng.post("pluck", int(tones[j]), 0.5 + 0.35 * min(1.0, abs(x)),
+                              -0.6 + 1.2 * j / max(1, len(tones) - 1))
+        else:
+            k = max(0.0, (abs(y) - 0.18) / 0.82)
+            rate = 3.0 + 13.0 * k ** 1.3                      # notes a second: 3 near the middle, 16 at the rim
+            d = 1 if y > 0 else -1
+            if getattr(self, "aarp", None) is None:
+                self.aarp = {"dir": d, "rate": rate, "i": 0 if d > 0 else len(tones) - 1, "next": now}
+            else:
+                if self.aarp["dir"] != d:                    # turn round from the note just played
+                    self.aarp["i"] = (self.aarp["i"] - self.aarp["dir"] + d) % len(tones)
+                    self.aarp["dir"] = d
+                self.aarp["rate"] = rate
+
+    def amb_arp_tick(self, now):
+        ap = getattr(self, "aarp", None)
+        if not ap or now < ap["next"]:
             return
-        run = [idx] if prev is None else (list(range(prev + 1, idx + 1)) if idx > prev else list(range(prev - 1, idx - 1, -1)))
-        for j in run[-6:]:
-            self.eng.post("pluck", int(tones[j]), 0.55 + 0.3 * min(1.0, r), -0.6 + 1.2 * j / max(1, len(tones) - 1))
+        tones = self.amb_strum_tones()
+        if not tones:
+            return
+        i = ap["i"] % len(tones)
+        self.eng.post("pluck", int(tones[i]), 0.6, -0.6 + 1.2 * i / max(1, len(tones) - 1))
+        ap["i"] = (i + ap["dir"]) % len(tones)
+        ap["next"] = max(now, ap["next"]) + 1.0 / ap["rate"]
 
     def amb_texture_names(self):
         return [p["name"] for p in self.amb_sounds if p.get("texture")]   # beds and beats, then textures
@@ -1367,7 +1406,7 @@ class AmbientMixin:
         p["i"], p["next"] = -1, 0.0
         steps = "  ".join(ROMAN[s % 7] for s in p["steps"] if s is not None)
         if p["run"] and edition.PLAY:
-            self.flash("PLAY A MELODY:  BUTTONS ARE NOTES   ROLL THE LEFT STICK TO STRUM")
+            self.flash("PLAY A MELODY:  BUTTONS ARE NOTES   L-STICK: SIDEWAYS STRUM, UP/DOWN ARP")
         else:
             self.flash(("PROGRESSION  %s   EVERY %gs" % (steps, p["time"])) if p["run"] else "PROGRESSION STOPPED")
 
@@ -1398,6 +1437,7 @@ class AmbientMixin:
         self.amb_tutorial_tick(now)
         if edition.PLAY:
             self.amb_midi_tick(now)
+            self.amb_arp_tick(now)
         if edition.PLAY and not getattr(self, "_tex_started", False):
             self._tex_started = True
             self.amb_midi_start()
