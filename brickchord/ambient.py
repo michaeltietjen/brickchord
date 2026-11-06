@@ -3,7 +3,7 @@
 #   < ^ > v X A B            the seven chords of the key (I to VII): the voices glide into it
 #                            and hold it; the same chord again lets it fade
 #   L1 / R1 / L1+R1 / Y      with a chord: 7th / sus4 / 9th / flip major-minor (as in Brickchord)
-#   hold a chord + right stick Scrub: the stick plays the glide to that chord, as far as you
+#   hold a chord + left stick  Scrub: the stick plays the glide to that chord, as far as you
 #                            push it; hold halfway for an in-between chord; let go to finish
 #                            (or go back, or stay: Settings > Chords > Scrub release)
 #   R2 + left stick          the Move compass: hold a direction and press a chord
@@ -105,7 +105,7 @@ TUTORIAL = [
     ("Hold  L1  and press  X :  the fifth chord with a 7th", 4, lambda s: s.acur_deg == 4 and "seventh" in (s.acur_key or (0, ()))[1]),
     ("Hold  Y  and press  ^ :  Y flips major and minor", 1,
      lambda s: s.acur_deg == 1 and "flip" in (s.acur_key or (0, ()))[1]),
-    ("HOLD  X  and push the RIGHT STICK slowly: you play the glide", 4,
+    ("HOLD  X  and push the LEFT STICK slowly: you play the glide", 4,
      lambda s: s.atut_flags.get("scrub")),
     ("Press  R2 :  bloom, every voice from one note", None, lambda s: s.atut_flags.get("bloom")),
     ("Press  START :  everything stops", None, lambda s: not s.amb_sounding() and not s.aprog.get("run")),
@@ -452,6 +452,8 @@ class AmbientMixin:
             return
         if getattr(self, "acompass", None) is not None:
             self.acompass = None
+        if getattr(self, "ascrub", None) is not None:
+            self.amb_scrub(x, y)                         # holding a chord: the left stick plays the glide
         return
         dz = 0.15
         sx = 0.0 if abs(x) < dz else x
@@ -1685,7 +1687,7 @@ class AmbientMixin:
         pygame.draw.circle(c, mm.BG, (mx, ty), 4)
         if not sc["active"]:
             b = 0.55 + 0.45 * math.sin(now * 6)
-            self.text(c, "push the right stick", self.f_small, self.mix(mm.BG, mm.INK, b), (r.centerx, r.y + 8),
+            self.text(c, "push the left stick", self.f_small, self.mix(mm.BG, mm.INK, b), (r.centerx, r.y + 8),
                       center=True)
         else:
             self.text(c, "%d%%" % round(p * 100), self.f_small, mm.INK, (r.centerx, r.y + 8), center=True)

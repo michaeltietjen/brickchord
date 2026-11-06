@@ -1056,9 +1056,6 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         ry = 0.0 if abs(ry) < 0.12 else ry
         rx = self.axis_val(st.get("rx")) if st.get("rx") else 0.0
         rx = 0.0 if abs(rx) < 0.12 else rx
-        if edition.AMBIENT and getattr(self, "ascrub", None) is not None:
-            self.amb_scrub(rx, ry)          # holding a chord: the right stick plays the glide, not the filter
-            return
         if self.fx_hold:
             rx, ry = self.fx_hold
         self.rx, self.ry = rx, ry
@@ -1863,7 +1860,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             status.append("CPU %d%%" % round(self.eng.load * 100))
         sr = self.text(c, "   ".join(status), self.f_small, ACCENT2 if self.eng.load <= 0.8 else (230, 90, 80),
                        (20, L["status_y"]))
-        hint = ("chords <^>vXAB  hold + R-stick scrub  L1 7th  R1 sus4  Y flip  R2 bloom  START stop"
+        hint = ("chords <^>vXAB  hold + L-stick scrub  L1 7th  R1 sus4  Y flip  R2 bloom  START stop"
                 if edition.AMBIENT else None) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
