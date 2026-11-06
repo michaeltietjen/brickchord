@@ -260,7 +260,8 @@ class AmbientMixin:
         # Brickglide Play: the melody over the progression, the strum, the texture bed
         self.amel_oct, self.amel_held, self.astrum_idx = 0, [], None
         # the strum and arp: instrument, level, arp pattern, range in octaves
-        self.astrum = dict({"inst": 0, "level": 1.0, "style": 0, "range": 2}, **(st.get("strum") or {}))
+        self.astrum = dict({"inst": 0, "level": 1.0, "style": 0, "range": 2, "rev": "Plate", "rev_amt": 0.6,
+                            "dly": "Ping-Pong", "dly_amt": 0.35, "dly_time": 2}, **(st.get("strum") or {}))
         self.atexture = dict({"name": "", "level": 0.45}, **(st.get("texture") or {})) if edition.PLAY else None
         if edition.PLAY:
             lv = self.av[6]
@@ -1036,6 +1037,14 @@ class AmbientMixin:
 
     ARP_STYLES = ["By stick", "Bounce", "Random", "Root and up"]
 
+    def amb_strum_fx(self):
+        """The strum and arp's own reverb and echo, on bus B, apart from the pads'."""
+        mm = M()
+        sa = self.astrum
+        times = mm.DELAY_TIMES
+        self.eng.post("busfx", 1, sa["rev"], sa["dly"], times[sa["dly_time"] % len(times)][1])
+        self.eng.post("pluckfx", sa["rev_amt"], sa["dly_amt"])
+
     def amb_strum_tones(self):
         deg = self.acur_deg if getattr(self, "acur_deg", None) is not None else None
         if deg is None and getattr(self, "amidi_pcs", None):
@@ -1478,6 +1487,7 @@ class AmbientMixin:
             self.amb_midi_start()
             self.amb_set_texture()                         # the texture bed you left playing comes back
             self.eng.post("pluck_warm", list(range(43, 101)), self.astrum["inst"])   # every strum note, built ahead
+            self.amb_strum_fx()
         pb = getattr(self, "_preview_back", None)
         if pb and now >= pb[0]:
             self._preview_back = None
@@ -1606,7 +1616,12 @@ class AmbientMixin:
                 rows += [("Strum sound", engine.Engine.PLUCKS[sa["inst"] % len(engine.Engine.PLUCKS)][0]),
                          ("Strum level", "%d%%" % round(sa["level"] * 100)),
                          ("Arp pattern", self.ARP_STYLES[sa["style"] % len(self.ARP_STYLES)]),
-                         ("Strum range", "%d octave%s" % (sa["range"], "" if sa["range"] == 1 else "s"))]
+                         ("Strum range", "%d octave%s" % (sa["range"], "" if sa["range"] == 1 else "s")),
+                         ("Strum reverb", sa["rev"]),
+                         ("Strum space", "%d%%" % round(sa["rev_amt"] * 100)),
+                         ("Strum echo", sa["dly"]),
+                         ("Strum echo amount", "%d%%" % round(sa["dly_amt"] * 100)),
+                         ("Strum echo time", mm.DELAY_TIMES[sa["dly_time"] % len(mm.DELAY_TIMES)][0])]
             rows += [("Melody", "Melody %s   %s" % ("AB"[j], "running" if m["run"] else "stopped"))]
             for s in range(5):
                 d = m["steps"][s]
@@ -1666,8 +1681,23 @@ class AmbientMixin:
                 v["drift"] = max(0, min(100, v["drift"] + 2 * d))
             self.amb_push(i)
             return
-        if pg == "Melody" and name in ("Strum sound", "Strum level", "Arp pattern", "Strum range"):
+        if pg == "Melody" and name.startswith(("Strum", "Arp")):
             sa = self.astrum
+            mm = M()
+            if name == "Strum reverb":
+                sa["rev"] = synth.REVERBS[(synth.REVERBS.index(sa["rev"]) + d) % len(synth.REVERBS)] \
+                    if sa["rev"] in synth.REVERBS else synth.REVERBS[0]
+            elif name == "Strum space":
+                sa["rev_amt"] = round(max(0.0, min(1.0, sa["rev_amt"] + 0.05 * d)), 2)
+            elif name == "Strum echo":
+                sa["dly"] = mm.DELAY_TYPES[(mm.DELAY_TYPES.index(sa["dly"]) + d) % len(mm.DELAY_TYPES)] \
+                    if sa["dly"] in mm.DELAY_TYPES else mm.DELAY_TYPES[0]
+            elif name == "Strum echo amount":
+                sa["dly_amt"] = round(max(0.0, min(1.0, sa["dly_amt"] + 0.05 * d)), 2)
+            elif name == "Strum echo time":
+                sa["dly_time"] = (sa["dly_time"] + d) % len(mm.DELAY_TIMES)
+            if name in ("Strum reverb", "Strum space", "Strum echo", "Strum echo amount", "Strum echo time"):
+                self.amb_strum_fx()
             if name == "Strum sound":
                 sa["inst"] = (sa["inst"] + d) % len(engine.Engine.PLUCKS)
                 self.eng.post("pluck_warm", list(range(43, 101)), sa["inst"])
@@ -1675,7 +1705,7 @@ class AmbientMixin:
                 sa["level"] = round(max(0.1, min(2.5, sa["level"] + 0.1 * d)), 2)
             elif name == "Arp pattern":
                 sa["style"] = (sa["style"] + d) % len(self.ARP_STYLES)
-            else:
+            elif name == "Strum range":
                 sa["range"] = max(1, min(4, sa["range"] + d))
             tones = self.amb_strum_tones()                 # hear it: a quick strum of the chord
             for k, n in enumerate(tones[:: max(1, len(tones) // 5)][:5]):

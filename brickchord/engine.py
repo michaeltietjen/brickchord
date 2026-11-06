@@ -1964,6 +1964,10 @@ class Engine:
         w = cache[(inst, midi)] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
         return w
 
+    def c_pluckfx(self, rev, dly):
+        """How much of the strum and arp goes to their own reverb and echo (bus B)."""
+        self.pk_rev, self.pk_dly = float(rev), float(dly)
+
     def c_pluck_warm(self, midis, inst=0):
         """Queue harp notes to build ahead, one per audio block, so the first strum
         is as smooth as the rest."""
@@ -2168,6 +2172,7 @@ class Engine:
         tb = {}                                  # looper track buses
         T = np.arange(t, t + N)
         live = []
+        pmix = None
         for v in self.voices:
             o = v.start - t
             if o >= N:
@@ -2224,6 +2229,11 @@ class Engine:
                 b[o:] += seg
             elif v.tag in ("drum", "bass"):
                 dmix[o:] += seg
+            elif v.tag == "pluck" and not self.route:
+                # the strum and arp have their own effects (bus B): kept apart from the pads
+                if pmix is None:
+                    pmix = np.zeros((N, 2), np.float32)
+                pmix[o:] += seg
             else:
                 mix[o:] += seg
             if not v.done:
@@ -2267,6 +2277,12 @@ class Engine:
         out = x.copy()
         rsend = [x * rv, np.zeros((N, 2), np.float32)]
         dsend = [x * dv, np.zeros((N, 2), np.float32)]
+        if pmix is not None:
+            out += pmix
+            if self.__dict__.get("pk_rev", 0.6):
+                rsend[1] += pmix * self.__dict__.get("pk_rev", 0.6)
+            if self.__dict__.get("pk_dly", 0.35):
+                dsend[1] += pmix * self.__dict__.get("pk_dly", 0.35)
         # tracks: each through its own rack and filter, then level, pan, sends.
         # The selected track uses the live sends (Settings reverb/delay + right stick).
         selkey = (self.cur, self.sel) if self.route else None
