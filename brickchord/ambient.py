@@ -1582,7 +1582,10 @@ class AmbientMixin:
             v = self.av[i]
             vname = ("Voice %d   %s" % (i + 1, GLYPH[DRONE_BTNS[i]])) if i < 6 else ("Melody %s" % "AB"[i - 6])
             nn = mm.NOTE_NAMES[v["note"] % 12] + str(v["note"] // 12 - 1)
-            return [("Voice", vname), ("Sound", self.amb_patch(i)["name"]), ("On", "On" if v["on"] else "Off"),
+            chord_snds = {self.av[k]["snd"] for k in range(self.NCH)}
+            allv = self.amb_sounds[next(iter(chord_snds))]["name"] if len(chord_snds) == 1 else "mixed"
+            return [("All chord voices", allv),
+                    ("Voice", vname), ("Sound", self.amb_patch(i)["name"]), ("On", "On" if v["on"] else "Off"),
                     ("Note", nn), ("Fine", "%+d cents" % v["cents"]), ("Level", "%d%%" % round(v["level"] * 100)),
                     ("Pan", "C" if abs(v["pan"]) < 0.05 else ("L%d" % round(-v["pan"] * 100) if v["pan"] < 0
                                                                else "R%d" % round(v["pan"] * 100))),
@@ -1648,6 +1651,19 @@ class AmbientMixin:
             v = self.av[i]
             if name == "Voice":
                 self.asel = (i + d) % NV
+                return
+            if name == "All chord voices":
+                # one sound for the whole chord: voices 1 to 5 together (the sub keeps its own)
+                chord_snds = {self.av[k]["snd"] for k in range(self.NCH)}
+                start = next(iter(chord_snds)) if len(chord_snds) == 1 else self.av[0]["snd"]
+                s = self.amb_next_sound(start, d) if len(chord_snds) == 1 else start
+                for k in range(self.NCH):
+                    vk = self.av[k]
+                    vk["snd"], vk["base"] = s, None
+                    if vk["on"]:
+                        self.amb_render(k)
+                    self.amb_push(k)
+                self.flash("ALL CHORD VOICES:  %s" % self.amb_sounds[s]["name"].upper())
                 return
             if name == "Sound":
                 v["snd"] = self.amb_next_sound(v["snd"], d)
