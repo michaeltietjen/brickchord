@@ -2123,6 +2123,105 @@ class Engine:
         if on and bk and bk[1] is not None:
             self._voice((bk[1], None), 1.0, 0.0, self.t, "chopfull", srev=0.5, sdly=0.4, rel=int(0.02 * self.sr))
 
+    # ------------------------------------------------------------ punch-in FX (Brickchop)
+    PUNCH = ["stutter", "repeat", "filter", "crush", "tapestop", "halfspeed", "reverse", "throw"]
+
+    def c_punch(self, mode, amt=0.0):
+        """Punch-in FX on the whole output, only while held: mode None lets go."""
+        pk = self.__dict__.get("_pk")
+        if pk is None:
+            n = int(4.0 * self.sr)
+            pk = self._pk = {"ring": np.zeros((n, 2), np.float32), "w": 0, "mode": None, "amt": 0.0, "mix": 0.0,
+                             "start": 0, "phase": 0.0, "L": 1, "rate": 1.0, "pos": 0.0, "t": 0, "fir": None}
+        if mode != pk["mode"] and mode is not None:
+            ring_n = len(pk["ring"])
+            beat = 60.0 / max(40.0, float(self.bpm)) * self.sr
+            pk.update(mode=mode, t=0, phase=0.0, start=pk["w"], pos=float(pk["w"]), rate=1.0)
+            if mode == "stutter":
+                pk["L"] = max(64, int(beat / (8 if amt < 0.5 else 16)))
+            elif mode == "repeat":
+                pk["L"] = max(64, int(beat / (2 if amt < 0.5 else 4)))
+            elif mode == "reverse":
+                pk["L"] = max(64, int(beat * (2 if amt < 0.5 else 1)))
+            pk["L"] = min(pk["L"], ring_n // 2)
+        pk["active"] = mode is not None
+        if mode is not None:
+            pk["amt"] = float(amt)
+
+    def _punch(self, pre, N, sr):
+        pk = self._pk
+        ring = pk["ring"]
+        rn = len(ring)
+        w = pk["w"]
+        idx = (w + np.arange(N)) % rn
+        ring[idx] = pre                                       # the dry output keeps flowing into the ring
+        pk["w"] = (w + N) % rn
+        target = 1.0 if pk.get("active") else 0.0
+        if pk["mix"] <= 0.0 and target == 0.0:
+            self._throw = None
+            return pre
+        mode, amt = pk["mode"], pk["amt"]
+        ar = np.arange(N)
+
+        def read(pos):                                       # fractional read from the ring
+            p0 = np.floor(pos).astype(np.int64)
+            f = (pos - p0)[:, None].astype(np.float32)
+            a, b = ring[p0 % rn], ring[(p0 + 1) % rn]
+            return a + (b - a) * f
+
+        y = pre
+        self._throw = None
+        if mode in ("stutter", "repeat"):
+            L = pk["L"]
+            # from the moment you push: the first slice plays live, then repeats
+            y = ring[(pk["start"] + (pk["phase"] + ar).astype(np.int64) % L) % rn]
+            pk["phase"] += N
+        elif mode == "reverse":
+            L = pk["L"]
+            y = ring[(pk["start"] - 1 - (pk["phase"] + ar).astype(np.int64) % L) % rn]
+            pk["phase"] += N
+        elif mode == "tapestop":
+            T = (1.3 - 0.9 * amt) * sr                        # further = faster stop
+            rates = np.maximum(0.0, 1.0 - (pk["t"] + ar) / T)
+            pos = pk["pos"] + np.cumsum(rates)
+            y = read(pos) * np.minimum(1.0, rates * 4)[:, None].astype(np.float32)
+            pk["pos"] = float(pos[-1])
+        elif mode == "halfspeed":
+            r = 0.75 - 0.25 * amt                             # three-quarter down to half speed
+            pos = pk["pos"] + r * (ar + 1)
+            if pk["w"] - pos[-1] > rn - 2 * N:                # fallen too far behind: catch up
+                pos = pos + (pk["w"] - pos[-1]) - sr
+            y = read(pos)
+            pk["pos"] = float(pos[-1])
+        elif mode == "filter":
+            fc = 18000.0 * (1.0 - amt) ** 2.2 + 160.0         # the low-pass closes as you push
+            taps = 63
+            n = np.arange(taps) - (taps - 1) / 2
+            h = np.sinc(2 * fc / sr * n) * np.hamming(taps)
+            h = (h / h.sum()).astype(np.float32)
+            prev = pk["fir"] if pk["fir"] is not None else np.zeros((taps - 1, 2), np.float32)
+            xx = np.concatenate([prev, pre])
+            y = np.stack([np.convolve(xx[:, c], h, mode="valid") for c in (0, 1)], 1).astype(np.float32)
+            pk["fir"] = pre[-(taps - 1):].copy()
+            y = y * (1.0 + 0.6 * amt)                         # a little lift so it doesn't just get quieter
+        elif mode == "crush":
+            k = 1 + int(amt * 15)                             # down-sample, then fewer bits
+            yy = pre[::k]
+            y = np.repeat(yy, k, axis=0)[:N]
+            bits = 2 ** (10 - int(amt * 7))
+            y = np.round(y * bits) / bits
+        elif mode == "throw":
+            self._throw = pre * (0.25 + 0.45 * amt)           # into the reverb and echo; the dry fades back
+            y = pre * (1.0 - 0.45 * amt)
+        if mode != "filter":
+            pk["fir"] = None
+        pk["t"] += N
+        m0 = pk["mix"]
+        m1 = m0 + (target - m0) * 0.6 if abs(target - m0) > 0.02 else target
+        pk["mix"] = m1
+        ramp = (m0 + (m1 - m0) * ar / N)[:, None].astype(np.float32)
+        return pre * (1 - ramp) + y.astype(np.float32) * ramp
+
     def c_click(self):
         lvl = self.metro_lvl
         self.metro_lvl = max(lvl, 0.3)
@@ -2429,6 +2528,10 @@ class Engine:
         out = x.copy()
         rsend = [x * rv, np.zeros((N, 2), np.float32)]
         dsend = [x * dv, np.zeros((N, 2), np.float32)]
+        thr = self.__dict__.get("_throw")
+        if thr is not None and len(thr) == N:                # punch-in reverb throw (one block late, unheard)
+            rsend[0] += thr
+            dsend[0] += thr * 0.7
         if pmix is not None:
             out += pmix
             if self.__dict__.get("pk_rev", 0.6):
@@ -2500,7 +2603,10 @@ class Engine:
         t6 = time.perf_counter()
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]
-        out = np.tanh((out + frame[:N]) * mv)
+        pre = out + frame[:N]
+        if self.__dict__.get("_pk") is not None:
+            pre = self._punch(pre, N, sr)
+        out = np.tanh(pre * mv)
 
         self.t += N
         self.active = frozenset(v.midi for v in self.voices if v.rel_at is None and v.midi is not None)

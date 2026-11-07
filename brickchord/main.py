@@ -1145,6 +1145,9 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         ry = 0.0 if abs(ry) < 0.12 else ry
         rx = self.axis_val(st.get("rx")) if st.get("rx") else 0.0
         rx = 0.0 if abs(rx) < 0.12 else rx
+        if edition.CHOP:
+            self.chop_punch(rx, ry)                     # Brickchop: the right stick is punch-in FX
+            return
         if self.fx_hold:
             rx, ry = self.fx_hold
         self.rx, self.ry = rx, ry
@@ -1973,7 +1976,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         hint = (("buttons = melody   L-stick <> strum ^v arp   L1/R1 octave   R2+button chord   START stop"
                  if edition.PLAY and self.aprog.get("run") else
                  "chords <^>vXAB  L-stick strum/arp  R2+chord+L-stick scrub  L1 7th  R1 sus4  START play")
-                if edition.AMBIENT else ("12 pads: shoulders, <^v>, YXBA   SELECT+<^v> group   L3 keys   L-stick tune/level   START whole"
+                if edition.AMBIENT else ("SELECT+<^v> group   L3 keys   L-stick tune/level   R-stick punch-in FX   START whole"
                                          if edition.CHOP else None)) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")

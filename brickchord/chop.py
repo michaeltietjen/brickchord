@@ -16,6 +16,7 @@
 #
 # Sounds are built here, in the UI process (a kit part, a synth note, a WAV or a
 # slice of one), and sent to the engine once; a pad press is just a trigger.
+import math
 import os
 import time
 
@@ -384,6 +385,28 @@ class ChopMixin:
         if not grp.get("keys"):
             self.chop_hit(i, 0.8)
 
+    # ------------------------------------------------------------ punch-in FX: the right stick
+    PUNCH = [("stutter", "STUTTER"), ("repeat", "BEAT REPEAT"), ("filter", "FILTER SWEEP"), ("crush", "BITCRUSH"),
+             ("tapestop", "TAPE STOP"), ("halfspeed", "HALF SPEED"), ("reverse", "REVERSE"), ("throw", "REVERB THROW")]
+    # compass, clockwise from up: up stutter, up-right repeat, right filter, down-right crush,
+    # down tape stop, down-left half speed, left reverse, up-left reverb throw
+
+    def chop_punch(self, x, y):
+        r = math.hypot(x, y)
+        cur = getattr(self, "cpunch", None)
+        if r < 0.3:
+            if cur is not None:
+                self.cpunch = None
+                self.eng.post("punch", None, 0.0)
+            return
+        sector = int(round(math.degrees(math.atan2(x, y)) / 45.0)) % 8   # 0 = up, clockwise
+        mode, label = self.PUNCH[sector]
+        amt = max(0.0, min(1.0, (r - 0.3) / 0.65))
+        if cur is None or cur[0] != mode or abs(cur[1] - amt) > 0.06:
+            self.cpunch = (mode, amt, label)
+            self.eng.post("punch", mode, amt)
+            self.cpunch_t = time.perf_counter()
+
     def chop_midi(self, ev):
         """MIDI in: C2 (36) up to B2 play pads 1 to 12, like a drum-pad layout; in KEYS,
         any note plays the sound at that pitch."""
@@ -627,8 +650,19 @@ class ChopMixin:
         while len(name) > 3 and self.f_small.size(name)[0] > pw - 24:
             name = name[:-2]
         self.text(c, name, self.f_small, mm.INK, (px + 14, gy + 104))
+        pn = getattr(self, "cpunch", None)
+        if pn is not None:                                    # punch-in FX held: say which, and how hard
+            pygame.draw.rect(c, mm.ACCENT, (px, gy, pw, ph), 3, border_radius=10)
+            self.text(c, pn[2], self.f_small, mm.ACCENT, (px + 14, gy + 128))
+            pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.9), (px + 14, gy + 150, pw - 28, 8), border_radius=4)
+            pygame.draw.rect(c, mm.ACCENT, (px + 14, gy + 150, int((pw - 28) * (0.15 + 0.85 * pn[1])), 8),
+                             border_radius=4)
+            return_early = True
+        else:
+            return_early = False
         hot = self.cfader and now - self.cfader[0] < 1.0
-        self.text(c, "tune %+d" % p.get("tune", 0), self.f_med, mm.ACCENT2 if hot else mm.INK, (px + 14, gy + 150))
+        if not return_early:
+            self.text(c, "tune %+d" % p.get("tune", 0), self.f_med, mm.ACCENT2 if hot else mm.INK, (px + 14, gy + 150))
         self.text(c, "level %d%%" % round(p.get("level", 0.9) * 100), self.f_small, mm.DIM, (px + 14, gy + 186))
         # the last pad's sound, wide, under the grid
         wx0, wx1, wy0 = 20, W - 20, gy + ph + 12
