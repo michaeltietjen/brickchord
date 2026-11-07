@@ -160,6 +160,9 @@ def raw_audio(src):
             k = int(0.25 * SR)
             x = x.copy()
             x[-k:] *= np.linspace(1, 0, k)
+            pk = float(np.abs(x).max())
+            if pk > 1e-4:
+                x *= 0.8 / pk                          # synth notes render far quieter than drum hits: match them
         elif kind == "file":
             x = synth._sample_audio(name)
             if x is not None and len(src) > 2 and src[2] is not None:
@@ -337,6 +340,82 @@ def default_groups():
     d = [pad(None) for _ in range(12)]
     return [{"pads": a, "keys": False}, {"pads": b, "keys": True, "keys_pad": 0},
             {"pads": c, "keys": True, "keys_pad": 0}, {"pads": d, "keys": False}]
+
+
+def demo_song():
+    """The built-in demo: "Night Bus", a swung lo-fi beat in A minor at 88 BPM.
+    A: 808 drums with ghost notes, a 1/32 hat roll and an open hat.
+    B: Moog bass in Keys, A to C to D, then F to E to G.
+    C: electric piano chords, Am7 then Fmaj7, filtered, into the reverb.
+    D: glass bells in Keys, a pentatonic line over four bars, into the echo.
+    The pads hold built-in sounds only, so it plays the same on every Brick."""
+    g = default_groups()
+    for grp in g:
+        grp["pattern"] = {"bars": 2, "ev": []}
+    A, B, C, D = g
+    # ---- A drums (808 on pads 5-12: kick 4, snare 5, hat 6, open hat 7, clap 8, rim 9, tom 10, shaker 11)
+    p = A["pads"]
+    p[4].update(tune=-2, level=0.8, drive=0.15)                       # a heavier kick
+    p[5].update(level=1.1, filter=0.1, rev=0.6)
+    p[6].update(level=0.42, filter=0.3, pan=0.25)
+    p[7].update(level=0.5, fade=0.4, pan=0.25)
+    p[8].update(level=0.5, rev=0.8)
+    p[9].update(level=0.45, pan=-0.3)
+    p[11].update(level=0.2, pan=-0.35, filter=0.4)
+    ev = A["pattern"]["ev"]
+    for s, v in ((0, 1.0), (7, 0.8), (10, 0.95), (16, 1.0), (23, 0.75), (26, 0.9), (29, 0.6)):
+        ev.append([s, 4, v])                                          # kick
+    for s in (4, 12, 20, 28):
+        ev.append([s, 5, 1.0])                                        # snare on 2 and 4
+    for s in (12, 28):
+        ev.append([s, 8, 0.6])                                        # clap layered on the 4
+    for s in (15, 31):
+        ev.append([s, 5, 0.3])                                        # ghost snares
+    for s in range(0, 32, 2):
+        if s not in (14, 30):
+            ev.append([s, 6, 0.9 if s % 4 == 0 else 0.6])             # 8th hats
+    for s in (14.0, 30.0):
+        ev.append([s, 7, 0.7])                                        # open hat into the bar line
+    for s in (27.0, 27.5, 28.5):
+        ev.append([s, 6, 0.45])                                       # a 1/32 hat roll
+    for s in (11, 27):
+        ev.append([s, 9, 0.6])                                        # rim
+    for s in range(1, 32, 2):
+        ev.append([s, 11, 0.5])                                       # shaker on the off-16ths
+    A["fx"] = {"swing": 0.18, "drive": 0.1}
+    # ---- B bass: Moog Bass in Keys; transpose -3 puts pad 1 on A
+    B["keys"], B["keys_pad"] = True, 0
+    B["pads"][0].update(level=0.5, filter=-0.3, drive=0.2, fade=0.2, rev=0.1, dly=0.0)
+    B["fx"] = {"tune": -3, "swing": 0.18, "volume": 0.55, "filter": 0.1}
+    # A=0 C=3 D=5 E=7 F=8 G=10
+    for s, n, v in ((0, 0, 1.0), (6, 0, 0.7), (10, 3, 0.9), (14, 5, 0.8),
+                    (16, 8, 1.0), (22, 8, 0.7), (26, 7, 0.9), (30, 10, 0.8)):
+        B["pattern"]["ev"].append([s, n, v])
+    # ---- C keys: Electric Piano in Keys, chords
+    C["keys"], C["keys_pad"] = True, 0
+    C["pads"][0] = {"src": ["keys", "Electric Piano"], "tune": 0, "level": 0.85, "choke": False, "reverse": False,
+                    "filter": -0.25, "rev": 0.9, "dly": 0.2, "attack": 0.01}
+    C["fx"] = {"tune": -3, "swing": 0.18, "volume": 0.95}
+    for s, v in ((0, 0.9), (11, 0.6)):
+        for n in (0, 3, 7, 10):                                       # Am7: A C E G
+            C["pattern"]["ev"].append([s, n, v])
+    for s, v in ((16, 0.9), (27, 0.6)):
+        for n in (0, 3, 7, 8):                                        # Fmaj7: A C E F
+            C["pattern"]["ev"].append([s, n, v])
+    # ---- D bells: Glass Bells in Keys, up an octave from the piano, four bars
+    D["keys"], D["keys_pad"] = True, 0
+    D["pads"][0] = {"src": ["keys", "Glass Bells"], "tune": 0, "level": 0.6, "choke": False, "reverse": False,
+                    "rev": 1.0, "dly": 0.8, "pan": 0.2}
+    D["fx"] = {"tune": 9, "swing": 0.18}
+    D["pattern"] = {"bars": 4, "ev": []}
+    for s, n, v in ((2, 7, 0.8), (5, 5, 0.6), (8, 3, 0.7), (10, 0, 0.6),
+                    (34, 7, 0.8), (37, 10, 0.7), (40, 7, 0.6), (44, 5, 0.6), (46, 3, 0.5)):
+        D["pattern"]["ev"].append([s, n, v])
+    state = {"v": 2, "group": 0, "last": 4, "groups": g, "rec_secs": 4, "chop_src": None, "bpm": 88,
+             "click": False, "quant": 0, "qstr": 1.0,
+             "master": {"comp": 0.4, "filter": -0.1, "width": 1.2, "drive": 0.1}}
+    return {"version": 1, "name": "Night Bus (demo)", "key": 9, "scale": "Minor", "chop": state,
+            "fx": {"rev": 0.35, "dly": 0.25}}
 
 
 class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
@@ -923,8 +1002,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         except Exception as ex:
             self.flash("COULD NOT SAVE: %s" % ex)
 
-    def chop_song_load(self, n):
-        s = self.chop_song_read(n)
+    def chop_song_load(self, n, s=None):
+        demo = s is not None
+        s = s or self.chop_song_read(n)
         if not s:
             self.flash("SONG %d IS EMPTY   SAVE ONE FIRST" % n)
             return
@@ -944,7 +1024,10 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         self.csong = n
         self.save_cfg()
         self.menu = False
-        self.flash("SONG %d   %s   START PLAYS IT" % (n, self.chop_song_summary(s)))
+        if demo:
+            self.flash("NIGHT BUS   88 BPM   START PLAYS IT   SAVE IT TO A SLOT TO KEEP CHANGES")
+        else:
+            self.flash("SONG %d   %s   START PLAYS IT" % (n, self.chop_song_summary(s)))
 
     # ------------------------------------------------------------ the guided demo
     TUT = [
@@ -991,6 +1074,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             rows = [("Song %d%s" % (n, "  *" if n == cur else ""), self.chop_song_summary(self.chop_song_read(n)))
                     for n in range(1, 9)]
             return rows + [("Save", "A saves to song %d" % cur), ("Load", "A loads song %d" % cur),
+                           ("Demo song", "A loads Night Bus, a lo-fi beat in A minor"),
                            ("Guided demo", "A starts it")]
         if pg == "Seq":
             pt = grp["pattern"]
@@ -1153,6 +1237,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                 self.chop_song_save(getattr(self, "csong", 1))
             elif name == "Load":
                 self.chop_song_load(getattr(self, "csong", 1))
+            elif name == "Demo song":
+                self.chop_song_load(getattr(self, "csong", 1), demo_song())
             elif name == "Guided demo":
                 self.menu = False
                 self.chop_tut_start()
