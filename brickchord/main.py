@@ -1051,7 +1051,8 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
                 for sig, down in self.inp.raw(ev):
                     if down and (sig in start_btn or sig == "k:START"):
                         skip = True
-                    elif down and key in ("R3", "L3") and sig.startswith("b") and sig not in self.inp.map:
+                    elif down and key in ("R3", "L3") and sig.startswith("b") and (
+                            sig not in self.inp.map or self.inp.map.get(sig) == key):   # already learned: fine
                         mapping = {k: v for k, v in self.inp.map.items() if v != key}
                         mapping[sig] = key
                         self.inp.map = mapping
