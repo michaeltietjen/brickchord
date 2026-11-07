@@ -119,8 +119,18 @@ footer p { margin: 0; max-width: 56em; }
 }
 @media (prefers-reduced-motion: reduce) { .key, .btn { transition: none; } }
 </style>
+<style>
+/* the Brick family bar, the same on all three pages */
+.family { border-bottom: 1px solid var(--seam); font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.family .in { max-width: 1120px; margin: 0 auto; padding: 8px max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.family a { color: var(--dim); text-decoration: none; }
+.family a:hover, .family a[aria-current="page"] { color: var(--ink); }
+.family a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }
+.family .sp { margin-left: auto; }
+</style>
 </head>
 <body>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/">Bricklab</a><a href="../brickglide/" aria-current="page">Brickglide</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
   <header class="strip">
     <div class="wrap">
       <a class="brand" href="#top" aria-label="Brickglide">
@@ -128,6 +138,8 @@ footer p { margin: 0; max-width: 56em; }
         <b>Brickglide</b>
       </a>
       <nav>
+        <a href="#play-over">Play</a>
+        <a href="#gear">MIDI &amp; samples</a>
         <a href="#moves">Moves</a>
         <a href="#controls">Controls</a>
         <a href="#install">Install</a>
@@ -140,11 +152,11 @@ footer p { margin: 0; max-width: 56em; }
   <section class="hero" id="top">
     <div class="wrap">
       <div>
-        <div class="label">For the TrimUI Brick Pro on KNULLI</div>
+        <div class="label">Beta &middot; for the TrimUI Brick Pro on KNULLI</div>
         <h1>Chords that <em>glide.</em></h1>
-        <p class="lede">An ambient machine. Press a chord and five voices slide into it and hold it; press the next and every voice travels there. Blooms, cascades and spirals on the way, a sub bass underneath, progressions that play themselves, and a screen that draws every glide as it happens.</p>
+        <p class="lede">An ambient machine. Press a chord and five voices slide into it and hold it; press the next and every voice travels there. Let the progression play and the buttons become a melody that always fits; the stick strums and arpeggiates. Plug in a MIDI keyboard or an Orchid, drop in your own samples, and it all glides.</p>
         <div class="ctas">
-          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/latest">Download Brickglide</a>
+          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Download the beta</a>
           <a class="btn" href="#try">Try it here</a>
         </div>
         <p class="fine">Free and open source. Same engine and the same seven buttons as <a href="../">Brickchord</a>; the third app in the family after <a href="../bricklab/">Bricklab</a>.</p>
@@ -207,6 +219,37 @@ footer p { margin: 0; max-width: 56em; }
     </div>
   </section>
 
+  <section class="module" id="play-over">
+    <div class="wrap">
+      <div class="label">START, then play</div>
+      <h2>A melody that always fits</h2>
+      <figure class="bezel" style="margin:0 0 28px; max-width:560px">
+        <img src="melody.png" width="640" height="480" alt="Brickglide while the progression plays: the seven tiles show melody notes, with the current chord's own tones marked">
+        <figcaption>While the progression plays, the tiles are melody notes; the chord's own tones are marked in gold.</figcaption>
+      </figure>
+      <p class="intro">Set up a progression, press START, and Brickglide plays the chords on its own, gliding. Now the seven buttons are melody notes, and they follow the harmony: buttons 1, 3 and 5 are always the current chord's tones, so nothing you press is wrong. Press a note while holding another and the melody glides between them.</p>
+      <div class="feat">
+        <div><h3>Strum, sideways</h3><p>Sweep the left stick left and right and it plucks through the chord, low to high, like a harp or an Omnichord plate.</p></div>
+        <div><h3>Arpeggiate, up and down</h3><p>Push up and the chord climbs, down and it falls; the further you push, the faster. Bounce, random and root-and-up patterns, one to four octaves.</p></div>
+        <div><h3>Its own instrument</h3><p>Harp, kalimba, bell, marimba, glass, music box, pluck synth or nylon, up to 250% loud, with its own reverb and echo, separate from the pads.</p></div>
+        <div><h3>One sound, or five</h3><p>Give every chord voice the same sound in one move, or a different one each. L1 and R1 move the melody by octaves; R2 and a button changes the chord by hand.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="gear">
+    <div class="wrap">
+      <div class="label">Bring your own</div>
+      <h2>MIDI, samples, and the room</h2>
+      <div class="feat">
+        <div><h3>USB MIDI in</h3><p>Plug a class-compliant keyboard or controller into the Brick's USB-C. Play chords on it and the voices glide into them, then hold. Tested with the Telepathic Instruments Orchid. Brickchord and Bricklab take MIDI too.</p></div>
+        <div><h3>Your samples as pads</h3><p>Drop WAVs into the samples folder (Brickglide's, Bricklab's or Brickchord's) and they become sounds that sustain and glide through your chords, tuned from the note in their file name.</p></div>
+        <div><h3>Loops as beds</h3><p>A loop in its own key becomes a bed under everything, moved into your key and trimmed to whole bars so it loops cleanly.</p></div>
+        <div><h3>Texture beds</h3><p>Rain, brook, wind, vinyl and tape hiss play underneath, with their own level. Add your own field recordings.</p></div>
+      </div>
+    </div>
+  </section>
+
   <section class="module" id="moves">
     <div class="wrap">
       <div class="label">Hold R2 and press a chord</div>
@@ -232,10 +275,10 @@ footer p { margin: 0; max-width: 56em; }
       <div class="controls">
         <div><div class="k">&lt; ^ &gt; v X A B</div><div class="v">The seven chords of the key, I to VII. The voices glide in and hold. <small>The same chord again lets it fade.</small></div></div>
         <div><div class="k">L1 / R1 / L1+R1 / Y</div><div class="v">7th, sus4, 9th, flip major and minor. <small>Held with a chord, as in Brickchord.</small></div></div>
-        <div><div class="k">LEFT STICK</div><div class="v">The Move compass: hold a direction while you press a chord. <small>Further out = longer glide. L2 + stick plays Cloud.</small></div></div>
+        <div><div class="k">LEFT STICK</div><div class="v">Sideways strums, up and down arpeggiates. <small>Hold a chord button and the stick scrubs the glide instead. R2 + stick is the Move compass; L2 + stick plays Cloud.</small></div></div>
         <div><div class="k">RIGHT STICK</div><div class="v">Filter and space. <small>Same as Brickchord.</small></div></div>
         <div><div class="k">R2</div><div class="v">Bloom. <small>R2 + a chord plays it with your chosen Move.</small></div></div>
-        <div><div class="k">START</div><div class="v">Stop everything. From silence, the progression plays by itself. <small>Up to eight chords, 1 to 16 seconds each.</small></div></div>
+        <div><div class="k">START</div><div class="v">Play the progression; START again stops everything. <small>While it plays, the seven buttons are melody notes that follow the chords.</small></div></div>
         <div><div class="k">L3</div><div class="v">Glide guides or spectrogram.</div></div>
         <div><div class="k">SELECT</div><div class="v">Settings: voices, chords, moves, melody, scenes, effects. <small>SELECT + a chord button saves a scene; L2 + it recalls one.</small></div></div>
       </div>
@@ -248,7 +291,7 @@ footer p { margin: 0; max-width: 56em; }
       <div class="label">Install</div>
       <h2>Two minutes on KNULLI</h2>
       <ol class="steps">
-        <li>Download the Brickglide zip from the <a href="https://github.com/michaeltietjen/brickchord/releases/latest">latest release</a>. On an R36S or R36 Max, get the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-r36">R36 family zip</a> instead: all three apps in one.</li>
+        <li>Download <code>brickglide-v0.4.0-beta-knulli.zip</code> from the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">beta release</a>. On an R36S or R36 Max, get <code>brick-family-r36-v0.4.0-beta.zip</code> from the same page instead: all three apps in one.</li>
         <li>Unzip it. Copy the <code>brickglide</code> folder, <code>Brickglide.sh</code> and the <code>images</code> folder into <code>roms/ports</code> on the Brick's SD card (over the network share or with a card reader).</li>
         <li>Update Gamelists on the Brick. Brickglide appears under Ports.</li>
         <li>On first launch, press each button once and push each stick once so it learns your controls, then follow the guided demo.</li>

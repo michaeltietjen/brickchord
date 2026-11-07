@@ -243,8 +243,18 @@ body { background: var(--chassis); color: var(--ink); }
 .feat p { margin: 0; color: var(--dim); }
 .hero-img { max-width: 420px; width: 100%; border-radius: 14px; display:block; margin: 0 auto 1.5rem; }
 </style>
+<style>
+/* the Brick family bar, the same on all three pages */
+.family { border-bottom: 1px solid var(--seam); font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.family .in { max-width: 1120px; margin: 0 auto; padding: 8px max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.family a { color: var(--dim); text-decoration: none; }
+.family a:hover, .family a[aria-current="page"] { color: var(--ink); }
+.family a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }
+.family .sp { margin-left: auto; }
+</style>
 </head>
 <body>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/" aria-current="page">Bricklab</a><a href="../brickglide/">Brickglide</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
   <section class="module" id="top">
     <div class="wrap">
       <img class="hero-img" src="../bricklab-lockup.png" alt="Bricklab">

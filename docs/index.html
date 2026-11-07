@@ -229,8 +229,18 @@ footer p { margin: 0; max-width: 56em; }
 }
 </style>
 <style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<style>
+/* the Brick family bar, the same on all three pages */
+.family { border-bottom: 1px solid var(--seam); font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.family .in { max-width: 1120px; margin: 0 auto; padding: 8px max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.family a { color: var(--dim); text-decoration: none; }
+.family a:hover, .family a[aria-current="page"] { color: var(--ink); }
+.family a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }
+.family .sp { margin-left: auto; }
+</style>
 </head>
 <body>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="" aria-current="page">Brickchord</a><a href="bricklab/">Bricklab</a><a href="brickglide/">Brickglide</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
 
 
 <header class="strip">
@@ -379,11 +389,20 @@ footer p { margin: 0; max-width: 56em; }
     </div>
   </section>
 
+  <section class="module" id="midi">
+    <div class="wrap">
+      <div class="label">New in the beta</div>
+      <h2>Play it from a keyboard</h2>
+      <p class="intro">All three apps now take USB MIDI in. Plug a class-compliant keyboard or controller into the Brick's USB-C: one key plays the chord on that degree, like its button; several keys together play that exact chord. Tested with the Telepathic Instruments Orchid.</p>
+      <p><a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Get the beta</a></p>
+    </div>
+  </section>
+
   <section class="module" id="brickglide">
     <div class="wrap">
       <div class="label">The ambient one</div>
       <h2>Want chords that glide? That's Brickglide.</h2>
-      <p class="intro">The same seven buttons, but press a chord and five voices slide into it and hold it. Blooms, cascades and spirals between chords, a sub bass, progressions that play themselves, and a screen that draws every glide, or the real spectrogram.</p>
+      <p class="intro">The same seven buttons, but press a chord and five voices slide into it and hold it. Let the progression play and the buttons become a melody that always fits, the stick strums and arpeggiates, and your MIDI keyboard and samples join in. Now in beta.</p>
       <p><a class="btn" href="brickglide/">Go to Brickglide</a></p>
     </div>
   </section>
