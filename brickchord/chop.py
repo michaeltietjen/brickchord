@@ -92,6 +92,120 @@ def src_label(src):
     return name
 
 
+KINDS = [("kit", "Drum kits"), ("bass", "Bass synths"), ("keys", "Keys synths"), ("lead", "Lead synths"),
+         ("file", "Samples")]
+KIND_NAME = dict(KINDS)
+_LOOP = {}
+
+
+def raw_loop(src):
+    """(attack, loop) mono for a drone: synths give their own sustain loop; kit
+    hits and samples loop their middle with a crossfade, so any sound can hold."""
+    key = tuple(x if not isinstance(x, list) else tuple(x) for x in src)
+    if key in _LOOP:
+        return _LOOP[key]
+    out = None
+    try:
+        kind, name = src[0], src[1]
+        if kind in ("bass", "keys", "lead"):
+            bank = {"bass": synth.BASS_PATCHES, "keys": synth.PATCHES, "lead": synth.LEAD_PATCHES}[kind]
+            patch = next(p for p in bank if p["name"] == name)
+            a, l = synth.render_note(36 if kind == "bass" else 48, patch, arrays=True)
+            mono = lambda z: (z.mean(axis=1) if z.ndim == 2 else z).astype(np.float32)
+            a = mono(a)
+            l = mono(l) if l is not None and len(l) > SR // 10 else None
+            if l is None:                              # no sustain loop: loop the attack's tail
+                a, l = _loopify(a)
+            pk = max(1e-4, float(max(np.abs(a).max(), np.abs(l).max())))
+            out = (a * (0.8 / pk), l * (0.8 / pk))
+        else:
+            x = raw_audio(src)
+            if x is not None and len(x) > 2048:
+                out = _loopify(x)
+    except Exception as ex:
+        print("drone loop:", ex, flush=True)
+    _LOOP[key] = out
+    return out
+
+
+def _loopify(x):
+    """Split a one-shot into an attack and a loop of its middle, crossfaded so the
+    seam doesn't click."""
+    n = len(x)
+    s0, s1 = int(n * 0.25), int(n * 0.75)
+    xf = min(int(0.08 * SR), (s1 - s0) // 3)
+    seg = x[s0:s1].astype(np.float32).copy()
+    ramp = np.linspace(0, 1, xf, dtype=np.float32)
+    seg[:xf] = seg[:xf] * ramp + x[s1:s1 + xf][:xf] * (1 - ramp) if s1 + xf <= n else seg[:xf]
+    loop = seg[:len(seg) - xf] if len(seg) > 2 * xf else seg
+    return x[:s0].astype(np.float32), loop
+
+
+def drone_shape(al, p, gfx=None, extra_tune=0.0):
+    """A drone's (attack, loop) with the pad's and group's tune, filter, drive,
+    bitcrush, level and pan; stereo."""
+    if not al:
+        return None
+    gfx = gfx or {}
+    a, l = al
+    tune = p.get("tune", 0) + p.get("fine", 0) / 100.0 + gfx.get("tune", 0) + extra_tune
+    r = 2 ** (tune / 12.0)
+
+    def rs(z):
+        if abs(r - 1) < 1e-4 or len(z) < 4:
+            return z.astype(np.float32)
+        idx = np.arange(0, len(z) - 1, r)
+        return np.interp(idx, np.arange(len(z)), z).astype(np.float32)
+    a, l = rs(a), rs(l)
+    pad_n = 256
+
+    def chain(z, loop):
+        if loop and len(z) > 2 * pad_n:                # filter around the seam so it stays seamless
+            zz = np.concatenate([z[-pad_n:], z, z[:pad_n]])
+        else:
+            zz = z
+        for f, dr, cr in ((p.get("filter", 0.0), p.get("drive", 0.0), p.get("crush", 0.0)),
+                          (gfx.get("filter", 0.0), gfx.get("drive", 0.0), gfx.get("crush", 0.0))):
+            zz = color(fir(zz, f), dr, cr)
+        if loop and len(z) > 2 * pad_n:
+            zz = zz[pad_n:pad_n + len(z)]
+        return zz * float(p.get("level", 0.9)) * float(gfx.get("volume", 1.0))
+    a, l = chain(a, False), chain(l, True)
+    at = max(int(0.004 * SR), int(p.get("attack", 0.0) * SR))
+    if len(a) > at:
+        a = a.copy()
+        a[:at] *= np.linspace(0, 1, at, dtype=np.float32)
+    pan = max(-1.0, min(1.0, p.get("pan", 0.0) + gfx.get("pan", 0.0)))
+    ang = (pan + 1) * math.pi / 4
+    st = lambda z: np.ascontiguousarray(np.stack([z * math.cos(ang) * 1.414, z * math.sin(ang) * 1.414], 1)
+                                        .astype(np.float32))
+    return (st(a), st(l))
+
+
+KEY_PLAYS = [("notes", "Notes"), ("triads", "Chords (triads)"), ("sevenths", "Chords (7ths)"), ("drone", "Drone")]
+_QUAL = {(4, 7): "", (3, 7): "m", (3, 6): "dim", (4, 8): "aug", (4, 7, 11): "maj7", (3, 7, 10): "m7",
+         (4, 7, 10): "7", (3, 6, 10): "m7b5", (3, 6, 9): "dim7", (3, 7, 11): "mMaj7", (4, 8, 11): "+maj7"}
+
+
+def chord_tones(k, key, scale_steps, sevenths):
+    """Pad k's chord (semitones from C): pads 1-7 are the scale's chords I to VII,
+    pads 8-12 the first five again an octave up."""
+    n = len(scale_steps)
+    deg, octv = k % 7, k // 7
+    if n < 7:
+        deg = k % n
+        octv = k // n
+    idx = [deg, deg + 2, deg + 4] + ([deg + 6] if sevenths else [])
+    tones = [key + scale_steps[d % n] + 12 * (d // n) + 12 * octv for d in idx]
+    return tones
+
+
+def chord_name(tones):
+    root = tones[0]
+    iv = tuple(t - root for t in tones[1:])
+    return NOTE[root % 12] + _QUAL.get(iv, "")
+
+
 def usb_capture_devices():
     """Sound cards that can record (USB audio from an SP-1, an OP-Z, a mixer...)."""
     out = []
@@ -656,12 +770,75 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             k = grp.get("keys_pad", 0)
             p = grp["pads"][k]
             x = raw_audio(p["src"]) if p.get("src") else None
-            arrs = [shape_fx(x, p, grp.get("fx"), n) for n in range(12)]
+            mode = grp.get("kplay", "notes")
+            if mode == "drone" and p.get("src"):
+                al = raw_loop(p["src"])
+                arrs = [drone_shape(al, p, grp.get("fx"), n) for n in range(12)]
+            elif mode in ("triads", "sevenths") and x is not None:
+                arrs = []
+                for n in range(12):
+                    parts = [shape_fx(x, p, grp.get("fx"), t) for t in self.chop_chord(n, mode)]
+                    parts = [q for q in parts if q is not None]
+                    if not parts:
+                        arrs.append(None)
+                        continue
+                    m = np.zeros((max(len(q) for q in parts), 2), np.float32)
+                    for q in parts:
+                        m[:len(q)] += q
+                    arrs.append(np.ascontiguousarray(m / math.sqrt(len(parts))))
+            else:
+                arrs = [shape_fx(x, p, grp.get("fx"), n) for n in range(12)]
         else:
             arrs = [self.chop_pad_array(g, i) for i in range(12)]
         self.eng.post("chop_load", g, arrs, None)
         self.chop_send_meta(g)
         self.cwave.pop(g, None)
+
+    def chop_chord(self, n, mode):
+        steps = self.SCALE_STEPS()
+        return chord_tones(n, int(self.key) % 12, steps, mode == "sevenths")
+
+    def SCALE_STEPS(self):
+        import sys
+        sc = getattr(sys.modules.get(type(self).__module__), "SCALES", None) or \
+            {"Major": [0, 2, 4, 5, 7, 9, 11], "Minor": [0, 2, 3, 5, 7, 8, 10]}
+        return list(sc.get(self.scale, sc.get("Major")))
+
+    def chop_set_kplay(self, g, step):
+        grp = self.cgroups[g]
+        modes = [k for k, _ in KEY_PLAYS]
+        cur = modes.index(grp.get("kplay", "notes")) if grp.get("kplay", "notes") in modes else 0
+        self.chop_drones_off(g)
+        grp["kplay"] = modes[(cur + step) % len(modes)]
+        self.chop_send_group(g)
+        self.flash("GROUP %s KEYS PLAY %s%s" % (GROUPS[g], dict(KEY_PLAYS)[grp["kplay"]].upper(),
+                                                "   PADS LATCH ON AND OFF" if grp["kplay"] == "drone" else
+                                                ("   IN %s %s" % (NOTE[int(self.key) % 12], self.scale.upper())
+                                                 if grp["kplay"] != "notes" else "")))
+
+    def chop_drones_off(self, g=None):
+        on = self.__dict__.setdefault("cdrones", set())
+        for (gg, i) in list(on):
+            if g is None or gg == g:
+                self.eng.post("chop_stop", gg, i)
+                on.discard((gg, i))
+
+    def chop_pick(self, p, d, by_type=False):
+        """Step a pad's sound: one at a time, or (by_type) to the first sound of the
+        next type: drum kits, bass, keys, leads, your samples."""
+        opts = [None] + self.csrcs
+        key = [tuple(s) if s else None for s in opts]
+        cur = tuple(p["src"][:2]) if p.get("src") else None
+        k = next((n for n, s in enumerate(key) if (s and cur and s[:2] == cur) or (s is None and cur is None)), 0)
+        if by_type:
+            kinds = [kk for kk, _ in KINDS if any(s and s[0] == kk for s in opts)]
+            ck = cur[0] if cur else None
+            ki = kinds.index(ck) if ck in kinds else (-1 if d > 0 else 0)
+            nk = kinds[(ki + d) % len(kinds)]
+            nxt = next(s for s in opts if s and s[0] == nk)
+        else:
+            nxt = opts[(k + d) % len(opts)]
+        p["src"] = list(nxt) if nxt else None
 
     def chop_send_pad(self, g, i):
         if self.cgroups[g].get("keys"):
@@ -700,7 +877,15 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.clast = i
             return
         choke = grp["pads"][grp.get("keys_pad", 0) if keys else i].get("choke", True)
-        self.eng.post("chop_hit", g, i, float(vel), 0.0, bool(choke) and not keys)
+        if keys and grp.get("kplay") == "drone":                 # drones latch: hit to start, hit to stop
+            on = self.__dict__.setdefault("cdrones", set())
+            if (g, i) in on:
+                on.discard((g, i))
+                self.eng.post("chop_stop", g, i)
+                return
+            on.add((g, i))
+            choke = True
+        self.eng.post("chop_hit", g, i, float(vel), 0.0, bool(choke) and (not keys or grp.get("kplay") == "drone"))
         self.clit[(g, i)] = time.perf_counter()
         self.ctut_n = getattr(self, "ctut_n", 0) + 1
         if self.cplay and self.crec_on:
@@ -780,6 +965,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                                                                 src_label(grp["pads"][self.clast]["src"]).upper()))
         else:
             grp["keys"] = False
+            self.chop_drones_off(self.cgrp)
             self.flash("PADS   12 SOUNDS AGAIN")
         self.chop_send_group(self.cgrp)
 
@@ -793,10 +979,18 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
 
     def qe_items(self, layer):
         if layer == "pad":
-            return [("fx", s) for s in PAD_FX] + [("bool", ("reverse", "Reverse")), ("bool", ("choke", "Choke"))]
+            return [("type", ("type", "Type")), ("src", ("src", "Sound"))] + [("fx", s) for s in PAD_FX] + \
+                [("bool", ("reverse", "Reverse")), ("bool", ("choke", "Choke"))]
         if layer == "group":
-            return [("fx", s) for s in GROUP_FX]
+            return [("kplay", ("kplay", "Keys play"))] + [("fx", s) for s in GROUP_FX]
         return [("fx", s) for s in MASTER_FX] + [("tempo", ("tempo", "Tempo")), ("quant", ("quant", "Quantize"))]
+
+    def qe_fader_item(self):
+        """What the fader's up/down changes: the pad effect last picked in Quick Edit
+        (Tune until one is picked; picking a sound doesn't move the fader)."""
+        items = self.qe_items("pad")
+        it = items[self.__dict__.get("cqe_idx", {}).get("pad", 2) % len(items)]
+        return it if it[0] in ("fx", "bool") else items[2]
 
     def qe_target(self, layer):
         grp = self.cgroups[self.cgrp]
@@ -817,6 +1011,13 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             return "On" if d.get(spec[0], dflt) else "Off"
         if kind == "quant":
             return self.QUANTS[self.cquant][0]
+        if kind == "type":
+            return KIND_NAME.get(d["src"][0], "") if d.get("src") else "empty"
+        if kind == "src":
+            return src_label(d.get("src"))
+        if kind == "kplay":
+            grp = self.cgroups[self.cgrp]
+            return dict(KEY_PLAYS)[grp.get("kplay", "notes")] if grp.get("keys") else "(Keys off: L3)"
         return "%d BPM" % self.cbpm
 
     def qe_change(self, layer, item, step):
@@ -825,12 +1026,27 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         grp = self.cgroups[g]
         d, i = self.qe_target(layer)
         kind, spec = item
-        if layer == "pad" and not d.get("src"):
+        if layer == "pad" and not d.get("src") and kind not in ("type", "src"):
             self.flash("HIT A PAD WITH A SOUND FIRST")
             return
         if kind == "quant":
             self.cquant = (self.cquant + step) % len(self.QUANTS)
             self.flash("QUANTIZE %s" % self.QUANTS[self.cquant][0].upper())
+            return
+        if kind == "kplay":
+            if not grp.get("keys"):
+                self.flash("CLICK L3 FOR KEYS FIRST")
+                return
+            self.chop_set_kplay(g, step)
+            return
+        if kind in ("type", "src"):
+            self.chop_pick(d, step, by_type=(kind == "type"))
+            self.cwave.clear()
+            self.chop_send_pad(g, i)
+            if d.get("src") and not grp.get("keys"):
+                self.chop_hit(i, 0.8)
+            elif d.get("src"):
+                self.chop_hit(0, 0.8)
             return
         if kind == "fx":
             fx_step(d, spec, step)
@@ -890,9 +1106,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         p = grp["pads"][i]
         if not p.get("src"):
             return
-        items = self.qe_items("pad")
         if abs(y) >= abs(x):
-            item = items[self.__dict__.get("cqe_idx", {}).get("pad", 0) % len(items)]
+            item = self.qe_fader_item()
         else:
             item = ("fx", next(s for s in PAD_FX if s[0] == "level"))
         self.qe_change("pad", item, 1 if (y if abs(y) >= abs(x) else x) > 0 else -1)
@@ -955,12 +1170,13 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                 col = muted
             pygame.draw.line(c, col, (xk, cy - int(a * hh)), (xk, cy - int(b * hh) + 1), max(1, r.w // n + 1))
         # start and end points
+        trimmed = s0 > 0.001 or s1 < 0.999
         for f, lab in ((s0, "START %d%%" % round(s0 * 100)), (s1, "END %d%%" % round(s1 * 100))):
             xf = r.x + int(r.w * f)
             pygame.draw.line(c, self.LIVE_RED, (xf, r.y), (xf, r.bottom), 2)
-            if not compact:
+            if not compact and trimmed:
                 tw = self.f_small.size(lab)[0]
-                tx = min(max(r.x, xf - tw // 2), r.right - tw)
+                tx = min(max(r.x + 4, xf - tw // 2), r.right - tw - 4)
                 self.text(c, lab, self.f_small, self.LIVE_RED, (tx, r.y - 2))
         if rev:
             self.text(c, "<< REVERSED", self.f_small, self.LIVE_RED, (r.right - 4, r.bottom - 16), right=True)
@@ -1251,7 +1467,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             cs = self.cchop_src or (files[0][1] if files else None)
             caps = usb_capture_devices()
             return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
-                    ("Mode", "Keys (pad %d)" % (grp.get("keys_pad", 0) + 1) if grp.get("keys") else "12 pads")] + \
+                    ("Mode", "Keys (pad %d)" % (grp.get("keys_pad", 0) + 1) if grp.get("keys") else "12 pads"),
+                    ("Keys play", dict(KEY_PLAYS).get(grp.get("kplay", "notes"), "Notes")),
+                    ("Stop drones", "A stops every held drone")] + \
                 [(s[1], fx_fmt(fx_get(grp.get("fx"), s), s[6])) for s in GROUP_FX] + [
                     ("Reset group FX", "A sets the group's effects back"),
                     ("Chop file", src_label(["file", cs]) if cs else "no WAVs found"),
@@ -1268,6 +1486,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         p = grp["pads"][i]
         return ([("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
                  ("Pad", "%d   %s" % (i + 1, GLYPH[PADS[i]])),
+                 ("Type", KIND_NAME.get(p["src"][0], "") if p.get("src") else "empty"),
                  ("Sound", src_label(p.get("src")))] +
                 [(s[1], fx_fmt(fx_get(p, s), s[6])) for s in PAD_FX] +
                 [("Choke", "On" if p.get("choke", True) else "Off"),
@@ -1330,6 +1549,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                     self.cgrp = g
                     self.chop_hit(self.clast, 0.8)
             return
+        if pg == "Group" and name == "Keys play":
+            self.chop_set_kplay(g, d)
+            return
         if pg == "Group":
             if name == "Mode":
                 self.cgrp = g
@@ -1352,13 +1574,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         if name == "Pad":
             self.clast = (i + d) % 12
             return
-        if name == "Sound":
-            opts = [None] + self.csrcs
-            key = [tuple(s) if s else None for s in opts]
-            cur = tuple(p["src"][:2]) if p.get("src") else None
-            k = next((n for n, s in enumerate(key) if (s and cur and s[:2] == cur) or (s is None and cur is None)), 0)
-            nxt = opts[(k + d) % len(opts)]
-            p["src"] = list(nxt) if nxt else None
+        if name in ("Sound", "Type"):
+            self.chop_pick(p, d, by_type=(name == "Type"))
         elif any(s[1] == name for s in PAD_FX):
             spec = next(s for s in PAD_FX if s[1] == name)
             fx_step(p, spec, d)
@@ -1456,6 +1673,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                 q.pop(s[0], None) if s[0] not in ("tune", "level") else None
             self.chop_send_pad(g, self.clast)
             self.flash("PAD %d EFFECTS RESET" % (self.clast + 1))
+        elif name == "Stop drones":
+            self.chop_drones_off()
+            self.flash("DRONES STOPPED")
         elif name == "Reset group FX":
             self.cgroups[g]["fx"] = {}
             self.chop_send_group(g)
@@ -1512,7 +1732,14 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             if keys:
                 base = grp["pads"][grp.get("keys_pad", 0)]
                 have = bool(base.get("src"))
-                label = NOTE[(i + base.get("tune", 0)) % 12]
+                kp = grp.get("kplay", "notes")
+                tr = base.get("tune", 0) + (grp.get("fx") or {}).get("tune", 0)
+                if kp in ("triads", "sevenths"):
+                    label = chord_name([t + tr for t in self.chop_chord(i, kp)])
+                elif kp == "drone":
+                    label = NOTE[(i + tr) % 12] + ("  HOLD" if (g, i) in self.__dict__.get("cdrones", set()) else "")
+                else:
+                    label = NOTE[(i + tr) % 12]
             else:
                 p = grp["pads"][i]
                 have = bool(p.get("src"))
@@ -1535,7 +1762,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.7), (px, gy, pw, ph), border_radius=10)
         self.text(c, GROUPS[g], self.f_big, mm.ACCENT, (px + 14, gy + 8))
         self.text(c, GROUP_NAMES[g].upper(), self.f_small, mm.INK, (px + 58, gy + 12))
-        self.text(c, "KEYS" if keys else "12 PADS", self.f_small, mm.ACCENT2 if keys else mm.DIM, (px + 58, gy + 32))
+        kp = {"notes": "KEYS", "triads": "KEYS  CHORDS", "sevenths": "KEYS  7TH CHORDS", "drone": "KEYS  DRONE"}
+        self.text(c, kp.get(grp.get("kplay", "notes"), "KEYS") if keys else "12 PADS", self.f_small,
+                  mm.ACCENT2 if keys else mm.DIM, (px + 58, gy + 32))
         i = grp.get("keys_pad", 0) if keys else self.clast
         p = grp["pads"][i]
         self.text(c, "PAD %d" % (i + 1), self.f_small, mm.DIM, (px + 14, gy + 84))
@@ -1554,8 +1783,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         else:
             return_early = False
         hot = self.cfader and now - self.cfader[0] < 1.0
-        items = self.qe_items("pad")
-        fitem = items[self.__dict__.get("cqe_idx", {}).get("pad", 0) % len(items)]
+        fitem = self.qe_fader_item()
         if not return_early:                                   # the fader: what up/down changes now
             self.text(c, fitem[1][1].lower(), self.f_small, mm.DIM, (px + 14, gy + 132))
             self.text(c, self.qe_value("pad", fitem), self.f_med, mm.ACCENT2 if hot else mm.INK, (px + 14, gy + 150))

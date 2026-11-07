@@ -2138,8 +2138,20 @@ class Engine:
             for v in self.voices:
                 if v.tag == tag and v.start < when and (v.rel_at is None or v.rel_at > when):
                     v.rel_at, v.rel_len = int(when), fast
-        self._voice((bk[0][int(pad)], None), float(vel), float(pan), int(when), tag, srev=float(srev),
+        snd = bk[0][int(pad)]
+        if isinstance(snd, tuple):                     # a drone: attack, then a loop until stopped
+            self._voice(snd, float(vel), float(pan), int(when), tag, srev=float(srev), sdly=float(sdly),
+                        rel=int(0.4 * self.sr))
+            return
+        self._voice((snd, None), float(vel), float(pan), int(when), tag, srev=float(srev),
                     sdly=float(sdly), rel=int(0.01 * self.sr))
+
+    def c_chop_stop(self, bank, pad):
+        """Release a held drone (a soft fade)."""
+        tag = "chop%d_%d" % (int(bank), int(pad))
+        for v in self.voices:
+            if v.tag == tag and (v.rel_at is None or v.rel_at > self.t):
+                v.rel_at, v.rel_len = int(self.t), int(0.5 * self.sr)
 
     def c_chop_meta(self, bank, chokes, sends=None):
         """Per pad: choke on or off, and its (reverb, delay) sends."""
