@@ -1056,7 +1056,11 @@ class AmbientMixin:
         else:
             _, pcs, _, _ = self.amb_chord_tones(deg or 0, None)
         lo, hi = {1: (60, 72), 2: (55, 79), 3: (48, 84), 4: (43, 91)}[int(self.astrum.get("range", 2))]
-        return [n for n in range(lo, hi + 1) if n % 12 in pcs]
+        tones = [n for n in range(lo, hi + 1) if n % 12 in pcs]
+        if tones != self.__dict__.get("_pk_tones"):         # a new chord: its strum notes go first
+            self._pk_tones = tones
+            self.amb_pluck_warm(self.astrum["inst"], tones)
+        return tones
 
     def amb_strum(self, x, y):
         """Left stick, the way a harp or an Omnichord plate is played:
@@ -1415,11 +1419,12 @@ class AmbientMixin:
         if edition.PLAY:
             self.amb_midi_tick(now)
             self.amb_arp_tick(now)
+            self.amb_pluck_tick()
         if edition.PLAY and not getattr(self, "_tex_started", False):
             self._tex_started = True
             self.amb_midi_start()
             self.amb_set_texture()                         # the texture bed you left playing comes back
-            self.eng.post("pluck_warm", list(range(43, 101)), self.astrum["inst"])   # every strum note, built ahead
+            self.amb_pluck_warm(self.astrum["inst"])   # every strum note, built ahead
             self.amb_strum_fx()
         pb = getattr(self, "_preview_back", None)
         if pb and now >= pb[0]:
@@ -1504,6 +1509,64 @@ class AmbientMixin:
                 while h and now - h[0][0] > HIST_SECS:
                     h.pop(0)
 
+    # ------------------------------------------------------------ strum notes, built off the audio process
+    def amb_pluck_warm(self, inst, first=None):
+        """Build every strum note of the instrument in a background thread here, in
+        the screen's process, and hand each to the engine as it is ready; the notes
+        being played now go first."""
+        import collections
+        import threading
+        st = self.__dict__.get("_pkb")
+        if st is None:
+            st = self._pkb = {"inst": None, "todo": collections.deque(), "done": collections.deque(), "have": set(),
+                              "lock": threading.Lock(), "wake": threading.Event()}
+
+            def work():
+                while True:
+                    st["wake"].wait(1.0)
+                    while True:
+                        with st["lock"]:
+                            if not st["todo"]:
+                                st["wake"].clear()
+                                break
+                            inst_, m = st["todo"].popleft()
+                        try:
+                            mono = engine.pluck_note(inst_, m, synth.SR)
+                        except Exception as ex:
+                            print("strum note failed", inst_, m, ex, flush=True)
+                            continue
+                        st["done"].append((inst_, m, mono))
+                        time.sleep(0.005)                  # leave the screen its share of the CPU
+            threading.Thread(target=work, daemon=True).start()
+        inst = int(inst) % len(engine.Engine.PLUCKS)
+        with st["lock"]:
+            if st["inst"] != inst:
+                st["inst"], st["have"] = inst, set()
+                st["todo"].clear()
+                st["done"].clear()
+                order = sorted(range(43, 101), key=lambda m: abs(m - 64))     # the middle first
+                st["todo"].extend((inst, m) for m in order)
+            for m in reversed(list(first or [])):
+                if m not in st["have"] and 43 <= m <= 100 and (inst, m) in st["todo"]:
+                    st["todo"].remove((inst, m))
+                    st["todo"].appendleft((inst, m))
+        st["wake"].set()
+
+    def amb_pluck_tick(self):
+        """Hand the engine the notes the thread has finished (two per frame at most)."""
+        st = self.__dict__.get("_pkb")
+        if not st:
+            return
+        for _ in range(2):
+            if not st["done"]:
+                return
+            inst, m, mono = st["done"].popleft()
+            if inst == st["inst"]:
+                st["have"].add(m)
+                self.eng.post("pluck_put", inst, m, mono)
+                if len(st["have"]) == 58:
+                    print("strum notes: all 58 of %s ready" % engine.Engine.PLUCKS[inst], flush=True)
+
     # ------------------------------------------------------------ settings pages
     def amb_menu_pages(self):
         return ["Songs", "Voice", "Chords", "Melody", "Scenes", "Global", "FX"]
@@ -1571,7 +1634,7 @@ class AmbientMixin:
         self.push_fx()
         self.push_rack()
         self.amb_strum_fx()
-        self.eng.post("pluck_warm", list(range(43, 101)), self.astrum["inst"])
+        self.amb_pluck_warm(self.astrum["inst"])
         self._tex_started = True
         self.amb_set_texture()
         self.aSong = n
@@ -1731,7 +1794,7 @@ class AmbientMixin:
                 self.amb_strum_fx()
             if name == "Strum sound":
                 sa["inst"] = (sa["inst"] + d) % len(engine.Engine.PLUCKS)
-                self.eng.post("pluck_warm", list(range(43, 101)), sa["inst"])
+                self.amb_pluck_warm(sa["inst"])
             elif name == "Strum level":
                 sa["level"] = round(max(0.1, min(2.5, sa["level"] + 0.1 * d)), 2)
             elif name == "Arp pattern":

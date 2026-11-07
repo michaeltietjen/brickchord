@@ -1071,7 +1071,8 @@ class Engine:
         w = self._lead_window(v, lo, int(i0[-1]) + 1)
         j = i0 - lo
         fr = (pos - i0).astype(np.float32)[:, None]
-        return w[j] * (1 - fr) + w[j + 1] * fr
+        a = w[j]
+        return a + (w[j + 1] - a) * fr                 # one multiply instead of two
 
     def _lead_fetch(self, v, idx):
         a, l = v.a, v.l
@@ -2047,16 +2048,35 @@ class Engine:
         self.__dict__.setdefault("_pluck_cache", {})[(inst, midi)] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
 
     def _pluck_wave(self, midi, inst=0):
-        """The strum note, from the cache; if it has not been built yet, it is built
-        now in one go (only the very first notes after a change of instrument)."""
+        """The strum note, from the cache. Notes are built in the screen's process and
+        handed over (pluck_put), never here: building one took up to a block of audio
+        on the Brick, which stuttered. Until a note arrives, the nearest note already
+        here is re-pitched to stand in (cheap); with none at all, it is skipped."""
         inst = int(inst) % len(self.PLUCKS)
         cache = self.__dict__.setdefault("_pluck_cache", {})
         w = cache.get((inst, midi))
-        if w is None:
-            for _ in self._pluck_job(inst, midi):
-                pass
-            w = cache[(inst, midi)]
-        return w
+        if w is not None:
+            return w
+        near = [m for (i, m) in cache if i == inst and abs(m - midi) <= 12]
+        if not near:
+            return None
+        m = min(near, key=lambda q: abs(q - midi))
+        src = cache[(inst, m)]
+        r = 2 ** ((midi - m) / 12.0)
+        n = int(len(src) / r)
+        idx = np.arange(n, dtype=np.float32) * r
+        k = idx.astype(np.int64)
+        f = (idx - k)[:, None]
+        k1 = np.minimum(k + 1, len(src) - 1)
+        return (src[k] + (src[k1] - src[k]) * f).astype(np.float32)
+
+    def c_pluck_put(self, inst, midi, mono):
+        """A strum note built in the screen's process."""
+        inst = int(inst) % len(self.PLUCKS)
+        cache = self.__dict__.setdefault("_pluck_cache", {})
+        for key in [k for k in cache if k[0] != inst]:
+            del cache[key]                             # only the instrument in use is kept
+        cache[(inst, int(midi))] = np.ascontiguousarray(np.repeat(np.asarray(mono, np.float32)[:, None], 2, 1))
 
     def c_pluckfx(self, rev, dly):
         """How much of the strum and arp goes to their own reverb and echo (bus B)."""
@@ -2065,20 +2085,16 @@ class Engine:
     def c_pluck_warm(self, midis, inst=0):
         """Queue harp notes to build ahead, one per audio block, so the first strum
         is as smooth as the rest."""
-        todo = self.__dict__.setdefault("_pluck_todo", [])
         cache = self.__dict__.setdefault("_pluck_cache", {})
         inst = int(inst) % len(self.PLUCKS)
         for key in [k for k in cache if k[0] != inst]:
-            del cache[key]                                    # only the instrument in use is kept
-        todo[:] = [k for k in todo if k[0] == inst]
-        for m in midis:
-            key = (inst, int(m))
-            if key not in cache and key not in todo:
-                todo.append(key)
+            del cache[key]                                    # notes now come from the screen (pluck_put)
 
     def c_pluck(self, midi, vel=0.8, pan=0.0, inst=0):
         """One plucked note for the strum and arp, through the reverb and delay."""
         w = self._pluck_wave(int(midi), inst)
+        if w is None:
+            return
         self._voice((w, None), float(vel), float(pan), self.t, "pluck", srev=1.0, sdly=0.7,
                     rel=int(0.05 * self.sr))
 
@@ -2902,3 +2918,15 @@ class Engine:
                 pygame.mixer.quit()
         except Exception:
             pass
+
+
+
+def pluck_note(inst, midi, sr):
+    """One strum note as mono float32, built outside the audio process."""
+    class _B:
+        _pluck_recipe = staticmethod(Engine._pluck_recipe)
+    b = _B()
+    b.sr = sr
+    for _ in Engine._pluck_job(b, int(inst) % len(Engine.PLUCKS), int(midi)):
+        pass
+    return b._pluck_cache[(int(inst) % len(Engine.PLUCKS), int(midi))][:, 0].copy()
