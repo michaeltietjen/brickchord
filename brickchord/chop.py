@@ -196,6 +196,130 @@ def shape(x, tune=0.0, level=0.9, reverse=False):
     return np.ascontiguousarray(np.repeat(x[:, None], 2, 1).astype(np.float32))
 
 
+# ---------------------------------------------------------------- effects
+# (key, label, lo, hi, step, default, kind). Pads and groups are baked into each
+# pad's sound when it changes (so playing costs nothing); sends and swing go to the
+# engine; the song's master chain runs in the engine on everything coming out.
+PAD_FX = [("tune", "Tune", -24, 24, 1, 0, "st"), ("fine", "Fine tune", -50, 50, 5, 0, "cents"),
+          ("level", "Level", 0.05, 1.6, 0.05, 0.9, "pct"), ("pan", "Pan", -1, 1, 0.1, 0.0, "pan"),
+          ("start", "Start", 0, 0.9, 0.05, 0.0, "pct"), ("length", "Length", 0.05, 1, 0.05, 1.0, "pct"),
+          ("attack", "Attack", 0, 0.5, 0.01, 0.0, "ms"), ("fade", "Fade out", 0, 1, 0.05, 0.0, "pct"),
+          ("filter", "Filter", -1, 1, 0.1, 0.0, "filter"), ("drive", "Drive", 0, 1, 0.1, 0.0, "pct"),
+          ("crush", "Bitcrush", 0, 1, 0.1, 0.0, "pct"), ("rev", "Reverb send", 0, 1, 0.1, 0.5, "pct"),
+          ("dly", "Delay send", 0, 1, 0.1, 0.4, "pct")]
+GROUP_FX = [("volume", "Volume", 0, 1.5, 0.05, 1.0, "pct"), ("pan", "Pan", -1, 1, 0.1, 0.0, "pan"),
+            ("tune", "Transpose", -12, 12, 1, 0, "st"), ("filter", "Filter", -1, 1, 0.1, 0.0, "filter"),
+            ("drive", "Drive", 0, 1, 0.1, 0.0, "pct"), ("crush", "Bitcrush", 0, 1, 0.1, 0.0, "pct"),
+            ("rev", "Reverb send", 0, 2, 0.1, 1.0, "x"), ("dly", "Delay send", 0, 2, 0.1, 1.0, "x"),
+            ("swing", "Swing", 0, 0.5, 0.05, 0.0, "pct")]
+MASTER_FX = [("filter", "Filter", -1, 1, 0.05, 0.0, "filter"), ("drive", "Drive", 0, 1, 0.1, 0.0, "pct"),
+             ("crush", "Bitcrush", 0, 1, 0.1, 0.0, "pct"), ("comp", "Compressor", 0, 1, 0.1, 0.0, "pct"),
+             ("width", "Stereo width", 0, 2, 0.1, 1.0, "pct"), ("volume", "Volume", 0, 1.5, 0.05, 1.0, "pct")]
+
+
+def fx_get(d, spec):
+    return d.get(spec[0], spec[5]) if d else spec[5]
+
+
+def fx_fmt(v, kind):
+    if kind == "st":
+        return "%+d" % v
+    if kind == "cents":
+        return "%+d cents" % v
+    if kind == "pct":
+        return "%d%%" % round(v * 100)
+    if kind == "ms":
+        return "%d ms" % round(v * 1000)
+    if kind == "x":
+        return "x%.1f" % v
+    if kind == "pan":
+        return "center" if abs(v) < 0.05 else ("%d%% %s" % (round(abs(v) * 100), "L" if v < 0 else "R"))
+    if kind == "filter":
+        return "open" if abs(v) < 0.05 else ("low-pass %d%%" % round(-v * 100) if v < 0 else "high-pass %d%%" % round(v * 100))
+    return str(v)
+
+
+def fx_step(d, spec, step):
+    key, _, lo, hi, st, dflt, kind = spec
+    v = d.get(key, dflt) + st * step
+    v = max(lo, min(hi, v))
+    d[key] = int(round(v)) if isinstance(st, int) and isinstance(lo, int) and kind in ("st", "cents") else round(v, 3)
+    return d[key]
+
+
+def fir(x, f):
+    """The bipolar filter: below 0 a low-pass closing, above 0 a high-pass opening."""
+    if x is None or abs(f) < 0.05 or len(x) < 128:
+        return x
+    taps = 101
+    n = np.arange(taps) - (taps - 1) / 2
+    win = np.hamming(taps)
+    if f < 0:
+        fc = 18000.0 * (1.0 + f) ** 2.2 + 120.0
+        h = np.sinc(2 * fc / SR * n) * win
+        h /= h.sum()
+    else:
+        fc = 30.0 + 7000.0 * f ** 2
+        lp = np.sinc(2 * fc / SR * n) * win
+        lp /= lp.sum()
+        h = -lp
+        h[(taps - 1) // 2] += 1.0                       # spectral inversion: high-pass
+    return np.convolve(x, h.astype(np.float32), mode="same").astype(np.float32)
+
+
+def color(x, drive, crush):
+    if drive > 0.01:
+        k = 1 + 6 * drive
+        x = (np.tanh(x * k) / np.tanh(k) * (0.75 + 0.25 * (1 - drive))).astype(np.float32)
+    if crush > 0.01:
+        step = 1 + int(crush * 9)
+        if step > 1:
+            x = np.repeat(x[::step], step)[: len(x)]
+        bits = 2 ** (12 - int(crush * 8))
+        x = (np.round(x * bits) / bits).astype(np.float32)
+    return x
+
+
+def shape_fx(x, p, gfx=None, extra_tune=0.0):
+    """A pad's sound with its own effects, then its group's, ready to play."""
+    if x is None or len(x) < 32:
+        return None
+    gfx = gfx or {}
+    n = len(x)
+    s0 = int(n * p.get("start", 0.0))
+    s1 = int(n * min(1.0, p.get("start", 0.0) + p.get("length", 1.0)))
+    x = x[s0:max(s0 + 32, s1)]
+    if p.get("reverse"):
+        x = x[::-1]
+    tune = p.get("tune", 0) + p.get("fine", 0) / 100.0 + gfx.get("tune", 0) + extra_tune
+    if tune:
+        r = 2 ** (tune / 12.0)
+        idx = np.arange(0, len(x) - 1, r)
+        x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
+    x = np.asarray(x, np.float32)
+    x = fir(x, p.get("filter", 0.0))
+    x = color(x, p.get("drive", 0.0), p.get("crush", 0.0))
+    x = fir(x, gfx.get("filter", 0.0))
+    x = color(x, gfx.get("drive", 0.0), gfx.get("crush", 0.0))
+    x = x * float(p.get("level", 0.9)) * float(gfx.get("volume", 1.0))
+    a = int(p.get("attack", 0.0) * SR)
+    fi = max(int(0.002 * SR), a)
+    fo = int(0.006 * SR)
+    if len(x) > fi + fo:
+        x = x.copy()
+        x[:fi] *= np.linspace(0, 1, fi, dtype=np.float32) ** (1.0 if a else 1.0)
+        fade = p.get("fade", 0.0)
+        if fade > 0.01:
+            k = max(fo, int(len(x) * fade))
+            x[-k:] *= np.linspace(1, 0, k, dtype=np.float32) ** 1.5
+        else:
+            x[-fo:] *= np.linspace(1, 0, fo, dtype=np.float32)
+    pan = max(-1.0, min(1.0, p.get("pan", 0.0) + gfx.get("pan", 0.0)))
+    ang = (pan + 1) * math.pi / 4
+    st = np.stack([x * math.cos(ang) * 1.414, x * math.sin(ang) * 1.414], 1)
+    return np.ascontiguousarray(st.astype(np.float32))
+
+
 def default_groups():
     kits = kit_list()
     k1 = "808" if "808" in kits else kits[0]
@@ -233,6 +357,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         self.crec = None
         self.crec_secs = int(st.get("rec_secs", 4))
         self.cchop_src = st.get("chop_src")
+        self.cmaster = dict(st.get("master") or {})
         self.cwave = {}
         self.csel_down = self.csel_combo = False
         self.cbpm = float(st.get("bpm", 100))
@@ -253,17 +378,19 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         for g in range(4):
             self.chop_send_group(g)
             self.chop_send_seq(g)
+        self.eng.post("chop_master", self.cmaster)
         if not self.cfg.get("chop_tutorial_done") and getattr(self, "ctut", None) is None:
             self.chop_tut_start()
 
     def chop_state(self):
         return {"v": 2, "group": self.cgrp, "last": self.clast, "groups": self.cgroups, "rec_secs": self.crec_secs,
-                "chop_src": self.cchop_src, "bpm": self.cbpm, "click": self.cclick}
+                "chop_src": self.cchop_src, "bpm": self.cbpm, "click": self.cclick, "master": self.cmaster}
 
     # ------------------------------------------------------------ the sequencer
     def chop_send_seq(self, g):
         pt = self.cgroups[g]["pattern"]
-        self.eng.post("chop_seq", g, pt["bars"] * 16, [[e[0], e[1], e[2], False] for e in pt["ev"]])
+        self.eng.post("chop_seq", g, pt["bars"] * 16, [[e[0], e[1], e[2], False] for e in pt["ev"]],
+                      float((self.cgroups[g].get("fx") or {}).get("swing", 0.0)))
 
     def chop_pos(self):
         """Where the playhead is, in 16ths since START (the engine keeps the same clock)."""
@@ -319,7 +446,18 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         p = self.cgroups[g]["pads"][i]
         if not p.get("src"):
             return None
-        return shape(raw_audio(p["src"]), p.get("tune", 0), p.get("level", 0.9), p.get("reverse", False))
+        return shape_fx(raw_audio(p["src"]), p, self.cgroups[g].get("fx"))
+
+    def chop_send_meta(self, g):
+        """Each pad's choke and its reverb and delay sends (times the group's)."""
+        grp = self.cgroups[g]
+        gfx = grp.get("fx") or {}
+        pads = grp["pads"]
+        if grp.get("keys"):
+            pads = [pads[grp.get("keys_pad", 0)]] * 12
+        chokes = [bool(p.get("choke", True)) and not grp.get("keys") for p in pads]
+        sends = [(p.get("rev", 0.5) * gfx.get("rev", 1.0), p.get("dly", 0.4) * gfx.get("dly", 1.0)) for p in pads]
+        self.eng.post("chop_meta", g, chokes, sends)
 
     def chop_send_group(self, g):
         """Send a group's 12 sounds to the engine (in KEYS, the 12 notes of one sound)."""
@@ -328,10 +466,11 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             k = grp.get("keys_pad", 0)
             p = grp["pads"][k]
             x = raw_audio(p["src"]) if p.get("src") else None
-            arrs = [shape(x, p.get("tune", 0) + n, p.get("level", 0.9), p.get("reverse", False)) for n in range(12)]
+            arrs = [shape_fx(x, p, grp.get("fx"), n) for n in range(12)]
         else:
             arrs = [self.chop_pad_array(g, i) for i in range(12)]
         self.eng.post("chop_load", g, arrs, None)
+        self.chop_send_meta(g)
         self.cwave.pop(g, None)
 
     def chop_send_pad(self, g, i):
@@ -339,6 +478,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.chop_send_group(g)
         else:
             self.eng.post("chop_pad", g, i, self.chop_pad_array(g, i))
+            self.chop_send_meta(g)
 
     def chop_to_group(self, g, f, quiet=False):
         """Chop one WAV onto all 12 pads of a group, at its hits."""
@@ -370,7 +510,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.clast = i
             return
         choke = grp["pads"][grp.get("keys_pad", 0) if keys else i].get("choke", True)
-        self.eng.post("chop_hit", g, i, float(vel), -0.3 + 0.6 * (i % 4) / 3.0, bool(choke) and not keys)
+        self.eng.post("chop_hit", g, i, float(vel), 0.0, bool(choke) and not keys)
         self.clit[(g, i)] = time.perf_counter()
         self.ctut_n = getattr(self, "ctut_n", 0) + 1
         if self.cplay and self.crec_on:
@@ -569,7 +709,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
 
     # ------------------------------------------------------------ settings
     def chop_menu_pages(self):
-        return ["Songs", "Pad", "Group", "Seq", "Global", "FX"]
+        return ["Songs", "Pad", "Group", "Seq", "Master", "Global", "FX"]
 
     # ------------------------------------------------------------ songs: everything, in 8 slots
     def chop_song_path(self, n):
@@ -690,7 +830,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             cs = self.cchop_src or (files[0][1] if files else None)
             caps = usb_capture_devices()
             return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
-                    ("Mode", "Keys (pad %d)" % (grp.get("keys_pad", 0) + 1) if grp.get("keys") else "12 pads"),
+                    ("Mode", "Keys (pad %d)" % (grp.get("keys_pad", 0) + 1) if grp.get("keys") else "12 pads")] + \
+                [(s[1], fx_fmt(fx_get(grp.get("fx"), s), s[6])) for s in GROUP_FX] + [
+                    ("Reset group FX", "A sets the group's effects back"),
                     ("Chop file", src_label(["file", cs]) if cs else "no WAVs found"),
                     ("Chop to group", "A chops it onto all 12 pads"),
                     ("Load kit", "A loads %s" % getattr(self, "ckit_pick", kit_list()[0])),
@@ -698,16 +840,20 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                     ("Record", ("A records %d s from %s" % (self.crec_secs, caps[-1][2])) if caps else "no USB audio input"),
                     ("Record length", "%d s" % self.crec_secs),
                     ("Rescan files", "%d WAVs" % len(self.cfiles))]
+        if pg == "Master":
+            return [(s[1], fx_fmt(fx_get(self.cmaster, s), s[6])) for s in MASTER_FX] + \
+                [("Reset master", "A sets every master effect back")]
         i = self.clast
         p = grp["pads"][i]
-        return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
-                ("Pad", "%d   %s" % (i + 1, GLYPH[PADS[i]])),
-                ("Sound", src_label(p.get("src"))),
-                ("Tune", "%+d" % p.get("tune", 0)),
-                ("Level", "%d%%" % round(p.get("level", 0.9) * 100)),
-                ("Choke", "On" if p.get("choke", True) else "Off"),
-                ("Reverse", "On" if p.get("reverse") else "Off"),
-                ("Clear pad", "A empties it")]
+        return ([("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
+                 ("Pad", "%d   %s" % (i + 1, GLYPH[PADS[i]])),
+                 ("Sound", src_label(p.get("src")))] +
+                [(s[1], fx_fmt(fx_get(p, s), s[6])) for s in PAD_FX] +
+                [("Choke", "On" if p.get("choke", True) else "Off"),
+                 ("Reverse", "On" if p.get("reverse") else "Off"),
+                 ("Copy FX to group", "A gives all 12 pads these effects"),
+                 ("Reset pad FX", "A sets this pad's effects back"),
+                 ("Clear pad", "A empties it")])
 
     def chop_menu_change(self, pg, name, d):
         g = self.cedit_g
@@ -736,6 +882,26 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                 self.chop_send_seq(g)
             elif name == "Click":
                 self.cclick = not self.cclick
+            return
+        if pg == "Master":
+            spec = next((s for s in MASTER_FX if s[1] == name), None)
+            if spec:
+                fx_step(self.cmaster, spec, d)
+                self.eng.post("chop_master", self.cmaster)
+            return
+        if pg == "Group" and any(s[1] == name for s in GROUP_FX):
+            spec = next((s for s in GROUP_FX if s[1] == name), None)
+            if spec:
+                gfx = grp.setdefault("fx", {})
+                fx_step(gfx, spec, d)
+                if spec[0] == "swing":
+                    self.chop_send_seq(g)
+                elif spec[0] in ("rev", "dly"):
+                    self.chop_send_meta(g)
+                else:
+                    self.chop_send_group(g)
+                    self.cgrp = g
+                    self.chop_hit(self.clast, 0.8)
             return
         if pg == "Group":
             if name == "Mode":
@@ -766,12 +932,18 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             k = next((n for n, s in enumerate(key) if (s and cur and s[:2] == cur) or (s is None and cur is None)), 0)
             nxt = opts[(k + d) % len(opts)]
             p["src"] = list(nxt) if nxt else None
-        elif name == "Tune":
-            p["tune"] = int(max(-24, min(24, p.get("tune", 0) + d)))
-        elif name == "Level":
-            p["level"] = round(max(0.05, min(1.6, p.get("level", 0.9) + 0.05 * d)), 2)
+        elif any(s[1] == name for s in PAD_FX):
+            spec = next(s for s in PAD_FX if s[1] == name)
+            fx_step(p, spec, d)
+            if spec[0] in ("rev", "dly"):
+                self.chop_send_meta(g)
+                self.cgrp = g
+                if p.get("src") and not grp.get("keys"):
+                    self.chop_hit(i, 0.8)
+                return
         elif name == "Choke":
             p["choke"] = not p.get("choke", True)
+            self.chop_send_meta(g)
             return
         elif name == "Reverse":
             p["reverse"] = not p.get("reverse")
@@ -838,6 +1010,30 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.cfiles = chop_files()
             self.csrcs = sources()
             self.flash("%d WAVs FOUND" % len(self.cfiles))
+        elif name == "Copy FX to group":
+            src = self.cgroups[g]["pads"][self.clast]
+            keys = [s[0] for s in PAD_FX if s[0] not in ("tune", "level", "start", "length")]
+            for q in self.cgroups[g]["pads"]:
+                for k in keys:
+                    if k in src:
+                        q[k] = src[k]
+            self.chop_send_group(g)
+            self.flash("PAD %d's EFFECTS ON ALL 12 PADS OF GROUP %s" % (self.clast + 1, GROUPS[g]))
+        elif name == "Reset pad FX":
+            q = self.cgroups[g]["pads"][self.clast]
+            for s in PAD_FX:
+                q.pop(s[0], None) if s[0] not in ("tune", "level") else None
+            self.chop_send_pad(g, self.clast)
+            self.flash("PAD %d EFFECTS RESET" % (self.clast + 1))
+        elif name == "Reset group FX":
+            self.cgroups[g]["fx"] = {}
+            self.chop_send_group(g)
+            self.chop_send_seq(g)
+            self.flash("GROUP %s EFFECTS RESET" % GROUPS[g])
+        elif name == "Reset master":
+            self.cmaster.clear()
+            self.eng.post("chop_master", self.cmaster)
+            self.flash("MASTER EFFECTS RESET")
         elif name == "Clear pad":
             self.cgroups[g]["pads"][self.clast]["src"] = None
             self.chop_send_pad(g, self.clast)

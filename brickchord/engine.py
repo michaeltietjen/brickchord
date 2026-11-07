@@ -2096,28 +2096,32 @@ class Engine:
             return
         meta = self.__dict__.get("chop_meta", {}).get(int(bank), {})
         if pan is None:
-            pan = -0.3 + 0.6 * (int(pad) % 4) / 3.0
+            pan = 0.0                                  # each pad's pan is in its sound
+        ch = meta.get("chokes") or []
         if choke is None:
-            choke = meta.get("choke", True)
+            choke = ch[int(pad)] if int(pad) < len(ch) else True
+        sd = meta.get("sends") or []
+        srev, sdly = sd[int(pad)] if int(pad) < len(sd) else (0.5, 0.4)
         tag = "chop%d_%d" % (int(bank), int(pad))
         if choke:                                      # the same pad again cuts the last one off
             fast = int(0.006 * self.sr)
             for v in self.voices:
                 if v.tag == tag and v.start < when and (v.rel_at is None or v.rel_at > when):
                     v.rel_at, v.rel_len = int(when), fast
-        self._voice((bk[0][int(pad)], None), float(vel), float(pan), int(when), tag, srev=0.5, sdly=0.4,
-                    rel=int(0.01 * self.sr))
+        self._voice((bk[0][int(pad)], None), float(vel), float(pan), int(when), tag, srev=float(srev),
+                    sdly=float(sdly), rel=int(0.01 * self.sr))
 
-    def c_chop_meta(self, bank, choke):
-        self.__dict__.setdefault("chop_meta", {})[int(bank)] = {"choke": bool(choke)}
+    def c_chop_meta(self, bank, chokes, sends=None):
+        """Per pad: choke on or off, and its (reverb, delay) sends."""
+        self.__dict__.setdefault("chop_meta", {})[int(bank)] = {"chokes": list(chokes), "sends": list(sends or [])}
 
-    def c_chop_seq(self, bank, length, events):
+    def c_chop_seq(self, bank, length, events, swing=0.0):
         """One group's pattern: length in 16ths, events [[step, pad, vel, skip]]."""
         cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
         by = {}
         for ev in events:
             by.setdefault(int(ev[0]), []).append([int(ev[0]), int(ev[1]), float(ev[2]), bool(ev[3])])
-        cs["seqs"][int(bank)] = {"len": int(length), "by": by}
+        cs["seqs"][int(bank)] = {"len": int(length), "by": by, "swing": float(swing)}
 
     def c_chop_add(self, bank, step, pad, vel, skip):
         cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
@@ -2160,6 +2164,70 @@ class Engine:
         bk = self.__dict__.get("chop", {}).get(int(bank))
         if on and bk and bk[1] is not None:
             self._voice((bk[1], None), 1.0, 0.0, self.t, "chopfull", srev=0.5, sdly=0.4, rel=int(0.02 * self.sr))
+
+    # ------------------------------------------------------------ Brickchop's master (the song's effects)
+    def c_chop_master(self, fx):
+        fx = dict(fx or {})
+        neutral = (abs(fx.get("filter", 0.0)) < 0.05 and fx.get("drive", 0.0) < 0.01 and fx.get("crush", 0.0) < 0.01
+                   and fx.get("comp", 0.0) < 0.01 and abs(fx.get("width", 1.0) - 1.0) < 0.01
+                   and abs(fx.get("volume", 1.0) - 1.0) < 0.01)
+        self._cm = None if neutral else fx
+        st = self.__dict__.setdefault("_cm_state", {"fir": None, "h": None, "f": None, "env": 0.0})
+        f = fx.get("filter", 0.0)
+        if st["f"] != f:
+            st["f"], st["h"] = f, None
+            if abs(f) >= 0.05:
+                taps = 63
+                n = np.arange(taps) - (taps - 1) / 2
+                win = np.hamming(taps)
+                if f < 0:
+                    fc = 18000.0 * (1.0 + f) ** 2.2 + 120.0
+                    h = np.sinc(2 * fc / self.sr * n) * win
+                    h /= h.sum()
+                else:
+                    fc = 30.0 + 7000.0 * f ** 2
+                    lp = np.sinc(2 * fc / self.sr * n) * win
+                    lp /= lp.sum()
+                    h = -lp
+                    h[(taps - 1) // 2] += 1.0
+                st["h"] = h.astype(np.float32)
+
+    def _chop_master(self, x, N, sr):
+        fx, st = self._cm, self._cm_state
+        h = st.get("h")
+        if h is not None:
+            taps = len(h)
+            prev = st["fir"] if st["fir"] is not None and len(st["fir"]) == taps - 1 else np.zeros((taps - 1, 2), np.float32)
+            xx = np.concatenate([prev, x])
+            st["fir"] = x[-(taps - 1):].copy()
+            x = np.stack([np.convolve(xx[:, c], h, mode="valid") for c in (0, 1)], 1).astype(np.float32)
+        d = fx.get("drive", 0.0)
+        if d > 0.01:
+            k = 1 + 5 * d
+            x = (np.tanh(x * k) / np.tanh(k)).astype(np.float32)
+        cr = fx.get("crush", 0.0)
+        if cr > 0.01:
+            step = 1 + int(cr * 9)
+            if step > 1:
+                x = np.repeat(x[::step], step, axis=0)[:N]
+            bits = 2 ** (12 - int(cr * 8))
+            x = (np.round(x * bits) / bits).astype(np.float32)
+        cp = fx.get("comp", 0.0)
+        if cp > 0.01:                                  # a gentle bus compressor: level per block, smoothed
+            lvl = float(np.sqrt(np.mean(x * x)) + 1e-6)
+            st["env"] = max(lvl, st["env"] * 0.85 + lvl * 0.15)
+            thr = 0.25 * (1 - 0.7 * cp)
+            gain = 1.0 if st["env"] <= thr else (thr / st["env"]) ** (0.6 * cp)
+            x = x * (gain * (1 + 1.2 * cp))
+        w = fx.get("width", 1.0)
+        if abs(w - 1.0) > 0.01:
+            mid = (x[:, 0] + x[:, 1]) * 0.5
+            side = (x[:, 0] - x[:, 1]) * 0.5 * w
+            x = np.stack([mid + side, mid - side], 1).astype(np.float32)
+        v = fx.get("volume", 1.0)
+        if abs(v - 1.0) > 0.01:
+            x = x * v
+        return x.astype(np.float32)
 
     # ------------------------------------------------------------ punch-in FX (Brickchop)
     PUNCH = ["stutter", "repeat", "filter", "crush", "tapestop", "halfspeed", "reverse", "throw"]
@@ -2460,11 +2528,12 @@ class Engine:
             while cs["next"] < t + N:
                 k, when = cs["step"], int(cs["next"])
                 for grp, seq in cs["seqs"].items():
+                    sw = int(seq.get("swing", 0.0) * st_len) if k % 2 else 0     # swing: the off-16ths late
                     for ev in seq["by"].get(k % max(1, seq["len"]), ()):
                         if ev[3]:
                             ev[3] = False                  # just recorded live: it already sounded
                             continue
-                        self._chop_trigger(grp, ev[1], ev[2], when)
+                        self._chop_trigger(grp, ev[1], ev[2], when + sw)
                 if cs.get("click") and k % 4 == 0 and self.kit and self.kit.get("click"):
                     self._voice(self.kit["click"], 0.55 if k % 16 == 0 else 0.3, 0.0, when, "drum", srev=0, sdly=0,
                                 rel=int(0.01 * sr))
@@ -2661,6 +2730,8 @@ class Engine:
         frame = np.concatenate([self.drum_hist, dmix])
         self.drum_hist = frame[N:]
         pre = out + frame[:N]
+        if self.__dict__.get("_cm"):
+            pre = self._chop_master(pre, N, sr)
         if self.__dict__.get("_pk") is not None:
             pre = self._punch(pre, N, sr)
         out = np.tanh(pre * mv)
