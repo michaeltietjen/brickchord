@@ -3,7 +3,7 @@
 #   < ^ > v X A B            the seven chords of the key (I to VII): the voices glide into it
 #                            and hold it; the same chord again lets it fade
 #   L1 / R1 / L1+R1 / Y      with a chord: 7th / sus4 / 9th / flip major-minor (as in Brickchord)
-#   hold a chord + left stick  Scrub: the stick plays the glide to that chord, as far as you
+#   R2 + chord + left stick  Scrub: the stick plays the glide to that chord, as far as you
 #                            push it; hold halfway for an in-between chord; let go to finish
 #                            (or go back, or stay: Settings > Chords > Scrub release)
 #   R2 + left stick          the Move compass: hold a direction and press a chord
@@ -172,7 +172,7 @@ TUTORIAL = [
     ("Hold  L1  and press  X :  the fifth chord with a 7th", 4, lambda s: s.acur_deg == 4 and "seventh" in (s.acur_key or (0, ()))[1]),
     ("Hold  Y  and press  ^ :  Y flips major and minor", 1,
      lambda s: s.acur_deg == 1 and "flip" in (s.acur_key or (0, ()))[1]),
-    ("HOLD  X  and push the LEFT STICK slowly: you play the glide", 4,
+    ("Hold  R2 + X  and push the LEFT STICK slowly: you play the glide", 4,
      lambda s: s.atut_flags.get("scrub")),
     ("Press  R2 :  bloom, every voice from one note", None, lambda s: s.atut_flags.get("bloom")),
     ("Press  START :  everything stops", None, lambda s: not s.amb_sounding() and not s.aprog.get("run")),
@@ -532,6 +532,8 @@ class AmbientMixin:
                 self.ascrub = None
                 if sc["active"]:
                     self.amb_scrub_finish(sc)
+                elif sc.get("r2"):                       # R2 + chord without the stick: the Move, as before
+                    self.amb_play(sc["deg"], sc["mods"], True)
                 else:                                    # a tap: the chord plays as always
                     self.amb_play(sc["deg"], sc["mods"], False, toggle=True)
                 return True
@@ -551,11 +553,11 @@ class AmbientMixin:
                 return True
             if "R2" in self.inp.held:
                 self.r2_used = True
-                self.amb_press_chord(name, with_move=True)   # R2 + chord: travel there with the chosen Move
+                if getattr(self, "acompass", None) is None and self.amb_scrub_begin(name, via_r2=True):
+                    return True                          # R2 + chord, then the left stick: Scrub the glide
+                self.amb_press_chord(name, with_move=True)   # R2 + chord (or the compass): travel with a Move
                 return True
-            if self.amb_scrub_begin(name):
-                return True                              # held: the left stick steers the glide (Scrub)
-            self.amb_press_chord(name)
+            self.amb_press_chord(name)                   # a plain press; the left stick stays strum and arp
             return True
         if name == "START":
             if self.aprog.get("run") or any(self.av[i]["on"] for i in range(6)):
@@ -572,8 +574,10 @@ class AmbientMixin:
         return False
 
     def amb_stick(self, x, y):
-        if (edition.PLAY and "L2" not in self.inp.held and "R2" not in self.inp.held
-                and getattr(self, "ascrub", None) is None):
+        if getattr(self, "ascrub", None) is not None:
+            self.amb_scrub(x, y)                         # R2 + a held chord: the left stick plays the glide
+            return
+        if (edition.PLAY and "L2" not in self.inp.held and "R2" not in self.inp.held):
             # Brickglide Play: the left stick strums and arpeggiates whatever chord is
             # sounding, from the progression, the chord buttons or the Orchid
             self.amb_strum(x, y)
@@ -910,7 +914,7 @@ class AmbientMixin:
     # ------------------------------------------------------------ Scrub: play the glide yourself
     SCRUB_RELEASE = ["Complete", "Return", "Stay"]
 
-    def amb_scrub_begin(self, btn):
+    def amb_scrub_begin(self, btn, via_r2=False):
         """Pressing a chord while voices sound arms a scrub: nothing moves until the
         left stick does. A tap (no stick) plays the chord on release, as before."""
         mm = M()
@@ -928,7 +932,7 @@ class AmbientMixin:
         if self.av[5]["on"] and self.achord.get("sub"):
             tgt[5] = (min(to.values()) - 12) * 100.0
         self.ascrub = {"btn": btn, "deg": deg, "mods": held, "key": key, "label": label, "from": frm,
-                       "to": tgt, "notes": to, "p": 0.0, "active": False, "sent": None}
+                       "to": tgt, "notes": to, "p": 0.0, "active": False, "sent": None, "r2": via_r2}
         return True
 
     def amb_scrub(self, x, y):
