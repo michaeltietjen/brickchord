@@ -49,4 +49,5 @@ EOF
 build brickchord Brickchord.sh "" brickchord
 build bricklab Bricklab.sh lab bricklab
 build brickglide Brickglide.sh glide bricklab
+build brickchop Brickchop.sh chop bricklab
 rm -rf "$WHL"

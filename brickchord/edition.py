@@ -17,6 +17,8 @@ def _read():
     v = v.lower()
     global _RAW
     _RAW = v
+    if v.startswith("chop"):
+        return "chop"
     return "lab" if v.startswith("lab") else ("ambient" if v.startswith(("amb", "glide")) else "chord")
 
 
@@ -27,4 +29,5 @@ EDITION = _read()
 LAB = EDITION == "lab"
 AMBIENT = EDITION == "ambient"           # Brickglide: drones, long glides, chords, scenes
 PLAY = AMBIENT   # Brickglide plays melody over the progression, strums, arps, samples and MIDI (was the Play fork)
-NAME = "Bricklab" if LAB else ("Brickglide" if AMBIENT else "Brickchord")
+CHOP = EDITION == "chop"                 # Brickchop: a K.O. II-style sampler, chop and play on pads
+NAME = "Bricklab" if LAB else ("Brickglide" if AMBIENT else ("Brickchop" if CHOP else "Brickchord"))

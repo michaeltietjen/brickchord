@@ -16,6 +16,7 @@ import pygame
 import edition
 import host
 import ambient
+import chop
 import modes
 import song
 import synth
@@ -102,6 +103,8 @@ if edition.LAB:                           # Bricklab is teal, with orange as its
     ACCENT, ACCENT2 = (41, 174, 184), (255, 150, 80)
 elif edition.AMBIENT:                     # Brickambient is violet dusk, with pale gold
     ACCENT, ACCENT2 = (150, 130, 235), (240, 200, 120)
+elif edition.CHOP:                        # Brickchop is hot coral, with sodium yellow
+    ACCENT, ACCENT2 = (255, 96, 72), (255, 206, 84)
 MOD_ON = (255, 200, 90)
 
 
@@ -300,7 +303,7 @@ KEYMAP_SIG = {"k:" + v: v for v in KEYMAP.values()}
 
 
 # ------------------------------------------------------------------ app
-class App(ambient.AmbientMixin, modes.ModesMixin):
+class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
     def __init__(self, eng, cfg):
         self.cfg = cfg
         s = self.cfg["settings"]
@@ -425,6 +428,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         if edition.AMBIENT:
             self.amb_init()
             self.amb_fx_defaults()
+        if edition.CHOP:
+            self.chop_init()
         self.intro()
         self.midi_held, self.midi_due, self.midi_btn, self.midi_chord = set(), 0.0, None, None
         if not edition.AMBIENT:
@@ -537,7 +542,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         self.push_params()
 
     def queue_precache(self):
-        if edition.AMBIENT:
+        if edition.AMBIENT or edition.CHOP:
             return                      # Brickambient renders one note per voice, when a voice needs it
         o = 12 * self.octave
         notes = set()
@@ -856,6 +861,14 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         q = getattr(self, "_midi_q", None)
         if q is None:
             return
+        if edition.CHOP:
+            while q:
+                ev = q.popleft()
+                if ev[0] == "connect":
+                    self.flash("MIDI IN: %s" % ev[1].upper())
+                else:
+                    self.chop_midi(ev)
+            return
         while q:
             ev = q.popleft()
             if ev[0] == "connect":
@@ -942,6 +955,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     def save_cfg(self):
         if edition.AMBIENT and hasattr(self, "av"):
             self.cfg["amb"] = self.amb_state()
+        if edition.CHOP and hasattr(self, "cbanks"):
+            self.cfg["chop"] = self.chop_state()
         self.cfg["settings"] = dict(key=self.key, scale=self.scale, patch=self.patch, tone=self.tone, res=self.res,
                                     octave=self.octave, bpm=self.bpm, beat=self.beat, play=self.play,
                                     latch=self.latch, spread=self.spread, volume=self.volume,
@@ -1165,6 +1180,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     def menu_pages(self):
         if edition.AMBIENT:
             return self.amb_menu_pages()
+        if edition.CHOP:
+            return self.chop_menu_pages()
         if edition.LAB:
             return ["Songs", "Global", self.track_tab(), "FX"]
         return ["Global", "Chords", "FX"]
@@ -1174,6 +1191,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         im = self.imode
         if edition.AMBIENT:
             return "Melody" if self.asel >= 6 else "Voice"
+        if edition.CHOP:
+            return "Pads"
         if im == "Effects":
             return "FX"
         if edition.LAB:
@@ -1204,11 +1223,13 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
 
     def menu_items(self):
+        if edition.CHOP and self.menu_pg == "Pads":
+            return self.chop_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg == "FX":
             return self.amb_fx_items()
-        if edition.AMBIENT and self.menu_pg == "Global":
+        if (edition.AMBIENT or edition.CHOP) and self.menu_pg == "Global":
             rows = dict(self.all_menu_items())
             return [(n, rows[n]) for n in self.AMB_GLOBAL if n in rows]
         if edition.LAB and self.menu_pg in self.TRACK_TABS and self.menu_pg != "Drums":
@@ -1283,6 +1304,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
+        if edition.CHOP and self.menu_pg == "Pads":
+            self.chop_menu_change(self.menu_pg, name, d)
+            return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_change(self.menu_pg, name, d)
             return
@@ -1423,6 +1447,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
+        if edition.CHOP and self.menu_pg == "Pads":
+            self.chop_menu_activate(self.menu_pg, name)
+            return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_activate(self.menu_pg, name)
             return
@@ -1572,6 +1599,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             self.running = False
             return
         if edition.AMBIENT and not self.menu and not self.editor and self.amb_handle(name, down):
+            return
+        if edition.CHOP and not self.menu and not self.editor and self.chop_handle(name, down):
             return
         if getattr(self, "welcome", False):
             if down and name in ("A", "B", "START"):
@@ -1756,11 +1785,13 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             info = None
         else:
             self.text(c, edition.NAME.upper(), self.f_small, ACCENT, (62, 12))
-            chips_end = self.draw_mode_chip(c, 172, 9) if not edition.AMBIENT else 200
+            chips_end = self.draw_mode_chip(c, 172, 9) if not (edition.AMBIENT or edition.CHOP) else 200
             info = "%s %s  |  %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale,
                                                        self.bank[self.patch]["name"], self.mode(), self.bpm)
             if edition.AMBIENT:
                 info = self.amb_header_info()
+            if edition.CHOP:
+                info = self.chop_header_info()
         for alt in (() if info is None else
                     ("%s %s  |  %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bank[self.patch]["name"], self.bpm),
                      "%s %s  |  %d BPM" % (NOTE_NAMES[self.key], self.scale, self.bpm))):
@@ -1779,6 +1810,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
 
         if edition.AMBIENT:
             self.draw_ambient(c, now)
+        elif edition.CHOP:
+            self.draw_chop(c, now)
         elif self.imode in ("Song", "Effects"):
             self.draw_page(c)
         else:
@@ -1920,6 +1953,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             if r:
                 self.burst(kx + r.centerx, ky, ACCENT, 2, 60, up=330)
 
+        if edition.CHOP:
+            self.draw_chop_bar(c, now)                          # Brickchop: the 16 pads, not a keyboard
+
         # ---- status + beat steps
         status = []
         if self.drums_on:
@@ -1936,7 +1972,8 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         hint = (("buttons = melody   L-stick <> strum ^v arp   L1/R1 octave   R2+button chord   START stop"
                  if edition.PLAY and self.aprog.get("run") else
                  "chords <^>vXAB  L-stick strum/arp  R2+chord+L-stick scrub  L1 7th  R1 sus4  START play")
-                if edition.AMBIENT else None) or \
+                if edition.AMBIENT else ("pads <^v>YXBA   L1 pads 9-16   R1+pad bank   START whole sample   SELECT chop"
+                                         if edition.CHOP else None)) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
         flashing = bool(self.msg) and self.since(self.msg_t, 1.5) < 1
