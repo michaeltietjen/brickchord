@@ -50,6 +50,29 @@ def chop_files():
     return out
 
 
+def usb_capture_devices():
+    """Sound cards that can record (USB audio from an SP-1, an OP-Z, a mixer...),
+    from /proc/asound: [(card, device, name)]."""
+    out = []
+    try:
+        names = {}
+        with open("/proc/asound/cards") as f:
+            for line in f:
+                p = line.split("[", 1)
+                if len(p) == 2 and p[0].strip().isdigit():
+                    names[int(p[0].strip())] = p[1].split("]", 1)[1].split(" - ", 1)[-1].strip()
+        with open("/proc/asound/pcm") as f:
+            for line in f:
+                if "capture" not in line:
+                    continue
+                cd = line.split(":", 1)[0].strip()
+                card, dev = (int(v) for v in cd.split("-"))
+                out.append((card, dev, names.get(card, "card %d" % card)))
+    except Exception:
+        pass
+    return out
+
+
 def short_name(path):
     s = os.path.splitext(os.path.basename(path))[0].replace("_", " ")
     return (s[:26] + "\u2026") if len(s) > 27 else s
@@ -98,11 +121,72 @@ class ChopMixin:
         self.cslices = {}                                 # bank -> [(start, end) in samples]
         self.clit = {}                                    # pad -> time it was hit
         self.caudition = False
+        self.crec = None                                  # a recording in progress: {"until", "proc", "path"}
+        self.crec_secs = int(st.get("rec_secs", 4))
+        import shutil
+        caps = usb_capture_devices()
+        print("Brickchop: audio inputs %s, arecord %s" % (caps or "none", shutil.which("arecord") or "missing"),
+              flush=True)
         for b in range(4):
             self.chop_load(b, quiet=True)
 
     def chop_state(self):
-        return {"bank": self.cbank, "banks": self.cbanks}
+        return {"bank": self.cbank, "banks": self.cbanks, "rec_secs": self.crec_secs}
+
+    # ------------------------------------------------------------ sampling from USB audio
+    def chop_record(self):
+        """Record from a USB audio input (whatever the Brick sees as a capture card)
+        with arecord, into Brickchop's samples folder, then chop it onto the bank."""
+        import shutil
+        import subprocess
+        caps = usb_capture_devices()
+        if not caps:
+            self.flash("NO USB AUDIO INPUT FOUND   PLUG ONE IN, THEN TRY AGAIN")
+            print("Brickchop: record: no capture device", flush=True)
+            return
+        if not shutil.which("arecord"):
+            self.flash("THIS FIRMWARE HAS NO ARECORD")
+            print("Brickchop: record: arecord missing", flush=True)
+            return
+        card, dev, name = caps[-1]                        # the newest card: the one just plugged in
+        os.makedirs(synth.SAMPLE_DIR, exist_ok=True)
+        fn = "rec_%s.wav" % time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(synth.SAMPLE_DIR, fn)
+        cmd = ["arecord", "-D", "plughw:%d,%d" % (card, dev), "-f", "S16_LE", "-r", "44100", "-c", "2",
+               "-d", str(self.crec_secs), path]
+        print("Brickchop: record:", " ".join(cmd), flush=True)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        except Exception as ex:
+            self.flash("COULD NOT START RECORDING: %s" % ex)
+            return
+        self.crec = {"until": time.perf_counter() + self.crec_secs, "proc": proc, "path": path, "file": fn,
+                     "name": name, "bank": self.csel}
+        self.menu = False
+
+    def chop_tick(self, now):
+        r = self.crec
+        if r is None:
+            return
+        if r["proc"].poll() is None:
+            left = max(0, r["until"] - now)
+            self.flash("RECORDING FROM %s   %.0f s" % (r["name"].upper(), left + 0.4))
+            return
+        out = (r["proc"].stdout.read() or b"").decode("utf-8", "replace").strip()
+        if out:
+            print("Brickchop: arecord says:", out[-400:], flush=True)
+        self.crec = None
+        ok = os.path.exists(r["path"]) and os.path.getsize(r["path"]) > 4096
+        print("Brickchop: recorded %s: %s bytes" % (r["file"], os.path.getsize(r["path"]) if ok else 0), flush=True)
+        if not ok:
+            self.flash("NOTHING CAME IN   SEE THE LOG")
+            return
+        self.cfiles = chop_files()
+        b = r["bank"]
+        self.cbanks[b]["sample"] = r["file"]
+        self.cbank = b
+        self.chop_load(b)
+        self.flash("SAMPLED %s INTO BANK %s   %s" % (r["name"].upper(), BANKS[b], r["file"]))
 
     # ------------------------------------------------------------ cutting
     def chop_load(self, b, quiet=False):
@@ -211,7 +295,10 @@ class ChopMixin:
                 ("Level", "%d%%" % round(d.get("level", 0.9) * 100)),
                 ("Choke", "On" if d.get("choke", True) else "Off"),
                 ("Reverse", "On" if d.get("reverse") else "Off"),
-                ("Files", "%d samples found" % len(self.cfiles))]
+                ("Files", "%d samples found" % len(self.cfiles)),
+                ("Record", ("A records from %s" % usb_capture_devices()[-1][2]) if usb_capture_devices()
+                 else "no USB audio input"),
+                ("Record length", "%d s" % self.crec_secs)]
 
     def chop_menu_change(self, pg, name, d):
         bk = self.cbanks[self.csel]
@@ -236,12 +323,21 @@ class ChopMixin:
         elif name == "Files":
             self.cfiles = chop_files()
             return
+        elif name == "Record":
+            return
+        elif name == "Record length":
+            opts = [2, 4, 8, 12]
+            self.crec_secs = opts[(opts.index(self.crec_secs) + d) % len(opts) if self.crec_secs in opts else 1]
+            return
         self.chop_load(self.csel)
         if name == "Sample" and bk["sample"]:
             self.cbank = self.csel                        # hear what you just picked
             self.chop_hit(0)
 
     def chop_menu_activate(self, pg, name):
+        if name == "Record":
+            self.chop_record()
+            return
         if name == "Files":
             self.cfiles = chop_files()
             self.flash("%d SAMPLES FOUND" % len(self.cfiles))
