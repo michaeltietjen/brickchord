@@ -418,6 +418,84 @@ def demo_song():
             "fx": {"rev": 0.35, "dly": 0.25}}
 
 
+def demo_neon():
+    """The second demo: "Neon Drift", deep house in F minor at 122 BPM.
+    A: 909 kick on every beat, clap on 2 and 4, 808 open hat on the off-beats,
+       closed hats and a shaker in 16ths, a rim figure.
+    B: Pulse Bass in Keys, off-beat, Fm then Db then Eb then C.
+    C: Juno Pad chord stabs on the off-beats, Fm7 then Dbmaj7, short and wide.
+    D: Saw Pluck arpeggio in 16ths, then 1/16 triplets in bars 3 and 4, into the echo."""
+    g = default_groups()
+    for grp in g:
+        grp["pattern"] = {"bars": 2, "ev": []}
+    A, B, C, D = g
+    p = A["pads"]
+    # pads: 0 909 kick, 1 909 snare, 2 909 clap, 3 909 hat, 7 808 open hat, 9 rim, 11 shaker
+    p[0].update(level=0.85, fade=0.35, drive=0.1)
+    p[2].update(level=0.75, rev=0.7)
+    p[3].update(level=0.6, filter=0.35, pan=-0.2, length=0.5)
+    p[7].update(level=0.65, filter=0.25, pan=0.2, fade=0.5)
+    p[9].update(level=0.4, pan=0.35, dly=0.6)
+    p[11].update(level=0.32, filter=0.45, pan=-0.4)
+    ev = A["pattern"]["ev"]
+    for s in range(0, 32, 4):
+        ev.append([s, 0, 1.0])                                        # four on the floor
+    for s in (4, 12, 20, 28):
+        ev.append([s, 2, 0.95])                                       # clap on 2 and 4
+    for s in range(2, 32, 4):
+        ev.append([s, 7, 0.8])                                        # open hat on the off-beat
+    for s in range(0, 32):
+        if s % 4 != 2:
+            ev.append([s, 3, 0.7 if s % 2 else 0.45])                 # closed hats in 16ths
+    for s in range(1, 32, 2):
+        ev.append([s, 11, 0.5])
+    for s in (3, 6, 14, 19, 22, 25):
+        ev.append([s, 9, 0.6])                                        # rim figure
+    A["fx"] = {"swing": 0.08}
+    # B bass: Pulse Bass in Keys; +5 puts pad 1 on F. F=0 Ab=3 Bb=5 C=7 Db=8 Eb=10
+    B["keys"], B["keys_pad"] = True, 2
+    B["pads"][2].update(level=0.7, filter=-0.25, fade=0.6, length=0.35, rev=0.0, dly=0.0, choke=True)
+    B["fx"] = {"tune": 5, "swing": 0.08, "volume": 0.6}
+    for s, n, v in ((2, 0, 1.0), (6, 0, 0.8), (10, 0, 1.0), (13, 3, 0.6), (14, 0, 0.8),
+                    (18, 8, 1.0), (22, 8, 0.8), (26, 10, 1.0), (29, 7, 0.6), (30, 7, 0.8)):
+        B["pattern"]["ev"].append([s, n, v])
+    # C stabs: Juno Pad, short, in Keys
+    C["keys"], C["keys_pad"] = True, 2
+    C["pads"][2].update(level=0.8, length=0.3, fade=0.5, filter=-0.15, rev=0.9, dly=0.4, choke=False)
+    C["fx"] = {"tune": 5, "swing": 0.08, "volume": 0.8}
+    for s in (3, 11):
+        for n in (0, 3, 7, 10):                                       # Fm7: F Ab C Eb
+            C["pattern"]["ev"].append([s, n, 0.8])
+    for s in (19, 27):
+        for n in (0, 3, 7, 8):                                        # Dbmaj7: Db F Ab C
+            C["pattern"]["ev"].append([s, n, 0.8])
+    # D arp: Saw Pluck an octave up, four bars
+    D["keys"], D["keys_pad"] = True, 0
+    D["pads"][0] = {"src": ["keys", "Saw Pluck"], "tune": 12, "level": 0.45, "choke": False, "reverse": False,
+                    "filter": -0.3, "fade": 0.6, "rev": 0.6, "dly": 0.9, "pan": 0.15}
+    D["fx"] = {"tune": 5}
+    D["pattern"] = {"bars": 4, "ev": []}
+    arp1 = [7, 3, 0, 10]                                              # C Ab F Eb over Fm
+    arp2 = [7, 3, 0, 8]                                               # C Ab F Db over Db
+    for k in range(32):                                               # bars 1-2: 16ths
+        D["pattern"]["ev"].append([k, (arp1 if k < 16 else arp2)[k % 4], 0.8 if k % 4 == 0 else 0.55])
+    for k in range(48):                                               # bars 3-4: 1/16 triplets
+        s = round(32 + k * 2.0 / 3.0, 3)
+        D["pattern"]["ev"].append([s, (arp1 if s < 48 else arp2)[k % 3], 0.75 if k % 3 == 0 else 0.5])
+    state = {"v": 2, "group": 0, "last": 0, "groups": g, "rec_secs": 4, "chop_src": None, "bpm": 122,
+             "click": False, "quant": 0, "qstr": 1.0,
+             "master": {"comp": 0.5, "width": 1.4}}
+    return {"version": 1, "name": "Neon Drift (demo)", "key": 5, "scale": "Minor", "chop": state,
+            "fx": {"rev": 0.3, "dly": 0.3}}
+
+
+DEMOS = [("Night Bus", "lo-fi, A minor, 88 BPM", None), ("Neon Drift", "deep house, F minor, 122 BPM", None)]
+
+
+def demo_by_index(i):
+    return (demo_song, demo_neon)[i % 2]()
+
+
 class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
     # ------------------------------------------------------------ state
     def chop_init(self):
@@ -1025,7 +1103,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         self.save_cfg()
         self.menu = False
         if demo:
-            self.flash("NIGHT BUS   88 BPM   START PLAYS IT   SAVE IT TO A SLOT TO KEEP CHANGES")
+            self.flash("%s   %d BPM   START PLAYS IT   SAVE IT TO A SLOT TO KEEP CHANGES"
+                       % (s.get("name", "DEMO").replace(" (demo)", "").upper(), s["chop"]["bpm"]))
         else:
             self.flash("SONG %d   %s   START PLAYS IT" % (n, self.chop_song_summary(s)))
 
@@ -1074,7 +1153,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             rows = [("Song %d%s" % (n, "  *" if n == cur else ""), self.chop_song_summary(self.chop_song_read(n)))
                     for n in range(1, 9)]
             return rows + [("Save", "A saves to song %d" % cur), ("Load", "A loads song %d" % cur),
-                           ("Demo song", "A loads Night Bus, a lo-fi beat in A minor"),
+                           ("Demo song", "%s   %s   A loads" % DEMOS[getattr(self, "cdemo", 0) % len(DEMOS)][:2]),
                            ("Guided demo", "A starts it")]
         if pg == "Seq":
             pt = grp["pattern"]
@@ -1126,6 +1205,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         if pg == "Songs":
             if name.startswith("Song "):
                 self.csong = int(name.split()[1])
+            elif name == "Demo song":
+                self.cdemo = (getattr(self, "cdemo", 0) + d) % len(DEMOS)
             return
         if name == "Group":
             self.cedit_g = (g + d) % 4
@@ -1238,7 +1319,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             elif name == "Load":
                 self.chop_song_load(getattr(self, "csong", 1))
             elif name == "Demo song":
-                self.chop_song_load(getattr(self, "csong", 1), demo_song())
+                self.chop_song_load(getattr(self, "csong", 1), demo_by_index(getattr(self, "cdemo", 0)))
             elif name == "Guided demo":
                 self.menu = False
                 self.chop_tut_start()
