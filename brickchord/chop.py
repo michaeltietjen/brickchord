@@ -524,6 +524,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         if name == "SELECT":
             if down:
                 self.csel_down, self.csel_combo = True, False
+                self.cqe_t = time.perf_counter()
+                self.cqe_moved = False
             elif self.csel_down:
                 self.csel_down = False
                 if not self.csel_combo:
@@ -537,6 +539,13 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             if self.cr3_down:                                 # R3 held + a pad: erase it from the pattern
                 self.cr3_combo = True
                 self.chop_erase_pad(self.cgrp, i)
+                return True
+            if self.csel_down and name in ("L1", "R1", "L2", "R2"):
+                self.csel_combo = True                         # quick edit: L1/R1 step through pad, group, song
+                layers = self.QE_LAYERS
+                k = layers.index(self.__dict__.get("cqe_layer", "pad"))
+                self.cqe_layer = layers[(k + (1 if name in ("R1", "R2") else -1)) % len(layers)]
+                self.cqe_moved = True
                 return True
             if self.csel_down and name in ("LEFT", "UP", "DOWN", "RIGHT"):
                 self.csel_combo = True
@@ -584,10 +593,99 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.flash("PADS   12 SOUNDS AGAIN")
         self.chop_send_group(self.cgrp)
 
+    # ------------------------------------------------------------ quick edit and the fader
+    # Hold SELECT: a panel lists every effect of the last pad (or its group, or the
+    # song; L1/R1 switch). Left stick up/down picks one, left/right changes it, and you
+    # hear each step. Let go of SELECT and you're playing again. Without SELECT, the
+    # left stick is the fader: up/down changes the effect last picked for pads (Tune
+    # to start with), left/right the pad's level.
+    QE_LAYERS = ["pad", "group", "song"]
+
+    def qe_items(self, layer):
+        if layer == "pad":
+            return [("fx", s) for s in PAD_FX] + [("bool", ("reverse", "Reverse")), ("bool", ("choke", "Choke"))]
+        if layer == "group":
+            return [("fx", s) for s in GROUP_FX]
+        return [("fx", s) for s in MASTER_FX] + [("tempo", ("tempo", "Tempo"))]
+
+    def qe_target(self, layer):
+        grp = self.cgroups[self.cgrp]
+        if layer == "pad":
+            i = grp.get("keys_pad", 0) if grp.get("keys") else self.clast
+            return grp["pads"][i], i
+        if layer == "group":
+            return grp.setdefault("fx", {}), None
+        return self.cmaster, None
+
+    def qe_value(self, layer, item):
+        d, _ = self.qe_target(layer)
+        kind, spec = item
+        if kind == "fx":
+            return fx_fmt(fx_get(d, spec), spec[6])
+        if kind == "bool":
+            dflt = spec[0] == "choke"
+            return "On" if d.get(spec[0], dflt) else "Off"
+        return "%d BPM" % self.cbpm
+
+    def qe_change(self, layer, item, step):
+        """Change one effect by one step, send it, and let you hear it."""
+        g = self.cgrp
+        grp = self.cgroups[g]
+        d, i = self.qe_target(layer)
+        kind, spec = item
+        if layer == "pad" and not d.get("src"):
+            self.flash("HIT A PAD WITH A SOUND FIRST")
+            return
+        if kind == "fx":
+            fx_step(d, spec, step)
+        elif kind == "bool":
+            d[spec[0]] = not d.get(spec[0], spec[0] == "choke")
+        else:
+            self.cbpm = float(max(50, min(220, self.cbpm + step)))
+            if self.cplay:
+                self.chop_transport(False)
+                self.chop_transport(True)
+            return
+        key = spec[0]
+        if layer == "pad":
+            if key in ("rev", "dly", "choke"):
+                self.chop_send_meta(g)
+            else:
+                self.chop_send_pad(g, i)
+            if not grp.get("keys"):
+                self.chop_hit(i, 0.8)
+        elif layer == "group":
+            if key == "swing":
+                self.chop_send_seq(g)
+            elif key in ("rev", "dly"):
+                self.chop_send_meta(g)
+            else:
+                self.chop_send_group(g)
+                self.chop_hit(self.clast, 0.8)
+        else:
+            self.eng.post("chop_master", self.cmaster)
+
     def chop_stick(self, x, y):
-        """The fader: up/down tunes the last pad a semitone at a time (in KEYS, the
-        whole keyboard), left/right sets its level."""
         now = time.perf_counter()
+        if self.csel_down:                                     # quick edit
+            if max(abs(x), abs(y)) < 0.5:
+                self.cqe_nav_t = 0.0
+                return
+            self.csel_combo = True
+            self.cqe_moved = True
+            self.__dict__.setdefault("ctut_f", {})["qe"] = True
+            layer = self.__dict__.get("cqe_layer", "pad")
+            items = self.qe_items(layer)
+            idx = self.__dict__.setdefault("cqe_idx", {}).get(layer, 0) % len(items)
+            wait = 0.22 if not self.__dict__.get("cqe_nav_t") else 0.11
+            if now - self.__dict__.get("cqe_last", 0.0) < wait:
+                return
+            self.cqe_last, self.cqe_nav_t = now, now
+            if abs(y) >= abs(x):
+                self.cqe_idx[layer] = (idx + (-1 if y > 0 else 1)) % len(items)
+            else:
+                self.qe_change(layer, items[idx], 1 if x > 0 else -1)
+            return
         if max(abs(x), abs(y)) < 0.5 or now - self.cfade_t < 0.16:
             return
         self.cfade_t = now
@@ -596,18 +694,57 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         p = grp["pads"][i]
         if not p.get("src"):
             return
+        items = self.qe_items("pad")
         if abs(y) >= abs(x):
-            p["tune"] = int(max(-24, min(24, p.get("tune", 0) + (1 if y > 0 else -1))))
-            what = "TUNE %+d" % p["tune"]
+            item = items[self.__dict__.get("cqe_idx", {}).get("pad", 0) % len(items)]
         else:
-            p["level"] = round(max(0.05, min(1.6, p.get("level", 0.9) + (0.05 if x > 0 else -0.05))), 2)
-            what = "LEVEL %d%%" % round(p["level"] * 100)
-        self.chop_send_pad(self.cgrp, i)
+            item = ("fx", next(s for s in PAD_FX if s[0] == "level"))
+        self.qe_change("pad", item, 1 if (y if abs(y) >= abs(x) else x) > 0 else -1)
+        what = "%s %s" % (item[1][1].upper(), self.qe_value("pad", item))
         self.cfader = (now, what)
         self.__dict__.setdefault("ctut_f", {})["fader"] = True
         self.flash("PAD %d   %s" % (i + 1, what))
-        if not grp.get("keys"):
-            self.chop_hit(i, 0.8)
+
+    def draw_quick_edit(self, c, now):
+        """The quick-edit panel, while SELECT is held (after a moment, or once used)."""
+        if not self.csel_down or (now - self.__dict__.get("cqe_t", now) < 0.25 and not self.__dict__.get("cqe_moved")):
+            return
+        mm = M()
+        W, L = mm.BASE_W, mm.L
+        layer = self.__dict__.get("cqe_layer", "pad")
+        items = self.qe_items(layer)
+        idx = self.__dict__.setdefault("cqe_idx", {}).get(layer, 0) % len(items)
+        r = pygame.Rect(W - 300, 44, 284, L["kb_y"] - 50)
+        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.35), r, border_radius=12)
+        pygame.draw.rect(c, mm.ACCENT, r, 2, border_radius=12)
+        # the three layers as tabs
+        x = r.x + 12
+        _, pi = self.qe_target("pad")
+        names = {"pad": "PAD %d" % ((pi or 0) + 1), "group": "GROUP %s" % GROUPS[self.cgrp], "song": "SONG"}
+        for ly in self.QE_LAYERS:
+            on = ly == layer
+            t = names[ly]
+            w = self.f_small.size(t)[0] + 14
+            tr = pygame.Rect(x, r.y + 8, w, 22)
+            pygame.draw.rect(c, mm.ACCENT if on else self.mix(mm.BG, mm.PANEL, 0.9), tr, border_radius=6)
+            self.text(c, t, self.f_small, mm.BG if on else mm.DIM, tr.center, center=True)
+            x += w + 6
+        # the list, scrolled to keep the pick in view
+        rowh = 22
+        rows = (r.h - 70) // rowh
+        top = max(0, min(idx - rows // 2, len(items) - rows))
+        y = r.y + 38
+        for k in range(top, min(len(items), top + rows)):
+            item = items[k]
+            sel = k == idx
+            if sel:
+                pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT, 0.35), (r.x + 6, y - 1, r.w - 12, rowh), border_radius=5)
+            self.text(c, item[1][1], self.f_small, mm.INK if sel else mm.DIM, (r.x + 14, y + 2))
+            self.text(c, self.qe_value(layer, item), self.f_small, mm.ACCENT2 if sel else mm.INK, (r.right - 14, y + 2),
+                      right=True)
+            y += rowh
+        self.text(c, "stick ^v pick  <> change  L1/R1 layer", self.f_small, mm.DIM, (r.centerx, r.bottom - 22),
+                  center=True)
 
     # ------------------------------------------------------------ punch-in FX: the right stick
     PUNCH = [("stutter", "STUTTER"), ("repeat", "BEAT REPEAT"), ("filter", "FILTER SWEEP"), ("crush", "BITCRUSH"),
@@ -780,7 +917,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         ("Play a beat. It loops: add a little more each time round", lambda s: len(s.cgroups[0]["pattern"]["ev"]) >= 4),
         ("Click R3 again to stop recording. Your beat keeps playing", lambda s: not s.crec_on),
         ("Push the RIGHT STICK while it plays: punch-in FX, only while held", lambda s: s.ctut_f.get("punch")),
-        ("LEFT STICK up and down tunes the last pad. Try it", lambda s: s.ctut_f.get("fader")),
+        ("LEFT STICK is the fader: up and down tunes the last pad. Try it", lambda s: s.ctut_f.get("fader")),
+        ("Hold SELECT: every effect. Stick ^v picks, <> changes, L1/R1 pad/group/song",
+         lambda s: s.ctut_f.get("qe") and not s.csel_down),
         ("Done! SELECT > Seq > Commit records it all into a new sound. START stops", lambda s: not s.cplay),
     ]
 
@@ -1123,8 +1262,11 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         else:
             return_early = False
         hot = self.cfader and now - self.cfader[0] < 1.0
-        if not return_early:
-            self.text(c, "tune %+d" % p.get("tune", 0), self.f_med, mm.ACCENT2 if hot else mm.INK, (px + 14, gy + 150))
+        items = self.qe_items("pad")
+        fitem = items[self.__dict__.get("cqe_idx", {}).get("pad", 0) % len(items)]
+        if not return_early:                                   # the fader: what up/down changes now
+            self.text(c, fitem[1][1].lower(), self.f_small, mm.DIM, (px + 14, gy + 132))
+            self.text(c, self.qe_value("pad", fitem), self.f_med, mm.ACCENT2 if hot else mm.INK, (px + 14, gy + 150))
         self.text(c, "level %d%%" % round(p.get("level", 0.9) * 100), self.f_small, mm.DIM, (px + 14, gy + 186))
         # the last pad's sound, wide, under the grid
         wx0, wx1, wy0 = 20, W - 20, gy + ph + 12
@@ -1198,6 +1340,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             lv = max(0.0, 1.0 - (now - hit) / 0.25)
             pygame.draw.circle(c, self.mix(mm.BG if on else mm.DIM, mm.ACCENT2, lv), (r.right - 14, r.centery), 5)
             x += 150
+        self.draw_quick_edit(c, now)
 
 
 # ---------------------------------------------------------------- the intro film

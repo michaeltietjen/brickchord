@@ -1989,7 +1989,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         hint = (("buttons = melody   L-stick <> strum ^v arp   L1/R1 octave   R2+button chord   START stop"
                  if edition.PLAY and self.aprog.get("run") else
                  "chords <^>vXAB  L-stick strum/arp  R2+chord+L-stick scrub  L1 7th  R1 sus4  START play")
-                if edition.AMBIENT else ("START play  R3 rec  SELECT+<^v> group  L3 keys  L-stick tune/level  R-stick punch-in"
+                if edition.AMBIENT else ("hold SELECT: edit   SELECT+<^v> group   START play   R3 rec   L3 keys   R-stick punch-in"
                                          if edition.CHOP else None)) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")
