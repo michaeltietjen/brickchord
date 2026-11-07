@@ -1920,48 +1920,142 @@ class Engine:
                         "chime", srev=1.0, sdly=0.6, rel=int(0.05 * sr))
 
     # strum and arp instruments: (frequency ratio, level, decay per second) per partial
-    PLUCKS = [
-        ("Harp", [(1, 1.0, 1.6), (2, 0.45, 3.2), (3, 0.18, 5.5), (4.02, 0.08, 9.0)], 0.25),
-        ("Kalimba", [(1, 1.0, 3.0), (5.9, 0.35, 18.0), (10.2, 0.1, 40.0)], 0.5),
-        ("Bell", [(1, 1.0, 1.2), (2.76, 0.5, 2.0), (5.4, 0.3, 3.5), (8.93, 0.12, 6.0)], 0.15),
-        ("Marimba", [(1, 1.0, 4.5), (3.9, 0.45, 12.0), (10.0, 0.12, 30.0)], 0.35),
-        ("Glass", [(1, 1.0, 0.9), (3.0, 0.25, 1.8), (5.0, 0.08, 3.0)], 0.05),
-        ("Music Box", [(2, 1.0, 2.2), (6.0, 0.4, 5.0), (12.4, 0.15, 9.0)], 0.2),
-        ("Pluck Synth", [(k, 1.0 / k, 2.0 + 1.3 * k) for k in range(1, 11)], 0.1),
-        ("Nylon", [(1, 1.0, 1.9), (2, 0.6, 2.6), (3, 0.35, 3.6), (4, 0.2, 5.0), (5, 0.1, 6.5)], 0.4),
-    ]
+    # The strum and arp instruments. Each is a recipe of partials (frequency ratio,
+    # level, decay per second, onset delay, swell time) plus touches: a pitch drop at
+    # the attack (koto, steel pan), wow and flutter (tape), detuned twins (glass,
+    # shimmer), a breath of noise for the pluck or mallet. Plucked strings use a
+    # string model: harmonics shaped by where the string is plucked, the high ones
+    # dying faster, which is what makes a harp or a guitar sound like one.
+    PLUCKS = ["Harp", "Nylon", "Koto", "Kalimba", "Celesta", "Steel Pan", "Bell", "Glass Harp",
+              "Marimba", "Music Box", "Shimmer Harp", "Tape Harp", "Sparkle", "Analog Pluck"]
+
+    @staticmethod
+    def _pluck_recipe(inst, f):
+        """-> (partials, options). partials: (ratio, level, decay, delay, swell, detune Hz)."""
+        def string(pos, n, d0, dk, tilt=1.0):
+            out = []
+            for k in range(1, n + 1):
+                a = abs(math.sin(math.pi * k * pos)) / k ** tilt
+                if a > 0.004:
+                    out.append((k, a, d0 * (1 + dk * (k - 1) ** 1.6) * (f / 260.0) ** 0.35, 0, 0, 0))
+            return out
+        name = Engine.PLUCKS[inst % len(Engine.PLUCKS)]
+        o = {"len": 2.2, "noise": 0.0, "ncut": 0.5, "drop": 0.0, "dtau": 0.05, "wow": 0.0, "att": 0.002}
+        if name == "Harp":
+            p = string(0.21, 12, 1.1, 0.22, 0.95)
+            o.update(noise=0.05, ncut=0.25)
+        elif name == "Nylon":
+            p = string(0.14, 14, 1.4, 0.35, 1.05)
+            p += [(1.003, 0.25, 1.6, 0, 0, 0)]                # a second string a hair sharp: body
+            o.update(noise=0.08, ncut=0.12, len=2.0)
+        elif name == "Koto":
+            p = string(0.07, 14, 1.9, 0.18, 0.85)
+            o.update(noise=0.12, ncut=0.5, drop=38.0, dtau=0.045, len=1.8)
+        elif name == "Kalimba":
+            p = [(1, 1.0, 2.0, 0, 0, 0), (1, 0.5, 2.1, 0, 0, 0.7), (5.95, 0.32, 13.0, 0, 0, 0),
+                 (10.9, 0.12, 28.0, 0, 0, 0), (2.0, 0.06, 6.0, 0, 0, 0)]
+            o.update(noise=0.22, ncut=0.08, len=2.0)
+        elif name == "Celesta":
+            p = [(1, 1.0, 1.4, 0, 0, 0), (4.0, 0.38, 5.5, 0, 0, 0), (8.12, 0.14, 11.0, 0, 0, 0),
+                 (2.0, 0.16, 2.8, 0, 0, 0), (12.3, 0.05, 18.0, 0, 0, 0)]
+            o.update(noise=0.05, ncut=0.6, len=2.4)
+        elif name == "Steel Pan":
+            p = [(1, 1.0, 1.25, 0, 0, 0), (2, 0.75, 1.9, 0, 0, 0), (3, 0.4, 3.0, 0, 0, 0),
+                 (4.02, 0.2, 4.6, 0, 0, 0), (2.0, 0.3, 1.3, 0, 0.03, 1.1)]
+            o.update(noise=0.06, ncut=0.4, drop=-14.0, dtau=0.03, len=2.4)
+        elif name == "Bell":
+            p = [(1, 1.0, 0.7, 0, 0, 0), (2.756, 0.62, 0.95, 0, 0, 0), (5.404, 0.42, 1.5, 0, 0, 0),
+                 (8.933, 0.26, 2.3, 0, 0, 0), (13.34, 0.12, 3.6, 0, 0, 0), (0.5, 0.14, 0.45, 0, 0, 0),
+                 (2.756, 0.3, 0.95, 0, 0, 0.9)]
+            o.update(noise=0.03, ncut=0.7, len=3.2)
+        elif name == "Glass Harp":
+            p = [(1, 1.0, 0.55, 0, 0.012, 0), (1, 0.85, 0.55, 0, 0.012, 1.3), (3.0, 0.18, 1.1, 0, 0.02, 0),
+                 (5.0, 0.06, 1.8, 0, 0.02, 0.6)]
+            o.update(len=3.2, att=0.012)
+        elif name == "Marimba":
+            p = [(1, 1.3, 2.6, 0, 0, 0), (3.93, 0.42, 8.5, 0, 0, 0), (9.24, 0.12, 21.0, 0, 0, 0),
+                 (1.0, 0.25, 1.4, 0, 0.02, 0.4)]               # the resonator tube ringing on
+            o.update(noise=0.18, ncut=0.15, len=2.0)
+        elif name == "Music Box":
+            p = [(1, 1.0, 1.7, 0, 0, 0), (1, 0.6, 1.8, 0, 0, 2.2), (2.98, 0.28, 4.6, 0, 0, 0),
+                 (5.95, 0.12, 8.5, 0, 0, 0), (9.9, 0.05, 14.0, 0, 0, 0)]
+            o.update(noise=0.07, ncut=0.9, len=2.4)
+        elif name == "Shimmer Harp":
+            p = string(0.21, 10, 1.0, 0.22, 0.95)
+            p += [(2, 0.32, 0.55, 0.06, 0.35, 0.8), (2, 0.28, 0.55, 0.06, 0.35, -0.8),
+                  (3, 0.16, 0.7, 0.12, 0.45, 0.5), (4, 0.1, 0.8, 0.18, 0.5, -0.5)]   # it blooms upward
+            o.update(noise=0.04, ncut=0.25, len=3.2)
+        elif name == "Tape Harp":
+            p = string(0.23, 8, 1.3, 0.45, 1.1)
+            o.update(noise=0.04, ncut=0.1, wow=1.0, len=2.4)
+        elif name == "Sparkle":
+            rng = np.random.RandomState(int(f * 10) % 9973)
+            p = [(1, 0.7, 2.2, 0, 0, 0)]
+            for _ in range(9):                                 # glints: high partials that start a little late
+                r = float(rng.choice([2, 3, 4, 5, 6, 8]))
+                p.append((r, float(rng.uniform(0.08, 0.3)), float(rng.uniform(5, 12)),
+                          float(rng.uniform(0.0, 0.18)), 0.004, float(rng.uniform(-2, 2))))
+            o.update(noise=0.02, ncut=0.9, len=2.0)
+        else:                                                  # Analog Pluck: a saw through a closing filter
+            p = [(k, 1.0 / k, 2.2 * (1 + 0.55 * (k - 1) ** 1.35), 0, 0, 0) for k in range(1, 17)]
+            o.update(len=1.6)
+        return p, o
+
+    def _pluck_job(self, inst, midi):
+        """Build one strum note a partial at a time (a generator), so the work is
+        spread over several audio blocks and never stalls the sound."""
+        sr = self.sr
+        f = 440.0 * 2 ** ((midi - 69) / 12.0)
+        parts, o = self._pluck_recipe(inst, f)
+        n = int(o["len"] * sr)
+        t = (np.arange(n) / sr).astype(np.float32)
+        cents = np.zeros(n, np.float32)
+        if o["drop"]:
+            cents += (o["drop"] * np.exp(-t / o["dtau"])).astype(np.float32)
+        if o["wow"]:
+            cents += (11.0 * np.sin(2 * np.pi * 0.55 * t) + 3.0 * np.sin(2 * np.pi * 6.7 * t + 1.0)).astype(np.float32)
+        if o["drop"] or o["wow"]:
+            ph = (2 * np.pi * f / sr) * np.cumsum(2 ** (cents / 1200.0)).astype(np.float32)
+        else:
+            ph = (2 * np.pi * f) * t
+        x = np.zeros(n, np.float32)
+        yield
+        nyq = 0.45 * sr
+        for ratio, lv, dk, delay, swell, det in parts:
+            if f * ratio >= nyq:
+                continue
+            tt = np.maximum(0.0, t - delay) if delay else t
+            env = np.exp(-tt * dk).astype(np.float32)
+            if swell:
+                env *= np.minimum(1.0, tt / swell).astype(np.float32)
+            if delay:
+                env *= (t >= delay)
+            y = np.sin(ratio * ph + (2 * np.pi * det) * t if det else ratio * ph).astype(np.float32)
+            x += y * (lv * env)
+            yield
+        if o["noise"]:
+            k = int(0.02 * sr)
+            nz = np.random.RandomState(int(midi) + 31 * inst).uniform(-1, 1, k).astype(np.float32)
+            c = o["ncut"]
+            for i in range(1, k):
+                nz[i] = nz[i - 1] + c * (nz[i] - nz[i - 1])    # colour the pluck or mallet noise
+            x[:k] += nz * o["noise"] * np.linspace(1, 0, k, dtype=np.float32) ** 2
+        x *= np.minimum(1.0, t / o["att"]).astype(np.float32)
+        tail = int(0.05 * sr)
+        x[-tail:] *= np.linspace(1, 0, tail, dtype=np.float32)
+        x *= 0.17 / (float(np.abs(x).max()) + 1e-6) * min(1.0, (220.0 / f) ** 0.25 + 0.35)
+        self.__dict__.setdefault("_pluck_cache", {})[(inst, midi)] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
 
     def _pluck_wave(self, midi, inst=0):
-        """The harp note for midi, built once and kept: building it while you strum
-        cost a block of audio per note on the Brick, which stuttered."""
+        """The strum note, from the cache; if it has not been built yet, it is built
+        now in one go (only the very first notes after a change of instrument)."""
         inst = int(inst) % len(self.PLUCKS)
         cache = self.__dict__.setdefault("_pluck_cache", {})
         w = cache.get((inst, midi))
-        if w is not None:
-            return w
-        sr = self.sr
-        env = self.__dict__.get("_pluck_env")
-        if env is None:
-            n = int(1.8 * sr)
-            t = (np.arange(n) / sr).astype(np.float32)
-            env = self._pluck_env = (t, {}, np.minimum(1.0, t / 0.002).astype(np.float32))
-        t, decays, att = env
-        _, parts, noise = self.PLUCKS[inst]
-        ph = (2 * np.pi * 440.0 * 2 ** ((midi - 69) / 12.0)) * t
-        x = np.zeros_like(t)
-        nyq = 0.45 * sr
-        for ratio, lv, dk in parts:
-            if 440.0 * 2 ** ((midi - 69) / 12.0) * ratio >= nyq:
-                continue
-            e = decays.get(dk)
-            if e is None:
-                e = decays[dk] = np.exp(-t * dk).astype(np.float32)
-            x += np.sin(ratio * ph).astype(np.float32) * (lv * e)
-        k = int(0.012 * sr)
-        x[:k] += (np.random.RandomState(int(midi)).uniform(-noise, noise, k).astype(np.float32)
-                  * np.linspace(1, 0, k, dtype=np.float32))
-        x = (x * att * 0.16).astype(np.float32)
-        w = cache[(inst, midi)] = np.ascontiguousarray(np.repeat(x[:, None], 2, 1))
+        if w is None:
+            for _ in self._pluck_job(inst, midi):
+                pass
+            w = cache[(inst, midi)]
         return w
 
     def c_pluckfx(self, rev, dly):
@@ -1973,8 +2067,12 @@ class Engine:
         is as smooth as the rest."""
         todo = self.__dict__.setdefault("_pluck_todo", [])
         cache = self.__dict__.setdefault("_pluck_cache", {})
+        inst = int(inst) % len(self.PLUCKS)
+        for key in [k for k in cache if k[0] != inst]:
+            del cache[key]                                    # only the instrument in use is kept
+        todo[:] = [k for k in todo if k[0] == inst]
         for m in midis:
-            key = (int(inst) % len(self.PLUCKS), int(m))
+            key = (inst, int(m))
             if key not in cache and key not in todo:
                 todo.append(key)
 
@@ -2145,9 +2243,22 @@ class Engine:
         t0 = time.perf_counter()
         N, t, sr = self.N, self.t, self.sr
         todo = self.__dict__.get("_pluck_todo")
-        if todo:
-            inst_, m_ = todo.pop(0)
-            self._pluck_wave(m_, inst_)                   # one strum note built ahead per block
+        if todo or self.__dict__.get("_pluck_gen") is not None:
+            # strum notes are built ahead a few partials per block, within ~3 ms
+            t_end = t0 + 0.003
+            while time.perf_counter() < t_end:
+                gen = self.__dict__.get("_pluck_gen")
+                if gen is None:
+                    if not todo:
+                        break
+                    key = todo.pop(0)
+                    if key in self.__dict__.setdefault("_pluck_cache", {}):
+                        continue
+                    gen = self._pluck_gen = self._pluck_job(*key)
+                try:
+                    next(gen)
+                except StopIteration:
+                    self._pluck_gen = None
         while self.cmds:
             name, args = self.cmds.popleft()
             try:

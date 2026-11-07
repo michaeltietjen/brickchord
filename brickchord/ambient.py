@@ -1549,7 +1549,7 @@ class AmbientMixin:
             rows = []
             if edition.PLAY:
                 sa = self.astrum
-                rows += [("Strum sound", engine.Engine.PLUCKS[sa["inst"] % len(engine.Engine.PLUCKS)][0]),
+                rows += [("Strum sound", engine.Engine.PLUCKS[sa["inst"] % len(engine.Engine.PLUCKS)]),
                          ("Strum level", "%d%%" % round(sa["level"] * 100)),
                          ("Arp pattern", self.ARP_STYLES[sa["style"] % len(self.ARP_STYLES)]),
                          ("Strum range", "%d octave%s" % (sa["range"], "" if sa["range"] == 1 else "s")),
