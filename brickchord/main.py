@@ -303,7 +303,7 @@ KEYMAP_SIG = {"k:" + v: v for v in KEYMAP.values()}
 
 
 # ------------------------------------------------------------------ app
-class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
+class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.ModesMixin):
     def __init__(self, eng, cfg):
         self.cfg = cfg
         s = self.cfg["settings"]
@@ -733,12 +733,19 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
             secs = self.INTRO_SECS
             struck = True                     # no chime: the bloom is the sound
             self.amb_intro_start()
+        if edition.CHOP:
+            # Brickchop's film: a loop chopped onto the pads, a stutter, a tape stop, the drop
+            secs = chop.INTRO_SECS
+            struck = True
+            self.chop_intro_start()
         while True:
             t = time.perf_counter() - self.t0
             if hasattr(self.eng, "pump"):
                 self.eng.pump()          # keep draining the audio process, or the pipes wedge
             if edition.AMBIENT:
                 self.amb_intro_tick(t)
+            if edition.CHOP:
+                self.chop_intro_tick(t)
             if edition.LAB:
                 while hits and t >= hits[0][0]:
                     _, part = hits.pop(0)
@@ -752,11 +759,15 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
             if t >= secs:
                 if edition.AMBIENT and not getattr(self, "_intro_done", False):
                     self.amb_intro_end()
+                if edition.CHOP:
+                    self.chop_intro_end()
                 return
             for ev in pygame.event.get():
                 if ev.type in (pygame.KEYDOWN, pygame.JOYBUTTONDOWN):
                     if edition.AMBIENT:
                         self.amb_intro_end()
+                    elif edition.CHOP:
+                        self.chop_intro_end()
                     elif not struck:
                         self.chime()
                     return
@@ -769,6 +780,8 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
             c.fill(BG)
             if edition.AMBIENT:
                 self.draw_amb_intro(c, t)
+            elif edition.CHOP:
+                self.draw_chop_intro(c, t)
             elif edition.LAB:
                 self.draw_mark(c, BASE_W // 2, 96 + L["dy"], 27, t)
                 self.draw_title(c, 196 + L["dy"], t)

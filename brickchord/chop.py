@@ -215,7 +215,7 @@ def default_groups():
             {"pads": c, "keys": True, "keys_pad": 0}, {"pads": d, "keys": False}]
 
 
-class ChopMixin:
+class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
     # ------------------------------------------------------------ state
     def chop_init(self):
         st = self.cfg.get("chop") or {}
@@ -867,3 +867,168 @@ class ChopMixin:
             lv = max(0.0, 1.0 - (now - hit) / 0.25)
             pygame.draw.circle(c, self.mix(mm.BG if on else mm.DIM, mm.ACCENT2, lv), (r.right - 14, r.centery), 5)
             x += 150
+
+
+# ---------------------------------------------------------------- the intro film
+# A loop runs in like tape, a beat plays and each hit chops a slice off the loop and
+# throws it onto one of the 12 pads; a stutter, a tape stop, a breath, and the name
+# lands on the downbeat. About five seconds; any button skips it.
+INTRO_BPM = 128.0
+INTRO_STEP = 60.0 / INTRO_BPM / 4
+INTRO_T0 = 0.45
+# step: (parts...)    one bar of beat, then the stutter, the tape stop, the drop
+INTRO_BEAT = {0: ("kick", "hat"), 2: ("hat",), 3: ("kick",), 4: ("snare", "hat"), 6: ("hat",), 7: ("kick",),
+              8: ("kick", "hat"), 10: ("ohat",), 11: ("kick",), 12: ("snare", "clap"), 14: ("hat",), 15: ("rim",),
+              16: ("kick", "snare"), 20: ("snare", "kick"), 21: ("hat",), 22: ("snare",), 23: ("hat",), 24: ("kick",)}
+INTRO_DROP = 28
+INTRO_SECS = INTRO_T0 + INTRO_DROP * INTRO_STEP + 1.55
+
+
+def _intro_wave(n=240):
+    rng = np.random.RandomState(7)
+    env = np.zeros(n)
+    for s in range(16):
+        k = int(s * n / 16)
+        strength = 1.0 if s in (0, 3, 7, 8, 11) else (0.85 if s in (4, 12) else 0.45)
+        L = n // 16
+        env[k:k + L] = np.maximum(env[k:k + L], strength * np.exp(-np.arange(min(L, n - k)) / (L * 0.35)))
+    return env * (0.7 + 0.3 * rng.rand(n))
+
+
+class ChopIntroMixin:
+    def chop_intro_start(self):
+        self.ci_hits = sorted((INTRO_T0 + s * INTRO_STEP, s, parts) for s, parts in INTRO_BEAT.items())
+        self.ci_fired = set()
+        self.ci_wave = _intro_wave()
+        self.ci_slices = []                                   # (time, slice index, pad index)
+        self.ci_punch = None
+        self.ci_dropped = False
+
+    def chop_intro_tick(self, t):
+        while self.ci_hits and t >= self.ci_hits[0][0]:
+            _, s, parts = self.ci_hits.pop(0)
+            for p in parts:
+                self.eng.post("hit", p, 0.95 if p in ("kick", "snare", "clap") else 0.55)
+            if s < 16 and len(self.ci_slices) < 12:
+                self.ci_slices.append((t, s, len(self.ci_slices)))
+        st = (t - INTRO_T0) / INTRO_STEP
+        want = None
+        if 16 <= st < 20:
+            want = ("stutter", 0.95)
+        elif 20 <= st < 26:
+            want = ("tapestop", 0.45)
+        if want != self.ci_punch:
+            self.ci_punch = want
+            self.eng.post("punch", *(want or (None, 0.0)))
+        if not self.ci_dropped and st >= INTRO_DROP:
+            self.ci_dropped = True
+            self.eng.post("hit", "kick", 1.0)
+            self.eng.post("hit", "clap", 0.9)
+            self.chime()
+
+    def chop_intro_end(self):
+        if getattr(self, "ci_punch", None):
+            self.eng.post("punch", None, 0.0)
+        self.ci_punch = None
+        self._intro_done = True
+
+    def draw_chop_intro(self, c, t):
+        mm = M()
+        W, H = mm.BASE_W, mm.BASE_H
+        dy = mm.L["dy"]
+        st = (t - INTRO_T0) / INTRO_STEP
+        rng = np.random.RandomState(int(t * 60))
+        # the stutter shakes; the tape stop sinks and fades
+        shake = (rng.randint(-5, 6), rng.randint(-4, 5)) if 16 <= st < 20 else (0, 0)
+        sink = 0.0
+        if 20 <= st < INTRO_DROP:
+            k = min(1.0, (st - 20) / 6.0)
+            sink = k * k
+        fade = 1.0 - 0.85 * sink
+        # the loop, running in from the left like tape, then losing its slices
+        wave = self.ci_wave
+        n = len(wave)
+        wx0, wx1, wy = 20, W - 20, 104 + dy + int(sink * 60)
+        reveal = min(1.0, t / INTRO_T0)
+        cut = {s for (_, s, _) in self.ci_slices}
+        col = self.mix(mm.BG, mm.INK, fade)
+        stretch = 1.0 + 0.35 * sink
+        for k in range(int(n * reveal)):
+            s = int(k * 16 / n)
+            if s in cut:
+                continue
+            x = wx0 + int((wx1 - wx0) * k / n * stretch) + shake[0]
+            if x > wx1:
+                break
+            h = int(wave[k] * 52 * (1 - 0.6 * sink))
+            pygame.draw.line(c, col, (x, wy - h + shake[1]), (x, wy + h + shake[1]), 2)
+        # the knife: a flash at each fresh cut
+        for (ts, s, pi) in self.ci_slices:
+            age = t - ts
+            if age < 0.12:
+                x = wx0 + int((wx1 - wx0) * s / 16) + shake[0]
+                a = 1 - age / 0.12
+                pygame.draw.line(c, self.mix(mm.BG, (255, 255, 255), a), (x, wy - 70), (x, wy + 70), 3)
+        # the 12 pads: each slice flies down into the next pad
+        tw, th, gap = 92, 46, 8
+        gx = (W - (4 * tw + 3 * gap)) // 2
+        gy = 210 + dy + int(sink * 110)
+        for i in range(12):
+            r = pygame.Rect(gx + (i % 4) * (tw + gap) + shake[0], gy + (i // 4) * (th + gap) + shake[1], tw, th)
+            filled = next(((ts, s) for (ts, s, pi) in self.ci_slices if pi == i), None)
+            appear = min(1.0, max(0.0, (t - 0.15) / 0.3))
+            base = self.mix(mm.BG, mm.PANEL, appear * fade)
+            pygame.draw.rect(c, base, r, border_radius=9)
+            if filled is None:
+                continue
+            ts, s = filled
+            age = t - ts
+            fly = min(1.0, age / 0.16)
+            fe = 1 - (1 - fly) ** 3
+            # the slice travels from its place in the loop to the pad
+            sx0 = wx0 + (wx1 - wx0) * s / 16
+            sw0 = (wx1 - wx0) / 16
+            x = sx0 + (r.x + 8 - sx0) * fe
+            y = (wy - 30) + (r.y + 6 - (wy - 30)) * fe
+            wdt = sw0 + (tw - 16 - sw0) * fe
+            lit = max(0.0, 1 - age / 0.3)
+            strobe = 16 <= st < 20 and (int(t * 30) + i) % 2 == 0
+            if fly >= 1:
+                pygame.draw.rect(c, self.mix(self.mix(mm.PANEL, mm.ACCENT, lit if not strobe else 1.0), mm.BG,
+                                              1 - fade), r, border_radius=9)
+            k0 = int(s * n / 16)
+            seg = wave[k0:k0 + n // 16]
+            for j, v in enumerate(seg):
+                xx = int(x + wdt * j / max(1, len(seg)))
+                hh = int(v * (th / 2 - 8 if fly >= 1 else 30))
+                cy = int(y + (th / 2 - 6) * fe + 30 * (1 - fe))
+                pygame.draw.line(c, self.mix(mm.BG, mm.ACCENT2 if fly >= 1 else mm.INK, fade),
+                                 (xx, cy - hh), (xx, cy + hh), 2)
+            self.text(c, str(i + 1), self.f_small, self.mix(mm.BG, mm.ACCENT2, fade * (0.5 + 0.5 * fe)),
+                      (r.x + 6, r.y + 3))
+        # the drop: a flash, then the name, letter by letter, like pad hits
+        td = t - (INTRO_T0 + INTRO_DROP * INTRO_STEP)
+        if td >= 0:
+            c.fill(mm.BG)
+            if td < 0.14:
+                flash = pygame.Surface((W, H), pygame.SRCALPHA)
+                flash.fill((255, 255, 255, int(200 * (1 - td / 0.14))))
+                c.blit(flash, (0, 0))
+            bounce = int(10 * math.exp(-td * 9) * math.cos(td * 30))
+            self.draw_mark(c, W // 2, 118 + dy - bounce, 30, 2.0)
+            word = "brickchop"
+            nlet = max(0, min(len(word), int(td / 0.035) + 1))
+            surf = self.f_huge.render(word, True, mm.INK)
+            x0 = W // 2 - surf.get_width() // 2
+            x = x0
+            for k, ch in enumerate(word):
+                g = self.f_huge.render(ch, True, mm.ACCENT if ch in "chop" and k >= 5 else mm.INK)
+                if k < nlet:
+                    age = td - k * 0.035
+                    yo = int(-18 * math.exp(-max(0.0, age) * 14))
+                    c.blit(g, (x, 214 + dy + yo - g.get_height() // 2))
+                x += g.get_width()
+            if td > 0.5:
+                a = min(1.0, (td - 0.5) / 0.35)
+                self.text(c, "chop.   play.   punch.", self.f_med, self.mix(mm.BG, mm.ACCENT2, a),
+                          (W // 2, 290 + dy), center=True)
