@@ -274,6 +274,8 @@ class ChopMixin:
             return True
         if name in ("L1", "R1"):
             return True                                   # held as page and bank shifts
+        if name == "L3":
+            return True                                   # no mode wheel here: Brickchop is all pads
         return False
 
     def chop_midi(self, ev):

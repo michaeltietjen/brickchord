@@ -1087,7 +1087,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
                 self.text(c, steps[i][2], self.f_huge, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
                 if steps[i][0] not in ("R3", "L3"):
                     self.text(c, "then let it go back to center", self.f_small, DIM, (BASE_W // 2, 320 + L["dy"]), center=True)
-            if only == ("L3",):
+            if only == ("L3",) and not edition.CHOP:
                 self.text(c, "New: click the left stick for the mode wheel (Play, Lead, Drone...)",
                           self.f_small, ACCENT2, (BASE_W // 2, 385 + L["dy"]), center=True)
             elif only:
