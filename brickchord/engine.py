@@ -2150,15 +2150,17 @@ class Engine:
         cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
         by = {}
         for ev in events:
-            by.setdefault(int(ev[0]), []).append([int(ev[0]), int(ev[1]), float(ev[2]), bool(ev[3])])
+            s = float(ev[0])
+            by.setdefault(int(math.floor(s + 1e-6)) % max(1, int(length)), []).append([s, int(ev[1]), float(ev[2]), bool(ev[3])])
         cs["seqs"][int(bank)] = {"len": int(length), "by": by, "swing": float(swing)}
 
     def c_chop_add(self, bank, step, pad, vel, skip):
         cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
         seq = cs["seqs"].setdefault(int(bank), {"len": 16, "by": {}})
-        lst = seq["by"].setdefault(int(step), [])
-        lst[:] = [e for e in lst if e[1] != int(pad)]
-        lst.append([int(step), int(pad), float(vel), bool(skip)])
+        s = float(step)
+        lst = seq["by"].setdefault(int(math.floor(s + 1e-6)) % max(1, seq["len"]), [])
+        lst[:] = [e for e in lst if not (e[1] == int(pad) and abs(e[0] - s) < 0.02)]
+        lst.append([s, int(pad), float(vel), bool(skip)])
 
     def c_chop_transport(self, play, bpm, click=False):
         cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
@@ -2563,7 +2565,8 @@ class Engine:
                         if ev[3]:
                             ev[3] = False                  # just recorded live: it already sounded
                             continue
-                        self._chop_trigger(grp, ev[1], ev[2], when + sw)
+                        frac = ev[0] - math.floor(ev[0] + 1e-6)      # off the 16th grid (triplets, 1/32, off)
+                        self._chop_trigger(grp, ev[1], ev[2], when + sw + int(max(0.0, frac) * st_len))
                 if cs.get("click") and k % 4 == 0 and self.kit and self.kit.get("click"):
                     self._voice(self.kit["click"], 0.55 if k % 16 == 0 else 0.3, 0.0, when, "drum", srev=0, sdly=0,
                                 rel=int(0.01 * sr))

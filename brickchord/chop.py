@@ -362,6 +362,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         self.csel_down = self.csel_combo = False
         self.cbpm = float(st.get("bpm", 100))
         self.cclick = bool(st.get("click", True))
+        self.cquant = int(st.get("quant", 0)) % len(self.QUANTS)
+        self.cqstr = float(st.get("qstr", 1.0))
         self.cplay = self.crec_on = False
         self.cplay_t0 = 0.0
         self.cr3_down = self.cr3_combo = False
@@ -384,7 +386,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
 
     def chop_state(self):
         return {"v": 2, "group": self.cgrp, "last": self.clast, "groups": self.cgroups, "rec_secs": self.crec_secs,
-                "chop_src": self.cchop_src, "bpm": self.cbpm, "click": self.cclick, "master": self.cmaster}
+                "chop_src": self.cchop_src, "bpm": self.cbpm, "click": self.cclick, "master": self.cmaster,
+                "quant": self.cquant, "qstr": self.cqstr}
 
     # ------------------------------------------------------------ the sequencer
     def chop_send_seq(self, g):
@@ -404,17 +407,47 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.crec_on = False
         self.eng.post("chop_transport", play, self.cbpm, self.cclick and self.crec_on)
 
+    # quantize grids, in 16ths: 1/16, 1/8, 1/32, 1/16 triplets (three per eighth), 1/4, off
+    QUANTS = [("1/16", 1.0), ("1/8", 2.0), ("1/32", 0.5), ("1/16 triplet", 2.0 / 3.0), ("1/4", 4.0), ("Off", 0.0)]
+
+    def chop_snap(self, pos, L, grid=None, strength=None):
+        """A position in 16ths moved toward the quantize grid (by its strength)."""
+        grid = self.QUANTS[self.cquant][1] if grid is None else grid
+        strength = self.cqstr if strength is None else strength
+        if grid <= 0:
+            return round(pos, 3) % L
+        q = round(pos / grid) * grid
+        return round(pos + (q - pos) * strength, 3) % L
+
     def chop_record_hit(self, g, i, vel):
-        """While recording: the hit lands on the nearest 16th of the group's pattern."""
+        """While recording: the hit lands on the quantize grid (1/16 to start with)."""
         pt = self.cgroups[g]["pattern"]
         L = pt["bars"] * 16
         # what you hear is about 0.1 s behind the clock here (the engine's block, then the
         # sound card's buffer), so a hit on the beat you hear is moved back by that much
         cur = (self.chop_pos() - 0.1 * self.cbpm / 60.0 * 4) % L
-        q = int(round(cur)) % L
-        ahead = (q > cur) or (q == 0 and cur > L - 0.5)    # rounded up: the sequencer would play it again
-        pt["ev"] = [e for e in pt["ev"] if not (e[0] == q and e[1] == i)] + [[q, i, round(vel, 2)]]
+        q = self.chop_snap(cur, L)
+        ahead = (q > cur + 1e-6) or (q < 1.0 and cur > L - 1.0)   # moved later: the sequencer would play it again
+        pt["ev"] = [e for e in pt["ev"] if not (abs(e[0] - q) < 0.02 and e[1] == i)] + [[q, i, round(vel, 2)]]
         self.eng.post("chop_add", g, q, i, float(vel), bool(ahead))
+
+    def chop_quantize_pattern(self, g):
+        """Snap every hit of a group's pattern to the grid, at the set strength."""
+        pt = self.cgroups[g]["pattern"]
+        L = pt["bars"] * 16
+        if self.QUANTS[self.cquant][1] <= 0:
+            self.flash("QUANTIZE IS OFF   PICK A GRID FIRST")
+            return
+        seen, out = set(), []
+        for e in pt["ev"]:
+            q = self.chop_snap(e[0], L)
+            if (round(q, 2), e[1]) in seen:
+                continue                                     # two hits of one pad on one step: keep one
+            seen.add((round(q, 2), e[1]))
+            out.append([q, e[1], e[2]])
+        pt["ev"] = out
+        self.chop_send_seq(g)
+        self.flash("GROUP %s QUANTIZED TO %s" % (GROUPS[g], self.QUANTS[self.cquant][0].upper()))
 
     def chop_erase_pad(self, g, i):
         pt = self.cgroups[g]["pattern"]
@@ -606,7 +639,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             return [("fx", s) for s in PAD_FX] + [("bool", ("reverse", "Reverse")), ("bool", ("choke", "Choke"))]
         if layer == "group":
             return [("fx", s) for s in GROUP_FX]
-        return [("fx", s) for s in MASTER_FX] + [("tempo", ("tempo", "Tempo"))]
+        return [("fx", s) for s in MASTER_FX] + [("tempo", ("tempo", "Tempo")), ("quant", ("quant", "Quantize"))]
 
     def qe_target(self, layer):
         grp = self.cgroups[self.cgrp]
@@ -625,6 +658,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         if kind == "bool":
             dflt = spec[0] == "choke"
             return "On" if d.get(spec[0], dflt) else "Off"
+        if kind == "quant":
+            return self.QUANTS[self.cquant][0]
         return "%d BPM" % self.cbpm
 
     def qe_change(self, layer, item, step):
@@ -635,6 +670,10 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         kind, spec = item
         if layer == "pad" and not d.get("src"):
             self.flash("HIT A PAD WITH A SOUND FIRST")
+            return
+        if kind == "quant":
+            self.cquant = (self.cquant + step) % len(self.QUANTS)
+            self.flash("QUANTIZE %s" % self.QUANTS[self.cquant][0].upper())
             return
         if kind == "fx":
             fx_step(d, spec, step)
@@ -958,6 +997,9 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
                     ("Tempo", "%d BPM" % self.cbpm),
                     ("Bars", "%d" % pt["bars"]),
+                    ("Quantize", self.QUANTS[self.cquant][0]),
+                    ("Quantize strength", "%d%%" % round(self.cqstr * 100)),
+                    ("Quantize pattern", "A snaps group %s's hits to the grid" % GROUPS[g]),
                     ("Click", "On while recording" if self.cclick else "Off"),
                     ("Hits", "%d in this group's pattern" % len(pt["ev"])),
                     ("Clear pattern", "A clears group %s" % GROUPS[g]),
@@ -1021,6 +1063,10 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                 self.chop_send_seq(g)
             elif name == "Click":
                 self.cclick = not self.cclick
+            elif name == "Quantize":
+                self.cquant = (self.cquant + d) % len(self.QUANTS)
+            elif name == "Quantize strength":
+                self.cqstr = round(max(0.25, min(1.0, self.cqstr + 0.25 * d)), 2)
             return
         if pg == "Master":
             spec = next((s for s in MASTER_FX if s[1] == name), None)
@@ -1123,6 +1169,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
                 self.flash("ALL PATTERNS CLEARED")
             elif name == "Commit":
                 self.chop_commit()
+            elif name == "Quantize pattern":
+                self.chop_quantize_pattern(g)
             elif name == "Audition pad":
                 self.eng.post("chop_audition", self.chop_pad_array(self.cgrp, self.clast))
             return
@@ -1293,7 +1341,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         bar = int(pos // 16) if pos >= 0 else 0
         steps = {}
         for e in pt["ev"]:
-            steps.setdefault(e[0], []).append(e[1])
+            steps.setdefault(int(e[0]) % L, []).append(e[1])
         sw = (wx1 - wx0 - 16) / 16.0
         sy = wy1 - 18
         for s in range(16):
