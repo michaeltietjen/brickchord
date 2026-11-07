@@ -2420,6 +2420,14 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         rows = [(name, val, INK) for name, val in self.menu_items()]
         self.draw_list(c, a, "", rows, self.menu_i, "menu", 100)
         self.draw_menu_tabs(c, a)
+        if edition.CHOP and self.menu_pg == "Pad" and a > 0.9:          # trimming: show what plays
+            items = self.menu_items()
+            name = items[self.menu_i][0] if 0 <= self.menu_i < len(items) else ""
+            if name in ("Sound", "Start", "Length", "Attack", "Fade out"):
+                r = pygame.Rect(60, L["hint_y"] - 74, BASE_W - 120, 50)
+                pygame.draw.rect(c, self.mix(BG, PANEL, 0.6), r.inflate(16, 22), border_radius=10)
+                pygame.draw.rect(c, self.mix(BG, DIM, 0.5), r.inflate(16, 22), 1, border_radius=10)
+                self.draw_trim(c, r, self.cedit_g, self.clast, time.perf_counter())
         if self.menu_pg == "Drums":
             hint = self.DRUM_MENU_HINT
         else:

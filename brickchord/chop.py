@@ -901,6 +901,78 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         self.__dict__.setdefault("ctut_f", {})["fader"] = True
         self.flash("PAD %d   %s" % (i + 1, what))
 
+    LIVE_RED = (236, 62, 50)
+    TRIM_KEYS = ("start", "length", "attack", "fade", "reverse")
+
+    def draw_trim(self, c, r, g, i, now, compact=False):
+        """The pad's whole sound with its trim shown: the part that plays in red, the
+        trimmed-off start and end in white (muted), the attack and fade-out as the
+        shape of the red part, lines at the start and end points, and a playhead
+        while it sounds."""
+        mm = M()
+        grp = self.cgroups[g]
+        keys = grp.get("keys")
+        pi = grp.get("keys_pad", 0) if keys else i
+        p = grp["pads"][pi]
+        w = self.chop_wave(g, i)
+        if not w:
+            return
+        mn, mx = w
+        n = len(mn)
+        pk = max(1e-6, float(max(abs(mn.min()), abs(mx.max()))))
+        s0 = max(0.0, min(0.95, p.get("start", 0.0)))
+        s1 = min(1.0, s0 + p.get("length", 1.0))
+        rev = bool(p.get("reverse"))
+        x = raw_audio(p["src"])
+        secs = (len(x) / float(SR)) * (s1 - s0) if x is not None else 1.0
+        af = min(1.0, p.get("attack", 0.0) / max(1e-3, secs))
+        ff = p.get("fade", 0.0)
+        hit = self.clit.get((g, i if not keys else -1), -9)
+        tune = p.get("tune", 0) + p.get("fine", 0) / 100.0 + (grp.get("fx") or {}).get("tune", 0)
+        play_secs = secs / (2 ** (tune / 12.0))
+        lv = max(0.0, 1.0 - (now - hit) / 0.4)
+        live = self.mix(self.LIVE_RED, (255, 200, 190), 0.35 * lv)
+        muted = self.mix(mm.BG, (235, 235, 235), 0.55)
+        cy, hh = r.centery, r.h // 2 - 2
+        band = pygame.Rect(r.x + int(r.w * s0), r.y, max(2, int(r.w * (s1 - s0))), r.h)
+        pygame.draw.rect(c, self.mix(mm.BG, self.LIVE_RED, 0.16), band)          # the live part, even where quiet
+        pygame.draw.line(c, self.mix(mm.BG, self.LIVE_RED, 0.5), (band.x, cy), (band.right, cy), 1)
+        for k in range(n):
+            fr = (k + 0.5) / n
+            xk = r.x + int(r.w * k / n)
+            a = mx[k] / pk
+            b = mn[k] / pk
+            if s0 <= fr < s1:
+                t = (s1 - fr) / (s1 - s0) if rev else (fr - s0) / (s1 - s0)    # where in the playback
+                env = 1.0
+                if af > 0 and t < af:
+                    env = t / af
+                if ff > 0.01 and t > 1 - ff:
+                    env = min(env, ((1 - t) / ff) ** 1.5)
+                col = live
+                a, b = a * max(0.06, env), b * max(0.06, env)
+            else:
+                col = muted
+            pygame.draw.line(c, col, (xk, cy - int(a * hh)), (xk, cy - int(b * hh) + 1), max(1, r.w // n + 1))
+        # start and end points
+        for f, lab in ((s0, "START %d%%" % round(s0 * 100)), (s1, "END %d%%" % round(s1 * 100))):
+            xf = r.x + int(r.w * f)
+            pygame.draw.line(c, self.LIVE_RED, (xf, r.y), (xf, r.bottom), 2)
+            if not compact:
+                tw = self.f_small.size(lab)[0]
+                tx = min(max(r.x, xf - tw // 2), r.right - tw)
+                self.text(c, lab, self.f_small, self.LIVE_RED, (tx, r.y - 2))
+        if rev:
+            self.text(c, "<< REVERSED", self.f_small, self.LIVE_RED, (r.right - 4, r.bottom - 16), right=True)
+        # the playhead while it sounds
+        el = now - hit
+        if 0 <= el < play_secs:
+            f = s0 + (s1 - s0) * (el / play_secs)
+            if rev:
+                f = s1 - (f - s0)
+            xf = r.x + int(r.w * f)
+            pygame.draw.line(c, (255, 255, 255), (xf, r.y + 2), (xf, r.bottom - 2), 2)
+
     def draw_quick_edit(self, c, now):
         """The quick-edit panel, while SELECT is held (after a moment, or once used)."""
         if not self.csel_down or (now - self.__dict__.get("cqe_t", now) < 0.25 and not self.__dict__.get("cqe_moved")):
@@ -927,7 +999,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             x += w + 6
         # the list, scrolled to keep the pick in view
         rowh = 22
-        rows = (r.h - 70) // rowh
+        strip = layer == "pad" and self.cgroups[self.cgrp]["pads"][self.qe_target("pad")[1]].get("src")
+        rows = (r.h - 70 - (54 if strip else 0)) // rowh
         top = max(0, min(idx - rows // 2, len(items) - rows))
         y = r.y + 38
         for k in range(top, min(len(items), top + rows)):
@@ -939,6 +1012,10 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             self.text(c, self.qe_value(layer, item), self.f_small, mm.ACCENT2 if sel else mm.INK, (r.right - 14, y + 2),
                       right=True)
             y += rowh
+        if strip:
+            sr_ = pygame.Rect(r.x + 12, r.bottom - 76, r.w - 24, 44)
+            pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.6), sr_.inflate(8, 8), border_radius=6)
+            self.draw_trim(c, sr_, self.cgrp, self.clast, now, compact=True)
         self.text(c, "stick ^v pick  <> change  L1/R1 layer", self.f_small, mm.DIM, (r.centerx, r.bottom - 22),
                   center=True)
 
@@ -1489,15 +1566,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.45), (wx0, wy0, wx1 - wx0, wy1 - wy0), border_radius=10)
         w = self.chop_wave(g, i)
         if w:
-            mn, mx = w
-            n = len(mn)
-            pk = max(1e-6, float(max(abs(mn.min()), abs(mx.max()))))
-            cy, hh = (wy0 + wy1 - 22) // 2, (wy1 - 22 - wy0) // 2 - 4    # room for the steps below
-            lv = max(0.0, 1.0 - (now - self.clit.get((g, i if not keys else -1), -9)) / 0.4)
-            top = [(wx0 + 8 + int((wx1 - wx0 - 16) * k / n), cy - int(mx[k] / pk * hh)) for k in range(n)]
-            bot = [(wx0 + 8 + int((wx1 - wx0 - 16) * k / n), cy - int(mn[k] / pk * hh)) for k in range(n)]
-            if len(top) > 1:
-                pygame.draw.polygon(c, self.mix(mm.INK, mm.ACCENT, lv), top + bot[::-1])
+            self.draw_trim(c, pygame.Rect(wx0 + 8, wy0 + 4, wx1 - wx0 - 16, wy1 - wy0 - 26), g, i, now)
         else:
             self.text(c, "empty pad   SELECT > Pad > Sound", self.f_small, mm.DIM, ((wx0 + wx1) // 2, (wy0 + wy1) // 2 - 9),
                       center=True)
