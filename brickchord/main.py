@@ -1204,7 +1204,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
 
     def menu_items(self):
-        if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
+        if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg == "FX":
             return self.amb_fx_items()
@@ -1283,7 +1283,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
-        if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
+        if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_change(self.menu_pg, name, d)
             return
         if edition.AMBIENT and self.menu_pg == "FX":
@@ -1423,7 +1423,7 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
-        if edition.AMBIENT and self.menu_pg in ("Voice", "Chords", "Melody", "Scenes"):
+        if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             self.amb_menu_activate(self.menu_pg, name)
             return
         if self.menu_pg == "Drums":

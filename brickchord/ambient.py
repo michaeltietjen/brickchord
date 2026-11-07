@@ -1506,10 +1506,88 @@ class AmbientMixin:
 
     # ------------------------------------------------------------ settings pages
     def amb_menu_pages(self):
-        return ["Voice", "Chords", "Melody", "Scenes", "Global", "FX"]
+        return ["Songs", "Voice", "Chords", "Melody", "Scenes", "Global", "FX"]
+
+    # ------------------------------------------------------------ songs: everything, in 8 slots
+    SONG_SLOTS = 8
+
+    def amb_song_path(self, n):
+        d = os.path.join(os.path.dirname(synth.SAMPLE_DIR), "songs_glide")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "song_%d.json" % n)
+
+    def amb_song_read(self, n):
+        try:
+            with open(self.amb_song_path(n)) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def amb_song_summary(self, s):
+        if not s:
+            return "empty"
+        mm = M()
+        steps = [x for x in (s.get("amb", {}).get("prog") or {}).get("steps", []) if x is not None]
+        try:
+            sc = mm.SCALES[s.get("scale", "Major")]
+            romans = " ".join(mm.roman_for(d % 7, mm.build_chord(s.get("key", 0), s.get("scale", "Major"), d % 7, {})[1])
+                              for d in steps[:5])
+        except Exception:
+            romans = ""
+        return "%s %s  %s" % (mm.NOTE_NAMES[s.get("key", 0) % 12], s.get("scale", ""), romans)
+
+    def amb_song_save(self, n):
+        """Save the whole Brickglide: key and scale, voices and sounds, chords and the
+        progression, melody, strum and arp, scenes, texture and the effects."""
+        song = {"version": 1, "saved": time.strftime("%Y-%m-%d %H:%M"), "key": self.key, "scale": self.scale,
+                "amb": self.amb_state(),
+                "fx": {"rev": self.base_rev, "dly": self.base_dly, "rev_type": self.rev_type, "dly_type": self.dly_type,
+                       "dly_time": self.dly_time, "rack": self.rack}}
+        try:
+            with open(self.amb_song_path(n), "w") as f:
+                json.dump(song, f, indent=1)
+            self.aSong = n
+            self.flash("SAVED TO SONG %d   %s" % (n, self.amb_song_summary(song)))
+        except Exception as ex:
+            self.flash("COULD NOT SAVE: %s" % ex)
+
+    def amb_song_load(self, n):
+        s = self.amb_song_read(n)
+        if not s:
+            self.flash("SONG %d IS EMPTY   SAVE ONE FIRST" % n)
+            return
+        self.amb_stop("LOADING")
+        self.key, self.scale = int(s.get("key", self.key)), s.get("scale", self.scale)
+        fx = s.get("fx") or {}
+        self.base_rev, self.base_dly = fx.get("rev", self.base_rev), fx.get("dly", self.base_dly)
+        self.rev_type, self.dly_type = fx.get("rev_type", self.rev_type), fx.get("dly_type", self.dly_type)
+        self.dly_time = fx.get("dly_time", self.dly_time)
+        if fx.get("rack"):
+            self.rack = fx["rack"]
+        self.cfg["amb"] = s.get("amb") or {}
+        self.amb_init()                                   # voices, chords, progression, melody, strum, scenes
+        self.rev, self.dly = self.base_rev, self.base_dly
+        self.push_types()
+        self.push_fx()
+        self.push_rack()
+        self.amb_strum_fx()
+        self.eng.post("pluck_warm", list(range(43, 101)), self.astrum["inst"])
+        self._tex_started = True
+        self.amb_set_texture()
+        self.aSong = n
+        self.save_cfg()
+        self.flash("SONG %d   %s   START PLAYS IT" % (n, self.amb_song_summary(s)))
 
     def amb_menu_items(self, pg):
         mm = M()
+        if pg == "Songs":
+            cur = getattr(self, "aSong", 1)
+            rows = []
+            for n in range(1, self.SONG_SLOTS + 1):
+                s = self.amb_song_read(n)
+                rows.append(("Song %d%s" % (n, "  *" if n == cur else ""), self.amb_song_summary(s)))
+            rows += [("Save", "A saves to song %d" % cur), ("Load", "A loads song %d" % cur)]
+            return rows
         if pg == "Voice":
             i = self.asel
             v = self.av[i]
@@ -1579,6 +1657,10 @@ class AmbientMixin:
         return []
 
     def amb_menu_change(self, pg, name, d):
+        if pg == "Songs":
+            if name.startswith("Song "):
+                self.aSong = int(name.split()[1])
+            return
         if pg == "Voice":
             i = self.asel
             v = self.av[i]
@@ -1738,6 +1820,20 @@ class AmbientMixin:
             self.amb_toggle(6 + getattr(self, "amel_sel", 0))
         elif pg == "Chords" and name == "Progression":
             self.amb_prog_toggle()
+        elif pg == "Songs":
+            if name.startswith("Song "):
+                n = int(name.split()[1])
+                if getattr(self, "aSong", None) == n and self.amb_song_read(n):
+                    self.menu = False
+                    self.amb_song_load(n)                # A on the selected song: load it
+                else:
+                    self.aSong = n
+                    self.flash("SONG %d SELECTED   A AGAIN LOADS, OR SAVE BELOW" % n)
+            elif name == "Save":
+                self.amb_song_save(getattr(self, "aSong", 1))
+            elif name == "Load":
+                self.menu = False
+                self.amb_song_load(getattr(self, "aSong", 1))
         elif pg == "Scenes" and name == "Guided demo":
             self.menu = False
             self.amb_tutorial_start()
