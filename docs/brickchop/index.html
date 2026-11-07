@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Brickchop</title>
+<meta name="description" content="Brickchop: a K.O. II-style sampler for the TrimUI Brick. Four groups of 12 pads, keys, punch-in FX, a sequencer and commit.">
+<meta property="og:title" content="Brickchop">
+<meta property="og:description" content="Chop. Play. Punch. A K.O. II-style sampler for the TrimUI Brick.">
+<meta property="og:image" content="https://michaeltietjen.github.io/brickchord/brickchop/pads.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔪</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #121116; --panel: #1d1c24; --ink: #ece4d6; --dim: #9a94a6; --seam: #2b2934;
+  --coral: #ff6048; --sodium: #ffce54;
+  color-scheme: dark;
+  box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--sodium); }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 max(20px, env(safe-area-inset-left, 0px)); }
+.label { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--coral); }
+h1 { font-size: clamp(44px, 8vw, 84px); line-height: 1; margin: .3em 0 .25em; letter-spacing: -.03em; font-weight: 800; }
+h1 span { color: var(--coral); }
+h2 { font-size: clamp(28px, 4vw, 40px); line-height: 1.1; margin: .2em 0 .5em; letter-spacing: -.02em; }
+h3 { margin: 0 0 .35em; font-size: 18px; }
+.lede { font-size: clamp(18px, 2.2vw, 22px); color: var(--ink); max-width: 760px; }
+.intro { color: var(--dim); max-width: 760px; }
+section.module { padding: clamp(48px, 8vw, 96px) 0; border-top: 1px solid var(--seam); }
+section.module:first-of-type { border-top: 0; }
+.hero { display: grid; gap: 36px; grid-template-columns: 1.05fr 1fr; align-items: center; }
+@media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+.bezel { background: #0b0a0e; border: 1px solid var(--seam); border-radius: 18px; padding: 12px; margin: 0; }
+.bezel img, .bezel video { display: block; width: 100%; height: auto; border-radius: 10px; max-width: 100%; }
+figcaption { color: var(--dim); font-size: 14px; margin-top: 10px; }
+.btn { display: inline-block; padding: 12px 20px; border-radius: 12px; border: 1px solid var(--seam); color: var(--ink); text-decoration: none; font-weight: 600; margin: 6px 8px 6px 0; }
+.btn.primary { background: var(--coral); border-color: var(--coral); color: #160c0a; }
+.feat { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-top: 24px; }
+.feat div { background: var(--panel); border: 1px solid var(--seam); border-radius: 14px; padding: 16px 18px; }
+.feat p { margin: 0; color: var(--dim); }
+.two { display: grid; gap: 28px; grid-template-columns: 1fr 1fr; align-items: start; margin-top: 26px; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 420px; margin: 22px 0; }
+.pads div { background: var(--panel); border: 1px solid var(--seam); border-radius: 10px; padding: 10px 12px; font-family: "IBM Plex Mono", monospace; font-size: 14px; }
+.pads b { color: var(--sodium); font-weight: 600; margin-right: 6px; }
+.table { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; }
+td, th { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--seam); vertical-align: top; }
+th { color: var(--coral); font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+td:first-child { font-family: "IBM Plex Mono", monospace; color: var(--sodium); white-space: nowrap; }
+ol li { margin: .5em 0; }
+code { font-family: "IBM Plex Mono", monospace; background: var(--panel); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
+footer { color: var(--dim); padding: 40px 0 60px; border-top: 1px solid var(--seam); font-size: 14px; }
+</style>
+<style>
+/* the Brick family bar, the same on all three pages */
+.family { border-bottom: 1px solid var(--seam); font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.family .in { max-width: 1120px; margin: 0 auto; padding: 8px max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.family a { color: var(--dim); text-decoration: none; }
+.family a:hover, .family a[aria-current="page"] { color: var(--ink); }
+.family a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }
+.family .sp { margin-left: auto; }
+</style>
+</head>
+<body>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/">Bricklab</a><a href="../brickglide/">Brickglide</a><a href="../brickchop/" aria-current="page">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide, Brickchop</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
+  <section class="module" id="top">
+    <div class="wrap hero">
+      <div>
+        <div class="label">Beta &middot; for the TrimUI Brick Pro on KNULLI</div>
+        <h1>brick<span>chop</span></h1>
+        <p class="lede">A K.O. II-style sampler for the Brick. Four groups of twelve pads, each pad its own sound. Chop a loop across them, play a sound in keys, punch in stutters and tape stops, record it all into patterns, then commit the lot into a new sample and chop that.</p>
+        <p>
+          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Download the beta</a>
+          <a class="btn" href="#controls">The controls</a>
+        </p>
+      </div>
+      <figure class="bezel">
+        <video src="intro.mp4" controls playsinline preload="metadata" width="320" height="240"></video>
+        <figcaption>The intro film, straight from the Brick: a loop chopped onto the pads, a stutter, a tape stop, the drop.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="module" id="pads">
+    <div class="wrap">
+      <div class="label">Twelve pads, four groups</div>
+      <h2>Every button is a pad</h2>
+      <p class="intro">The Brick's twelve thumb and finger buttons are laid out like the K.O. II's keypad. Hold SELECT and press a direction to switch groups: A drums, B bass, C keys, D your samples. Each pad holds its own sound: a kit part, a synth note, any WAV, or a slice of one.</p>
+      <div class="two">
+        <div>
+          <div class="pads">
+            <div><b>1</b>L2</div><div><b>2</b>L1</div><div><b>3</b>R1</div><div><b>4</b>R2</div>
+            <div><b>5</b>&lt;</div><div><b>6</b>^</div><div><b>7</b>Y</div><div><b>8</b>X</div>
+            <div><b>9</b>v</div><div><b>10</b>&gt;</div><div><b>11</b>B</div><div><b>12</b>A</div>
+          </div>
+          <div class="feat" style="margin-top:0">
+            <div><h3>Chop to group</h3><p>Pick a loop and it is cut at its hits across all twelve pads of a group.</p></div>
+            <div><h3>Keys</h3><p>Click the left stick: the last pad's sound plays chromatically across all twelve pads.</p></div>
+            <div><h3>The fader</h3><p>Left stick up and down tunes the last pad; left and right sets its level.</p></div>
+          </div>
+        </div>
+        <figure class="bezel"><img src="pads.png" width="640" height="480" alt="Brickchop's screen: group A's twelve pads with an 808 and a 909 kit, the last pad's waveform below"><figcaption>Group A: an 808 kit on the D-pad and face buttons, 909 hits on the shoulders.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="punch">
+    <div class="wrap">
+      <div class="label">The right stick</div>
+      <h2>Punch-in FX, only while you hold</h2>
+      <p class="intro">Push the right stick in a direction and the whole mix gets that effect until you let go; the further you push, the harder it hits. Stutter and beat repeat lock to the tempo.</p>
+      <div class="two">
+        <div class="table">
+          <table>
+            <tr><th>Push</th><th>Effect</th></tr>
+            <tr><td>Up</td><td>Stutter</td></tr>
+            <tr><td>Up-right</td><td>Beat repeat</td></tr>
+            <tr><td>Right</td><td>Filter sweep</td></tr>
+            <tr><td>Down-right</td><td>Bitcrush</td></tr>
+            <tr><td>Down</td><td>Tape stop</td></tr>
+            <tr><td>Down-left</td><td>Half speed</td></tr>
+            <tr><td>Left</td><td>Reverse</td></tr>
+            <tr><td>Up-left</td><td>Reverb throw</td></tr>
+          </table>
+        </div>
+        <figure class="bezel"><img src="punch.png" width="640" height="480" alt="Brickchop with the stutter held: the panel outlined and a bar showing how hard"><figcaption>Stutter held: the panel shows which effect, and how hard.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="seq">
+    <div class="wrap">
+      <div class="label">Record, loop, commit</div>
+      <h2>Patterns, then resample</h2>
+      <div class="two">
+        <div>
+          <p class="intro">START plays; clicking the right stick records. Whatever you play lands on the nearest 16th of the group's pattern, and it loops, so you build a beat pass by pass, then switch to the bass group and record over it. Each group keeps its own pattern of one, two or four bars.</p>
+          <div class="feat">
+            <div><h3>Erase</h3><p>Hold R3 and tap a pad to take it out of the pattern.</p></div>
+            <div><h3>Commit</h3><p>Records every pattern, punch-ins included, into a new sound on group D. Chop it, play it in keys, record over it.</p></div>
+            <div><h3>Songs</h3><p>Eight slots save everything: pads, sounds, patterns, tempo and effects.</p></div>
+          </div>
+        </div>
+        <figure class="bezel"><img src="sequencer.png" width="640" height="480" alt="Brickchop recording: the step strip under the waveform with the playhead, and the guided demo's banner"><figcaption>Recording, with the guided demo that runs on first launch.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="gear">
+    <div class="wrap">
+      <div class="label">Bring your own</div>
+      <h2>Your samples, your keyboard</h2>
+      <div class="feat">
+        <div><h3>Every samples folder</h3><p>Brickchop sees the WAVs in its own samples folder and in Bricklab's, Brickchord's and Brickglide's.</p></div>
+        <div><h3>USB MIDI in</h3><p>A keyboard, an Orchid or an OP-Z plays the pads: C2 up is pads 1 to 12, and in keys any note plays at its pitch.</p></div>
+        <div><h3>Sample from USB audio</h3><p>Where the Brick sees a USB audio input, Record captures it straight onto a pad. Still being tested on the Brick Pro.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="controls">
+    <div class="wrap">
+      <div class="label">Controls</div>
+      <h2>On the Brick</h2>
+      <div class="table">
+        <table>
+          <tr><th>Button</th><th>What it does</th></tr>
+          <tr><td>12 pads</td><td>L2 L1 R1 R2, &lt; ^ Y X, v &gt; B A</td></tr>
+          <tr><td>SELECT + &lt; ^ v &gt;</td><td>Group A, B, C or D. A quick tap of SELECT opens Settings</td></tr>
+          <tr><td>L3</td><td>Keys: the last pad across all twelve, chromatically</td></tr>
+          <tr><td>Left stick</td><td>The fader: up and down tune, left and right level</td></tr>
+          <tr><td>Right stick</td><td>Punch-in FX, only while held</td></tr>
+          <tr><td>START</td><td>Play and stop every group's pattern</td></tr>
+          <tr><td>R3</td><td>Record. Hold R3 and tap a pad to erase it</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="module" id="install">
+    <div class="wrap">
+      <div class="label">Install</div>
+      <h2>Get it on your Brick</h2>
+      <ol>
+        <li>Download <code>brickchop-v0.4.0-beta-knulli.zip</code> from the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">beta release</a>.</li>
+        <li>Copy the <code>brickchop</code> folder, <code>Brickchop.sh</code> and <code>images</code> into <code>roms/ports</code> on the card.</li>
+        <li>Start &gt; Game Settings &gt; Update Gamelists. Brickchop is under Ports.</li>
+      </ol>
+      <p class="intro">It shares its engine with <a href="../">Brickchord</a>, <a href="../bricklab/">Bricklab</a> and <a href="../brickglide/">Brickglide</a>, and its samples with all three.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">Brickchop is part of the Brick family by Michael Tietjen. Source and issues on <a href="https://github.com/michaeltietjen/brickchord">GitHub</a>.</div>
+  </footer>
+</body>
+</html>

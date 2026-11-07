@@ -1240,7 +1240,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
     AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
 
     def menu_items(self):
-        if edition.CHOP and self.menu_pg in ("Pad", "Group", "Seq"):
+        if edition.CHOP and self.menu_pg in ("Songs", "Pad", "Group", "Seq"):
             return self.chop_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
@@ -1321,7 +1321,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
-        if edition.CHOP and self.menu_pg in ("Pad", "Group", "Seq"):
+        if edition.CHOP and self.menu_pg in ("Songs", "Pad", "Group", "Seq"):
             self.chop_menu_change(self.menu_pg, name, d)
             return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
@@ -1464,7 +1464,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
-        if edition.CHOP and self.menu_pg in ("Pad", "Group", "Seq"):
+        if edition.CHOP and self.menu_pg in ("Songs", "Pad", "Group", "Seq"):
             self.chop_menu_activate(self.menu_pg, name)
             return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):

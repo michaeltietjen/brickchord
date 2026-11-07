@@ -253,6 +253,8 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         for g in range(4):
             self.chop_send_group(g)
             self.chop_send_seq(g)
+        if not self.cfg.get("chop_tutorial_done") and getattr(self, "ctut", None) is None:
+            self.chop_tut_start()
 
     def chop_state(self):
         return {"v": 2, "group": self.cgrp, "last": self.clast, "groups": self.cgroups, "rec_secs": self.crec_secs,
@@ -370,6 +372,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         choke = grp["pads"][grp.get("keys_pad", 0) if keys else i].get("choke", True)
         self.eng.post("chop_hit", g, i, float(vel), -0.3 + 0.6 * (i % 4) / 3.0, bool(choke) and not keys)
         self.clit[(g, i)] = time.perf_counter()
+        self.ctut_n = getattr(self, "ctut_n", 0) + 1
         if self.cplay and self.crec_on:
             self.chop_record_hit(g, i, vel)
         if not keys:
@@ -461,6 +464,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             what = "LEVEL %d%%" % round(p["level"] * 100)
         self.chop_send_pad(self.cgrp, i)
         self.cfader = (now, what)
+        self.__dict__.setdefault("ctut_f", {})["fader"] = True
         self.flash("PAD %d   %s" % (i + 1, what))
         if not grp.get("keys"):
             self.chop_hit(i, 0.8)
@@ -482,6 +486,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         sector = int(round(math.degrees(math.atan2(x, y)) / 45.0)) % 8   # 0 = up, clockwise
         mode, label = self.PUNCH[sector]
         amt = max(0.0, min(1.0, (r - 0.3) / 0.65))
+        self.__dict__.setdefault("ctut_f", {})["punch"] = True
         if cur is None or cur[0] != mode or abs(cur[1] - amt) > 0.06:
             self.cpunch = (mode, amt, label)
             self.eng.post("punch", mode, amt)
@@ -523,6 +528,7 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
         self.menu = False
 
     def chop_tick(self, now):
+        self.chop_tut_tick(now)
         cm = self.ccommit
         if cm is not None and now >= cm["due"]:
             if os.path.exists(cm["path"]):
@@ -563,11 +569,111 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
 
     # ------------------------------------------------------------ settings
     def chop_menu_pages(self):
-        return ["Pad", "Group", "Seq", "Global", "FX"]
+        return ["Songs", "Pad", "Group", "Seq", "Global", "FX"]
+
+    # ------------------------------------------------------------ songs: everything, in 8 slots
+    def chop_song_path(self, n):
+        d = os.path.join(os.path.dirname(synth.SAMPLE_DIR), "songs_chop")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "song_%d.json" % n)
+
+    def chop_song_read(self, n):
+        try:
+            import json
+            with open(self.chop_song_path(n)) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def chop_song_summary(self, s):
+        if not s:
+            return "empty"
+        ch = s.get("chop") or {}
+        hits = [len((g.get("pattern") or {}).get("ev", [])) for g in ch.get("groups", [])]
+        used = "".join(GROUPS[k] for k, h in enumerate(hits) if h)
+        return "%d BPM   %s" % (ch.get("bpm", 100), ("groups " + used) if used else "no patterns")
+
+    def chop_song_save(self, n):
+        import json
+        song = {"version": 1, "saved": time.strftime("%Y-%m-%d %H:%M"), "key": self.key, "scale": self.scale,
+                "chop": self.chop_state(),
+                "fx": {"rev": self.base_rev, "dly": self.base_dly, "rev_type": self.rev_type,
+                       "dly_type": self.dly_type, "dly_time": self.dly_time}}
+        try:
+            with open(self.chop_song_path(n), "w") as f:
+                json.dump(song, f, indent=1)
+            self.csong = n
+            self.flash("SAVED TO SONG %d   %s" % (n, self.chop_song_summary(song)))
+        except Exception as ex:
+            self.flash("COULD NOT SAVE: %s" % ex)
+
+    def chop_song_load(self, n):
+        s = self.chop_song_read(n)
+        if not s:
+            self.flash("SONG %d IS EMPTY   SAVE ONE FIRST" % n)
+            return
+        self.chop_transport(False)
+        self.key, self.scale = int(s.get("key", self.key)), s.get("scale", self.scale)
+        fx = s.get("fx") or {}
+        self.base_rev, self.base_dly = fx.get("rev", self.base_rev), fx.get("dly", self.base_dly)
+        self.rev_type, self.dly_type = fx.get("rev_type", self.rev_type), fx.get("dly_type", self.dly_type)
+        self.dly_time = fx.get("dly_time", self.dly_time)
+        self.cfg["chop"] = s.get("chop") or {}
+        tut = getattr(self, "ctut", None)
+        self.chop_init()
+        self.ctut = tut
+        self.rev, self.dly = self.base_rev, self.base_dly
+        self.push_types()
+        self.push_fx()
+        self.csong = n
+        self.save_cfg()
+        self.menu = False
+        self.flash("SONG %d   %s   START PLAYS IT" % (n, self.chop_song_summary(s)))
+
+    # ------------------------------------------------------------ the guided demo
+    TUT = [
+        ("Hit the pads: the shoulders, the D-pad and Y X B A are 12 pads", lambda s: s.ctut_n >= 6),
+        ("Hold SELECT and press ^ for group B, the bass", lambda s: s.cgrp == 1),
+        ("B is in KEYS: each pad is a note. Play a little bass line", lambda s: s.ctut_n >= 4),
+        ("Hold SELECT and press < to go back to group A, the drums", lambda s: s.cgrp == 0),
+        ("Press START to play, then click the RIGHT STICK (R3) to record", lambda s: s.cplay and s.crec_on),
+        ("Play a beat. It loops: add a little more each time round", lambda s: len(s.cgroups[0]["pattern"]["ev"]) >= 4),
+        ("Click R3 again to stop recording. Your beat keeps playing", lambda s: not s.crec_on),
+        ("Push the RIGHT STICK while it plays: punch-in FX, only while held", lambda s: s.ctut_f.get("punch")),
+        ("LEFT STICK up and down tunes the last pad. Try it", lambda s: s.ctut_f.get("fader")),
+        ("Done! SELECT > Seq > Commit records it all into a new sound. START stops", lambda s: not s.cplay),
+    ]
+
+    def chop_tut_start(self):
+        self.ctut, self.ctut_n, self.ctut_f, self.ctut_t = 0, 0, {}, time.perf_counter()
+
+    def chop_tut_tick(self, now):
+        k = getattr(self, "ctut", None)
+        if k is None:
+            return
+        if self.menu:
+            self.ctut = None                                  # opening Settings ends the demo
+            self.cfg["chop_tutorial_done"] = True
+            return
+        if now - self.ctut_t > 0.6 and self.TUT[k][1](self):
+            self.ctut += 1
+            self.ctut_n, self.ctut_t = 0, now
+            self.eng.post("click")
+            if self.ctut >= len(self.TUT):
+                self.ctut = None
+                self.cfg["chop_tutorial_done"] = True
+                self.save_cfg()
+                self.flash("THAT'S BRICKCHOP. SELECT > SONGS SAVES IT")
 
     def chop_menu_items(self, pg):
         g = self.cedit_g
         grp = self.cgroups[g]
+        if pg == "Songs":
+            cur = getattr(self, "csong", 1)
+            rows = [("Song %d%s" % (n, "  *" if n == cur else ""), self.chop_song_summary(self.chop_song_read(n)))
+                    for n in range(1, 9)]
+            return rows + [("Save", "A saves to song %d" % cur), ("Load", "A loads song %d" % cur),
+                           ("Guided demo", "A starts it")]
         if pg == "Seq":
             pt = grp["pattern"]
             return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
@@ -606,6 +712,10 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
     def chop_menu_change(self, pg, name, d):
         g = self.cedit_g
         grp = self.cgroups[g]
+        if pg == "Songs":
+            if name.startswith("Song "):
+                self.csong = int(name.split()[1])
+            return
         if name == "Group":
             self.cedit_g = (g + d) % 4
             self.cgrp = self.cedit_g
@@ -674,6 +784,22 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
 
     def chop_menu_activate(self, pg, name):
         g = self.cedit_g
+        if pg == "Songs":
+            if name.startswith("Song "):
+                n = int(name.split()[1])
+                if getattr(self, "csong", None) == n and self.chop_song_read(n):
+                    self.chop_song_load(n)
+                else:
+                    self.csong = n
+                    self.flash("SONG %d SELECTED   A AGAIN LOADS, OR SAVE BELOW" % n)
+            elif name == "Save":
+                self.chop_song_save(getattr(self, "csong", 1))
+            elif name == "Load":
+                self.chop_song_load(getattr(self, "csong", 1))
+            elif name == "Guided demo":
+                self.menu = False
+                self.chop_tut_start()
+            return
         if pg == "Seq":
             if name == "Clear pattern":
                 self.cgroups[g]["pattern"]["ev"] = []
@@ -845,6 +971,15 @@ class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
             pygame.draw.rect(c, col, r, border_radius=3)
         if pt["bars"] > 1:
             self.text(c, "bar %d/%d" % (bar + 1, pt["bars"]), self.f_small, mm.DIM, (wx1 - 8, wy0 + 4), right=True)
+        k = getattr(self, "ctut", None)
+        if k is not None:                                     # the guided demo: one line at a time
+            msg = self.TUT[k][0]
+            r = pygame.Rect(wx0, wy0, wx1 - wx0, 34)
+            pygame.draw.rect(c, mm.ACCENT, r, border_radius=8)
+            self.text(c, "%d/%d" % (k + 1, len(self.TUT)), self.f_small, mm.BG, (r.x + 10, r.y + 7))
+            while len(msg) > 8 and self.f_small.size(msg)[0] > r.w - 70:
+                msg = msg[:-2]
+            self.text(c, msg, self.f_small, mm.BG, (r.x + 52, r.y + 7))
 
     def draw_chop_bar(self, c, now):
         """Where the keyboard is in Brickchord: the four groups and what is on them."""
