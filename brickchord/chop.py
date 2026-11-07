@@ -1,17 +1,21 @@
-# Brickchop: a K.O. II-style sampler on the Brickchord engine. Load a loop or any
-# WAV, it is chopped onto 16 pads, and you play them with your thumbs.
+# Brickchop: an EP-133 K.O. II-style sampler on the Brickchord engine.
 #
-#   < ^ v > Y X B A     pads 1 to 8 (the screen shows them in that order)
-#   hold L1             pads 9 to 16
-#   R1 + pad 1-4        bank A, B, C or D (each bank holds one chopped sample)
-#   START               play the whole sample (again: stop)
-#   SELECT              Settings: the sample, how it is chopped, pitch, level
-#   right stick         filter and space, as in Brickchord
+# Four groups (A drums, B bass, C keys, D your samples), 12 pads each, every pad
+# holding its own sound. The 12 pads are the Brick's 12 thumb and finger buttons,
+# laid out on screen as the K.O. II's 3 x 4 grid:
 #
-# Each bank's slices are cut here, in the UI process, and sent to the engine once;
-# a pad press is then just a trigger, so playing never waits on anything.
-import json
-import math
+#     L2  L1  R1  R2        pads  1  2  3  4
+#     <   ^   Y   X               5  6  7  8
+#     v   >   B   A               9 10 11 12
+#
+#   SELECT + < ^ v >   group A, B, C or D        SELECT (tap)   Settings
+#   L3                 KEYS: the last pad's sound across all 12 pads, chromatically
+#   left stick         the fader: up/down tunes the last pad, left/right its level
+#   START              play the last pad's whole sound (again: stop)
+#   right stick        filter and space
+#
+# Sounds are built here, in the UI process (a kit part, a synth note, a WAV or a
+# slice of one), and sent to the engine once; a pad press is just a trigger.
 import os
 import time
 
@@ -20,10 +24,14 @@ import pygame
 
 import synth
 
-BANKS = "ABCD"
-PADS = ["LEFT", "UP", "DOWN", "RIGHT", "Y", "X", "B", "A"]
-GLYPH = {"LEFT": "<", "UP": "^", "DOWN": "v", "RIGHT": ">", "Y": "Y", "X": "X", "B": "B", "A": "A"}
-CHOPS = ["8 equal", "16 equal", "Transients"]
+GROUPS = "ABCD"
+GROUP_NAMES = ["drums", "bass", "keys", "samples"]
+PADS = ["L2", "L1", "R1", "R2", "LEFT", "UP", "Y", "X", "DOWN", "RIGHT", "B", "A"]
+GLYPH = {"L2": "L2", "L1": "L1", "R1": "R1", "R2": "R2", "LEFT": "<", "UP": "^", "DOWN": "v", "RIGHT": ">",
+         "Y": "Y", "X": "X", "B": "B", "A": "A"}
+KIT_PARTS = ["kick", "snare", "hat", "ohat", "clap", "rim", "tom", "shk"]
+NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+SR = synth.SR
 
 
 def M():
@@ -50,9 +58,39 @@ def chop_files():
     return out
 
 
+def kit_list():
+    try:
+        return sorted(k for k in os.listdir(synth.KITS_DIR) if os.path.isdir(os.path.join(synth.KITS_DIR, k)))
+    except OSError:
+        return ["Classic"]
+
+
+def sources():
+    """Everything a pad can hold, as (kind, name): kit parts, synth notes, WAVs."""
+    out = [("kit", "%s/%s" % (k, p)) for k in kit_list() for p in KIT_PARTS]
+    out += [("bass", p["name"]) for p in synth.BASS_PATCHES]
+    out += [("keys", p["name"]) for p in synth.PATCHES]
+    out += [("lead", p["name"]) for p in synth.LEAD_PATCHES]
+    out += [("file", f) for f in chop_files()]
+    return out
+
+
+def src_label(src):
+    if not src:
+        return "empty"
+    kind, name = src[0], src[1]
+    if kind == "file":
+        s = os.path.splitext(os.path.basename(name))[0].replace("_", " ")
+        s = (s[:20] + "\u2026") if len(s) > 21 else s
+        return s + ("  #%d" % (src[2] + 1) if len(src) > 2 and src[2] is not None else "")
+    if kind == "kit":
+        k, p = name.split("/")
+        return "%s %s" % (k, p)
+    return name
+
+
 def usb_capture_devices():
-    """Sound cards that can record (USB audio from an SP-1, an OP-Z, a mixer...),
-    from /proc/asound: [(card, device, name)]."""
+    """Sound cards that can record (USB audio from an SP-1, an OP-Z, a mixer...)."""
     out = []
     try:
         names = {}
@@ -65,20 +103,14 @@ def usb_capture_devices():
             for line in f:
                 if "capture" not in line:
                     continue
-                cd = line.split(":", 1)[0].strip()
-                card, dev = (int(v) for v in cd.split("-"))
+                card, dev = (int(v) for v in line.split(":", 1)[0].strip().split("-"))
                 out.append((card, dev, names.get(card, "card %d" % card)))
     except Exception:
         pass
     return out
 
 
-def short_name(path):
-    s = os.path.splitext(os.path.basename(path))[0].replace("_", " ")
-    return (s[:26] + "\u2026") if len(s) > 27 else s
-
-
-def find_onsets(x, n, sr):
+def find_onsets(x, n):
     """Where the hits are: rises in short-time energy, the n strongest, kept apart."""
     hop = 256
     if len(x) < hop * 8:
@@ -86,11 +118,10 @@ def find_onsets(x, n, sr):
     frames = len(x) // hop
     e = np.sqrt(np.mean(x[:frames * hop].reshape(frames, hop) ** 2, axis=1) + 1e-9)
     flux = np.maximum(0.0, np.diff(np.log(e), prepend=np.log(e[0])))
-    flux[: 2] = 0
-    gap = max(2, int(0.07 * sr / hop))                    # at least 70 ms apart
-    order = np.argsort(flux)[::-1]
+    flux[:2] = 0
+    gap = max(2, int(0.07 * SR / hop))
     picked = [0]
-    for i in order:
+    for i in np.argsort(flux)[::-1]:
         if flux[i] <= 0.05:
             break
         if all(abs(int(i) - p) >= gap for p in picked):
@@ -100,55 +131,279 @@ def find_onsets(x, n, sr):
     return sorted(p * hop for p in picked)
 
 
+_RAW = {}
+
+
+def raw_audio(src):
+    """Mono float32 at SR for a source (cached): a kit part, a synth note at C3
+    (bass at C2), a WAV, or one slice of a WAV."""
+    key = tuple(x if not isinstance(x, list) else tuple(x) for x in src)
+    x = _RAW.get(key)
+    if x is not None:
+        return x
+    kind, name = src[0], src[1]
+    x = None
+    try:
+        if kind == "kit":
+            k, p = name.split("/")
+            kit = synth.builtin_kit(k)
+            x = kit.get(p)
+        elif kind in ("bass", "keys", "lead"):
+            bank = {"bass": synth.BASS_PATCHES, "keys": synth.PATCHES, "lead": synth.LEAD_PATCHES}[kind]
+            patch = next(p for p in bank if p["name"] == name)
+            a, l = synth.render_note(36 if kind == "bass" else 48, patch, arrays=True)
+            x = a if l is None else np.concatenate([a, l[: int(1.2 * SR)]])
+            x = x.mean(axis=1) if x.ndim == 2 else x
+            k = int(0.25 * SR)
+            x = x.copy()
+            x[-k:] *= np.linspace(1, 0, k)
+        elif kind == "file":
+            x = synth._sample_audio(name)
+            if x is not None and len(src) > 2 and src[2] is not None:
+                s, e = src[3], src[4]
+                x = x[s:e]
+    except Exception as ex:
+        print("Brickchop: could not load %s: %s" % (src, ex), flush=True)
+        x = None
+    if x is not None:
+        x = np.asarray(x, np.float32)
+        if len(_RAW) > 120:
+            _RAW.clear()
+        _RAW[key] = x
+    return x
+
+
+def shape(x, tune=0.0, level=0.9, reverse=False):
+    """A pad's sound ready to play: reversed, tuned (speed with pitch, as samplers
+    do), level, short fades so nothing clicks, stereo."""
+    if x is None or len(x) < 32:
+        return None
+    if reverse:
+        x = x[::-1]
+    if tune:
+        r = 2 ** (tune / 12.0)
+        idx = np.arange(0, len(x) - 1, r)
+        x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
+    x = x * float(level)
+    fi, fo = int(0.002 * SR), int(0.006 * SR)
+    if len(x) > fi + fo:
+        x = x.copy()
+        x[:fi] *= np.linspace(0, 1, fi, dtype=np.float32)
+        x[-fo:] *= np.linspace(1, 0, fo, dtype=np.float32)
+    return np.ascontiguousarray(np.repeat(x[:, None], 2, 1).astype(np.float32))
+
+
+def default_groups():
+    kits = kit_list()
+    k1 = "808" if "808" in kits else kits[0]
+    k2 = "909" if "909" in kits else kits[-1]
+    pad = lambda src: {"src": src, "tune": 0, "level": 0.9, "choke": True, "reverse": False}
+    # A: two kits, the main eight on the D-pad and face buttons, four more on the shoulders
+    a = [pad(["kit", "%s/%s" % (k2, p)]) for p in ("kick", "snare", "clap", "hat")]
+    a += [pad(["kit", "%s/%s" % (k1, p)]) for p in ("kick", "snare", "hat", "ohat", "clap", "rim", "tom", "shk")]
+    b = [pad(["bass", p["name"]]) for p in synth.BASS_PATCHES[:8]]
+    b += [pad(["bass", p["name"]]) for p in synth.BASS_PATCHES[:4]]
+    keys_names = ["Electric Piano", "FM Keys", "Juno Pad", "Square Keys", "Glass Bells", "Nylon Guitar",
+                  "Drawbar Organ", "Saw Pluck", "Choir Pad", "FM Bell", "Prophet Poly", "Air Pad"]
+    names = [p["name"] for p in synth.PATCHES]
+    c = [pad(["keys", n if n in names else names[i % len(names)]]) for i, n in enumerate(keys_names)]
+    d = [pad(None) for _ in range(12)]
+    return [{"pads": a, "keys": False}, {"pads": b, "keys": True, "keys_pad": 0},
+            {"pads": c, "keys": True, "keys_pad": 0}, {"pads": d, "keys": False}]
+
+
 class ChopMixin:
     # ------------------------------------------------------------ state
     def chop_init(self):
         st = self.cfg.get("chop") or {}
+        self.cgroups = st.get("groups") if st.get("v") == 2 and st.get("groups") else default_groups()
+        self.cgrp = int(st.get("group", 0)) % 4
+        self.clast = int(st.get("last", 4)) % 12              # the last pad hit: what Settings and the fader edit
+        self.cedit_g = self.cgrp
         self.cfiles = chop_files()
-        default = next((f for f in self.cfiles if "drum" in f.lower() or "break" in f.lower()), None)
-        if default is None and self.cfiles:
-            default = self.cfiles[0]
-        self.cbanks = []
-        for b in range(4):
-            d = {"sample": default if b == 0 else "", "chop": 1 if b == 0 else 0, "pitch": 0, "level": 0.9,
-                 "choke": True, "reverse": False}
-            if b < len(st.get("banks", [])):
-                d.update(st["banks"][b])
-            self.cbanks.append(d)
-        self.cbank = int(st.get("bank", 0)) % 4
-        self.csel = 0                                     # which bank the Pads page edits
-        self.cwave = {}                                   # bank -> (min, max) per pixel for the screen
-        self.cslices = {}                                 # bank -> [(start, end) in samples]
-        self.clit = {}                                    # pad -> time it was hit
+        self.csrcs = sources()
+        self.clit = {}
+        self.cview = None                                     # (group, pad) shown in the waveform
         self.caudition = False
-        self.crec = None                                  # a recording in progress: {"until", "proc", "path"}
+        self.cfader = None                                    # last fader move: (time, what)
+        self.cfade_t = 0.0
+        self.crec = None
         self.crec_secs = int(st.get("rec_secs", 4))
+        self.cchop_src = st.get("chop_src")
+        self.cwave = {}
+        self.csel_down = self.csel_combo = False
         import shutil
-        caps = usb_capture_devices()
-        print("Brickchop: audio inputs %s, arecord %s" % (caps or "none", shutil.which("arecord") or "missing"),
-              flush=True)
-        for b in range(4):
-            self.chop_load(b, quiet=True)
+        print("Brickchop: audio inputs %s, arecord %s" % (usb_capture_devices() or "none",
+                                                          shutil.which("arecord") or "missing"), flush=True)
+        if st.get("v") != 2 and not any(p["src"] for p in self.cgroups[3]["pads"]):
+            loop = next((f for f in self.cfiles if "loop" in f.lower() or "break" in f.lower()), None)
+            if loop:
+                self.chop_to_group(3, loop, quiet=True)      # D starts with one of your loops, chopped
+        for g in range(4):
+            self.chop_send_group(g)
 
     def chop_state(self):
-        return {"bank": self.cbank, "banks": self.cbanks, "rec_secs": self.crec_secs}
+        return {"v": 2, "group": self.cgrp, "last": self.clast, "groups": self.cgroups, "rec_secs": self.crec_secs,
+                "chop_src": self.cchop_src}
 
-    # ------------------------------------------------------------ sampling from USB audio
+    # ------------------------------------------------------------ building sounds
+    def chop_pad_array(self, g, i):
+        p = self.cgroups[g]["pads"][i]
+        if not p.get("src"):
+            return None
+        return shape(raw_audio(p["src"]), p.get("tune", 0), p.get("level", 0.9), p.get("reverse", False))
+
+    def chop_send_group(self, g):
+        """Send a group's 12 sounds to the engine (in KEYS, the 12 notes of one sound)."""
+        grp = self.cgroups[g]
+        if grp.get("keys"):
+            k = grp.get("keys_pad", 0)
+            p = grp["pads"][k]
+            x = raw_audio(p["src"]) if p.get("src") else None
+            arrs = [shape(x, p.get("tune", 0) + n, p.get("level", 0.9), p.get("reverse", False)) for n in range(12)]
+        else:
+            arrs = [self.chop_pad_array(g, i) for i in range(12)]
+        self.eng.post("chop_load", g, arrs, None)
+        self.cwave.pop(g, None)
+
+    def chop_send_pad(self, g, i):
+        if self.cgroups[g].get("keys"):
+            self.chop_send_group(g)
+        else:
+            self.eng.post("chop_pad", g, i, self.chop_pad_array(g, i))
+
+    def chop_to_group(self, g, f, quiet=False):
+        """Chop one WAV onto all 12 pads of a group, at its hits."""
+        x = synth._sample_audio(f)
+        if x is None or len(x) < 1024:
+            if not quiet:
+                self.flash("COULD NOT READ THAT FILE")
+            return
+        starts = find_onsets(np.asarray(x, np.float32), 12)
+        if len(starts) < 12:                                  # few hits: fill the rest with equal slices
+            starts = sorted(set(starts) | {int(len(x) * k / 12) for k in range(12)})[:12]
+        bounds = [(s, starts[k + 1] if k + 1 < len(starts) else len(x)) for k, s in enumerate(starts)]
+        grp = self.cgroups[g]
+        grp["keys"] = False
+        grp["pads"] = [{"src": ["file", f, k, int(s), int(e)], "tune": 0, "level": 0.9, "choke": True,
+                        "reverse": False} for k, (s, e) in enumerate(bounds)]
+        self.cchop_src = f
+        self.chop_send_group(g)
+        if not quiet:
+            self.flash("GROUP %s: %s CHOPPED ONTO 12 PADS" % (GROUPS[g], src_label(["file", f]).upper()))
+
+    # ------------------------------------------------------------ playing
+    def chop_hit(self, i, vel=1.0):
+        g = self.cgrp
+        grp = self.cgroups[g]
+        keys = grp.get("keys")
+        if not keys and not grp["pads"][i].get("src"):
+            self.flash("PAD %d IS EMPTY   SELECT > PAD > SOUND" % (i + 1))
+            self.clast = i
+            return
+        choke = grp["pads"][grp.get("keys_pad", 0) if keys else i].get("choke", True)
+        self.eng.post("chop_hit", g, i, float(vel), -0.3 + 0.6 * (i % 4) / 3.0, bool(choke) and not keys)
+        self.clit[(g, i)] = time.perf_counter()
+        if not keys:
+            self.clast = i
+            self.cview = (g, i)
+
+    def chop_handle(self, name, down):
+        held = self.inp.held
+        if name == "SELECT":
+            if down:
+                self.csel_down, self.csel_combo = True, False
+            elif self.csel_down:
+                self.csel_down = False
+                if not self.csel_combo:
+                    self.cedit_g = self.cgrp
+                    self.open_menu()
+            return True
+        if name in PADS:
+            if not down:
+                return True
+            i = PADS.index(name)
+            if self.csel_down and name in ("LEFT", "UP", "DOWN", "RIGHT"):
+                self.csel_combo = True
+                g = ("LEFT", "UP", "DOWN", "RIGHT").index(name)
+                self.cgrp = self.cedit_g = g
+                grp = self.cgroups[g]
+                self.flash("GROUP %s  %s%s" % (GROUPS[g], GROUP_NAMES[g].upper(), "   KEYS" if grp.get("keys") else ""))
+                return True
+            self.chop_hit(i)
+            return True
+        if name == "L3":
+            if down:
+                self.chop_keys_toggle()
+            return True
+        if name == "START":
+            if down:
+                self.caudition = not self.caudition
+                g, i = self.cgrp, self.clast
+                arr = self.chop_pad_array(g, i) if self.caudition else None
+                self.eng.post("chop_audition", arr)
+                self.flash(("PLAYING PAD %d WHOLE" % (i + 1)) if self.caudition else "STOPPED")
+            return True
+        return False
+
+    def chop_keys_toggle(self):
+        grp = self.cgroups[self.cgrp]
+        if not grp.get("keys"):
+            if not grp["pads"][self.clast].get("src"):
+                self.flash("HIT A PAD WITH A SOUND FIRST, THEN L3")
+                return
+            grp["keys"], grp["keys_pad"] = True, self.clast
+            self.flash("KEYS   PAD %d (%s) ACROSS ALL 12 PADS" % (self.clast + 1,
+                                                                src_label(grp["pads"][self.clast]["src"]).upper()))
+        else:
+            grp["keys"] = False
+            self.flash("PADS   12 SOUNDS AGAIN")
+        self.chop_send_group(self.cgrp)
+
+    def chop_stick(self, x, y):
+        """The fader: up/down tunes the last pad a semitone at a time (in KEYS, the
+        whole keyboard), left/right sets its level."""
+        now = time.perf_counter()
+        if max(abs(x), abs(y)) < 0.5 or now - self.cfade_t < 0.16:
+            return
+        self.cfade_t = now
+        grp = self.cgroups[self.cgrp]
+        i = grp.get("keys_pad", 0) if grp.get("keys") else self.clast
+        p = grp["pads"][i]
+        if not p.get("src"):
+            return
+        if abs(y) >= abs(x):
+            p["tune"] = int(max(-24, min(24, p.get("tune", 0) + (1 if y > 0 else -1))))
+            what = "TUNE %+d" % p["tune"]
+        else:
+            p["level"] = round(max(0.05, min(1.6, p.get("level", 0.9) + (0.05 if x > 0 else -0.05))), 2)
+            what = "LEVEL %d%%" % round(p["level"] * 100)
+        self.chop_send_pad(self.cgrp, i)
+        self.cfader = (now, what)
+        self.flash("PAD %d   %s" % (i + 1, what))
+        if not grp.get("keys"):
+            self.chop_hit(i, 0.8)
+
+    def chop_midi(self, ev):
+        """MIDI in: C2 (36) up to B2 play pads 1 to 12, like a drum-pad layout; in KEYS,
+        any note plays the sound at that pitch."""
+        if ev[0] == "connect":
+            self.flash("MIDI IN: %s" % ev[1].upper())
+        elif ev[0] == "on":
+            self.chop_hit((ev[1] - 36) % 12, max(0.25, ev[2] / 127.0))
+
+    # ------------------------------------------------------------ recording from USB audio
     def chop_record(self):
-        """Record from a USB audio input (whatever the Brick sees as a capture card)
-        with arecord, into Brickchop's samples folder, then chop it onto the bank."""
         import shutil
         import subprocess
         caps = usb_capture_devices()
         if not caps:
             self.flash("NO USB AUDIO INPUT FOUND   PLUG ONE IN, THEN TRY AGAIN")
-            print("Brickchop: record: no capture device", flush=True)
             return
         if not shutil.which("arecord"):
             self.flash("THIS FIRMWARE HAS NO ARECORD")
-            print("Brickchop: record: arecord missing", flush=True)
             return
-        card, dev, name = caps[-1]                        # the newest card: the one just plugged in
+        card, dev, name = caps[-1]
         os.makedirs(synth.SAMPLE_DIR, exist_ok=True)
         fn = "rec_%s.wav" % time.strftime("%Y%m%d_%H%M%S")
         path = os.path.join(synth.SAMPLE_DIR, fn)
@@ -161,7 +416,7 @@ class ChopMixin:
             self.flash("COULD NOT START RECORDING: %s" % ex)
             return
         self.crec = {"until": time.perf_counter() + self.crec_secs, "proc": proc, "path": path, "file": fn,
-                     "name": name, "bank": self.csel}
+                     "name": name, "group": self.cedit_g, "pad": self.clast}
         self.menu = False
 
     def chop_tick(self, now):
@@ -169,8 +424,7 @@ class ChopMixin:
         if r is None:
             return
         if r["proc"].poll() is None:
-            left = max(0, r["until"] - now)
-            self.flash("RECORDING FROM %s   %.0f s" % (r["name"].upper(), left + 0.4))
+            self.flash("RECORDING FROM %s   %.0f s" % (r["name"].upper(), max(0, r["until"] - now) + 0.4))
             return
         out = (r["proc"].stdout.read() or b"").decode("utf-8", "replace").strip()
         if out:
@@ -182,258 +436,237 @@ class ChopMixin:
             self.flash("NOTHING CAME IN   SEE THE LOG")
             return
         self.cfiles = chop_files()
-        b = r["bank"]
-        self.cbanks[b]["sample"] = r["file"]
-        self.cbank = b
-        self.chop_load(b)
-        self.flash("SAMPLED %s INTO BANK %s   %s" % (r["name"].upper(), BANKS[b], r["file"]))
-
-    # ------------------------------------------------------------ cutting
-    def chop_load(self, b, quiet=False):
-        """Decode bank b's sample, cut it into 16 slices and send them to the engine."""
-        d = self.cbanks[b]
-        self.cslices[b], self.cwave[b] = [], None
-        if not d.get("sample"):
-            self.eng.post("chop_load", b, [], None)
-            return
-        x = synth._sample_audio(d["sample"])
-        if x is None or len(x) < 64:
-            if not quiet:
-                self.flash("COULD NOT READ %s" % short_name(d["sample"]).upper())
-            self.eng.post("chop_load", b, [], None)
-            return
-        x = np.asarray(x, np.float32)
-        if d.get("reverse"):
-            x = x[::-1].copy()
-        if d.get("pitch"):
-            r = 2 ** (d["pitch"] / 12.0)                  # pitch and speed together, like a sampler
-            idx = np.arange(0, len(x) - 1, r)
-            x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
-        sr = synth.SR
-        mode = CHOPS[d.get("chop", 1) % len(CHOPS)]
-        n = 8 if mode == "8 equal" else 16
-        if mode == "Transients":
-            starts = find_onsets(x, 16, sr)
-        else:
-            starts = [int(len(x) * i / n) for i in range(n)]
-        bounds = [(s, starts[i + 1] if i + 1 < len(starts) else len(x)) for i, s in enumerate(starts)]
-        bounds = bounds[:16]
-        slices = []
-        fi, fo = int(0.002 * sr), int(0.008 * sr)
-        for s, e in bounds:
-            seg = x[s:e].copy()
-            if len(seg) > fi + fo:
-                seg[:fi] *= np.linspace(0, 1, fi, dtype=np.float32)
-                seg[-fo:] *= np.linspace(1, 0, fo, dtype=np.float32)
-            slices.append(np.ascontiguousarray(np.repeat((seg * float(d.get("level", 0.9)))[:, None], 2, 1)))
-        self.cslices[b] = bounds
-        full = np.ascontiguousarray(np.repeat((x * float(d.get("level", 0.9)))[:, None], 2, 1))
-        self.eng.post("chop_load", b, slices, full)
-        # the picture: min and max of each column
-        W = 600
-        step = max(1, len(x) // W)
-        cols = len(x) // step
-        xs = x[: cols * step].reshape(cols, step)
-        self.cwave[b] = (xs.min(axis=1), xs.max(axis=1), len(x))
-        if not quiet:
-            self.flash("BANK %s   %s   %s, %d PADS" % (BANKS[b], short_name(d["sample"]).upper(), mode.upper(),
-                                                       len(slices)))
-
-    # ------------------------------------------------------------ playing
-    def chop_hit(self, pad, vel=1.0):
-        b = self.cbank
-        if not self.cslices.get(b):
-            self.flash("BANK %s IS EMPTY   SELECT > PADS > SAMPLE" % BANKS[b])
-            return
-        if pad >= len(self.cslices[b]):
-            return
-        d = self.cbanks[b]
-        self.eng.post("chop_hit", b, pad, float(vel), -0.25 + 0.5 * (pad % 8) / 7.0, bool(d.get("choke", True)))
-        self.clit[(b, pad)] = time.perf_counter()
-
-    def chop_handle(self, name, down):
-        held = self.inp.held
-        if name in PADS:
-            if not down:
-                return True
-            i = PADS.index(name)
-            if "R1" in held:
-                if i < 4:
-                    self.cbank = i
-                    self.csel = i
-                    d = self.cbanks[i]
-                    self.flash("BANK %s   %s" % (BANKS[i], short_name(d["sample"]).upper() if d["sample"] else "EMPTY"))
-                return True
-            self.chop_hit(i + (8 if "L1" in held else 0))
-            return True
-        if name == "START":
-            if down:
-                self.caudition = not self.caudition
-                self.eng.post("chop_full", self.cbank, self.caudition)
-                self.flash("PLAYING BANK %s" % BANKS[self.cbank] if self.caudition else "STOPPED")
-            return True
-        if name in ("L1", "R1"):
-            return True                                   # held as page and bank shifts
-        if name == "L3":
-            return True                                   # no mode wheel here: Brickchop is all pads
-        return False
-
-    def chop_midi(self, ev):
-        """MIDI in: notes from C2 (36) up play pads 1 to 16, like a drum pad layout."""
-        if ev[0] == "on":
-            pad = (ev[1] - 36) % 16
-            self.chop_hit(pad, max(0.25, ev[2] / 127.0))
+        self.csrcs = sources()
+        g, i = r["group"], r["pad"]
+        self.cgroups[g]["pads"][i]["src"] = ["file", r["file"]]
+        self.cgrp = g
+        self.chop_send_pad(g, i)
+        self.flash("SAMPLED %s ONTO GROUP %s PAD %d" % (r["name"].upper(), GROUPS[g], i + 1))
 
     # ------------------------------------------------------------ settings
     def chop_menu_pages(self):
-        return ["Pads", "Global", "FX"]
+        return ["Pad", "Group", "Global", "FX"]
 
     def chop_menu_items(self, pg):
-        d = self.cbanks[self.csel]
-        return [("Bank", "%s%s" % (BANKS[self.csel], "  (playing)" if self.csel == self.cbank else "")),
-                ("Sample", short_name(d["sample"]) if d["sample"] else "none"),
-                ("Chop", CHOPS[d.get("chop", 1) % len(CHOPS)]),
-                ("Pitch", "%+d semitones" % d.get("pitch", 0)),
-                ("Level", "%d%%" % round(d.get("level", 0.9) * 100)),
-                ("Choke", "On" if d.get("choke", True) else "Off"),
-                ("Reverse", "On" if d.get("reverse") else "Off"),
-                ("Files", "%d samples found" % len(self.cfiles)),
-                ("Record", ("A records from %s" % usb_capture_devices()[-1][2]) if usb_capture_devices()
-                 else "no USB audio input"),
-                ("Record length", "%d s" % self.crec_secs)]
+        g = self.cedit_g
+        grp = self.cgroups[g]
+        if pg == "Group":
+            files = [s for s in self.csrcs if s[0] == "file"]
+            cs = self.cchop_src or (files[0][1] if files else None)
+            caps = usb_capture_devices()
+            return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
+                    ("Mode", "Keys (pad %d)" % (grp.get("keys_pad", 0) + 1) if grp.get("keys") else "12 pads"),
+                    ("Chop file", src_label(["file", cs]) if cs else "no WAVs found"),
+                    ("Chop to group", "A chops it onto all 12 pads"),
+                    ("Load kit", "A loads %s" % getattr(self, "ckit_pick", kit_list()[0])),
+                    ("Kit", getattr(self, "ckit_pick", kit_list()[0])),
+                    ("Record", ("A records %d s from %s" % (self.crec_secs, caps[-1][2])) if caps else "no USB audio input"),
+                    ("Record length", "%d s" % self.crec_secs),
+                    ("Rescan files", "%d WAVs" % len(self.cfiles))]
+        i = self.clast
+        p = grp["pads"][i]
+        return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
+                ("Pad", "%d   %s" % (i + 1, GLYPH[PADS[i]])),
+                ("Sound", src_label(p.get("src"))),
+                ("Tune", "%+d" % p.get("tune", 0)),
+                ("Level", "%d%%" % round(p.get("level", 0.9) * 100)),
+                ("Choke", "On" if p.get("choke", True) else "Off"),
+                ("Reverse", "On" if p.get("reverse") else "Off"),
+                ("Clear pad", "A empties it")]
 
     def chop_menu_change(self, pg, name, d):
-        bk = self.cbanks[self.csel]
-        if name == "Bank":
-            self.csel = (self.csel + d) % 4
+        g = self.cedit_g
+        grp = self.cgroups[g]
+        if name == "Group":
+            self.cedit_g = (g + d) % 4
+            self.cgrp = self.cedit_g
             return
-        if name == "Sample":
-            opts = [""] + self.cfiles
-            cur = bk["sample"] if bk["sample"] in opts else ""
-            bk["sample"] = opts[(opts.index(cur) + d) % len(opts)]
-        elif name == "Chop":
-            bk["chop"] = (bk.get("chop", 1) + d) % len(CHOPS)
-        elif name == "Pitch":
-            bk["pitch"] = max(-12, min(12, bk.get("pitch", 0) + d))
+        if pg == "Group":
+            if name == "Mode":
+                self.cgrp = g
+                self.chop_keys_toggle()
+            elif name == "Chop file":
+                files = [s[1] for s in self.csrcs if s[0] == "file"]
+                if files:
+                    cur = self.cchop_src if self.cchop_src in files else files[0]
+                    self.cchop_src = files[(files.index(cur) + d) % len(files)]
+            elif name == "Kit":
+                kits = kit_list()
+                cur = getattr(self, "ckit_pick", kits[0])
+                self.ckit_pick = kits[(kits.index(cur) + d) % len(kits) if cur in kits else 0]
+            elif name == "Record length":
+                opts = [2, 4, 8, 12]
+                self.crec_secs = opts[(opts.index(self.crec_secs) + d) % 4 if self.crec_secs in opts else 1]
+            return
+        i = self.clast
+        p = grp["pads"][i]
+        if name == "Pad":
+            self.clast = (i + d) % 12
+            return
+        if name == "Sound":
+            opts = [None] + self.csrcs
+            key = [tuple(s) if s else None for s in opts]
+            cur = tuple(p["src"][:2]) if p.get("src") else None
+            k = next((n for n, s in enumerate(key) if (s and cur and s[:2] == cur) or (s is None and cur is None)), 0)
+            nxt = opts[(k + d) % len(opts)]
+            p["src"] = list(nxt) if nxt else None
+        elif name == "Tune":
+            p["tune"] = int(max(-24, min(24, p.get("tune", 0) + d)))
         elif name == "Level":
-            bk["level"] = round(max(0.1, min(1.5, bk.get("level", 0.9) + 0.05 * d)), 2)
+            p["level"] = round(max(0.05, min(1.6, p.get("level", 0.9) + 0.05 * d)), 2)
         elif name == "Choke":
-            bk["choke"] = not bk.get("choke", True)
+            p["choke"] = not p.get("choke", True)
             return
         elif name == "Reverse":
-            bk["reverse"] = not bk.get("reverse")
-        elif name == "Files":
-            self.cfiles = chop_files()
+            p["reverse"] = not p.get("reverse")
+        else:
             return
-        elif name == "Record":
-            return
-        elif name == "Record length":
-            opts = [2, 4, 8, 12]
-            self.crec_secs = opts[(opts.index(self.crec_secs) + d) % len(opts) if self.crec_secs in opts else 1]
-            return
-        self.chop_load(self.csel)
-        if name == "Sample" and bk["sample"]:
-            self.cbank = self.csel                        # hear what you just picked
-            self.chop_hit(0)
+        self.cgrp = g
+        self.chop_send_pad(g, i)
+        if p.get("src") and not grp.get("keys"):
+            self.chop_hit(i, 0.8)                              # hear it as you change it
 
     def chop_menu_activate(self, pg, name):
-        if name == "Record":
+        g = self.cedit_g
+        if name == "Chop to group" and self.cchop_src:
+            self.chop_to_group(g, self.cchop_src)
+            self.cgrp = g
+        elif name in ("Chop file",) and not self.cchop_src:
+            self.flash("NO WAVs FOUND   COPY SOME INTO A SAMPLES FOLDER")
+        elif name == "Load kit":
+            k = getattr(self, "ckit_pick", kit_list()[0])
+            grp = self.cgroups[g]
+            grp["keys"] = False
+            pad = lambda part, tune=0: {"src": ["kit", "%s/%s" % (k, part)], "tune": tune, "level": 0.9,
+                                        "choke": True, "reverse": False}
+            # the shoulders get pitched-down extras; the D-pad and face buttons the main eight
+            grp["pads"] = [pad("kick", -3), pad("snare", -3), pad("tom", -5), pad("clap", -2)] + \
+                [pad(p) for p in KIT_PARTS]
+            self.chop_send_group(g)
+            self.cgrp = g
+            self.flash("GROUP %s: %s KIT" % (GROUPS[g], k.upper()))
+        elif name == "Record":
             self.chop_record()
-            return
-        if name == "Files":
+        elif name == "Rescan files":
             self.cfiles = chop_files()
-            self.flash("%d SAMPLES FOUND" % len(self.cfiles))
-        elif name == "Sample":
-            self.cbank = self.csel
-            self.chop_hit(0)
+            self.csrcs = sources()
+            self.flash("%d WAVs FOUND" % len(self.cfiles))
+        elif name == "Clear pad":
+            self.cgroups[g]["pads"][self.clast]["src"] = None
+            self.chop_send_pad(g, self.clast)
+        elif name == "Mode":
+            self.cgrp = g
+            self.chop_keys_toggle()
 
     def chop_header_info(self):
-        d = self.cbanks[self.cbank]
-        return "BANK %s   %s" % (BANKS[self.cbank], short_name(d["sample"]) if d["sample"] else "empty")
+        grp = self.cgroups[self.cgrp]
+        return "GROUP %s  %s%s" % (GROUPS[self.cgrp], GROUP_NAMES[self.cgrp].upper(), "  KEYS" if grp.get("keys") else "")
 
     # ------------------------------------------------------------ screen
+    def chop_wave(self, g, i):
+        key = (g, i, self.cgroups[g].get("keys"))
+        w = self.cwave.get(key)
+        if w is None:
+            grp = self.cgroups[g]
+            p = grp["pads"][grp.get("keys_pad", 0) if grp.get("keys") else i]
+            x = raw_audio(p["src"]) if p.get("src") else None
+            if x is None or len(x) < 32:
+                w = False
+            else:
+                cols = 200
+                step = max(1, len(x) // cols)
+                n = (len(x) // step) * step
+                xs = x[:n].reshape(-1, step)
+                w = (xs.min(axis=1), xs.max(axis=1))
+            self.cwave[key] = w
+        return w
+
     def draw_chop(self, c, now):
         mm = M()
         W, L = mm.BASE_W, mm.L
-        b = self.cbank
-        gx0, gx1, gy0, gy1 = 20, W - 20, 50, L["tiles_y"] - 14
-        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.55), (gx0 - 8, gy0 - 6, gx1 - gx0 + 16, gy1 - gy0 + 12),
-                         border_radius=10)
-        wv = self.cwave.get(b)
-        page = 8 if "L1" in self.inp.held else 0
-        if wv is None:
-            self.text(c, "Bank %s is empty" % BANKS[b], self.f_med, mm.DIM, ((gx0 + gx1) // 2, (gy0 + gy1) // 2 - 12),
-                      center=True)
-            self.text(c, "SELECT > Pads > Sample to load one", self.f_small, mm.DIM,
-                      ((gx0 + gx1) // 2, (gy0 + gy1) // 2 + 16), center=True)
+        g = self.cgrp
+        grp = self.cgroups[g]
+        keys = grp.get("keys")
+        # the 3 x 4 pad grid
+        tw, th, gap = 92, 70, 8
+        gx, gy = 20, 50
+        for i, btn in enumerate(PADS):
+            r = pygame.Rect(gx + (i % 4) * (tw + gap), gy + (i // 4) * (th + gap), tw, th)
+            lv = max(0.0, 1.0 - (now - self.clit.get((g, i), -9)) / 0.25)
+            if keys:
+                base = grp["pads"][grp.get("keys_pad", 0)]
+                have = bool(base.get("src"))
+                label = NOTE[(i + base.get("tune", 0)) % 12]
+            else:
+                p = grp["pads"][i]
+                have = bool(p.get("src"))
+                label = src_label(p.get("src")) if have else ""
+            last = (i == self.clast) and not keys
+            fill = mm.PANEL if have else self.mix(mm.BG, mm.PANEL, 0.4)
+            pygame.draw.rect(c, self.mix(fill, mm.ACCENT, lv), r, border_radius=10)
+            if last:
+                pygame.draw.rect(c, mm.ACCENT2, r, 2, border_radius=10)
+            self.text(c, str(i + 1), self.f_small, self.mix(mm.ACCENT2 if have else mm.DIM, mm.BG, lv), (r.x + 8, r.y + 5))
+            self.text(c, GLYPH[btn], self.f_small, self.mix(mm.DIM, mm.BG, lv), (r.right - 8, r.y + 5), right=True)
+            if label:
+                f = self.f_med if keys else self.f_small
+                txt = label if self.f_small.size(label)[0] < tw - 10 else label[: max(3, len(label) * (tw - 14) // max(1, self.f_small.size(label)[0]))]
+                self.text(c, txt, f, self.mix(mm.INK, mm.BG, lv), (r.centerx, r.y + th // 2 + (2 if keys else 8)),
+                          center=True)
+        # the right panel: group, mode, the last pad and the fader
+        px, pw = gx + 4 * (tw + gap) + 8, W - 20 - (gx + 4 * (tw + gap) + 8)
+        ph = 3 * th + 2 * gap
+        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.7), (px, gy, pw, ph), border_radius=10)
+        self.text(c, GROUPS[g], self.f_big, mm.ACCENT, (px + 14, gy + 8))
+        self.text(c, GROUP_NAMES[g].upper(), self.f_small, mm.INK, (px + 58, gy + 12))
+        self.text(c, "KEYS" if keys else "12 PADS", self.f_small, mm.ACCENT2 if keys else mm.DIM, (px + 58, gy + 32))
+        i = grp.get("keys_pad", 0) if keys else self.clast
+        p = grp["pads"][i]
+        self.text(c, "PAD %d" % (i + 1), self.f_small, mm.DIM, (px + 14, gy + 84))
+        name = src_label(p.get("src"))
+        while len(name) > 3 and self.f_small.size(name)[0] > pw - 24:
+            name = name[:-2]
+        self.text(c, name, self.f_small, mm.INK, (px + 14, gy + 104))
+        hot = self.cfader and now - self.cfader[0] < 1.0
+        self.text(c, "tune %+d" % p.get("tune", 0), self.f_med, mm.ACCENT2 if hot else mm.INK, (px + 14, gy + 150))
+        self.text(c, "level %d%%" % round(p.get("level", 0.9) * 100), self.f_small, mm.DIM, (px + 14, gy + 186))
+        # the last pad's sound, wide, under the grid
+        wx0, wx1, wy0 = 20, W - 20, gy + ph + 12
+        wy1 = L["kb_y"] - 10
+        pygame.draw.rect(c, self.mix(mm.BG, mm.PANEL, 0.45), (wx0, wy0, wx1 - wx0, wy1 - wy0), border_radius=10)
+        w = self.chop_wave(g, i)
+        if w:
+            mn, mx = w
+            n = len(mn)
+            pk = max(1e-6, float(max(abs(mn.min()), abs(mx.max()))))
+            cy, hh = (wy0 + wy1) // 2, (wy1 - wy0) // 2 - 6
+            lv = max(0.0, 1.0 - (now - self.clit.get((g, i if not keys else -1), -9)) / 0.4)
+            top = [(wx0 + 8 + int((wx1 - wx0 - 16) * k / n), cy - int(mx[k] / pk * hh)) for k in range(n)]
+            bot = [(wx0 + 8 + int((wx1 - wx0 - 16) * k / n), cy - int(mn[k] / pk * hh)) for k in range(n)]
+            if len(top) > 1:
+                pygame.draw.polygon(c, self.mix(mm.INK, mm.ACCENT, lv), top + bot[::-1])
         else:
-            mn, mx, n = wv
-            cols = len(mn)
-            cy, hh = (gy0 + gy1) // 2, (gy1 - gy0) // 2 - 6
-            sl = self.cslices.get(b, [])
-            # the slices: alternate tint, lit when hit, numbered
-            for i, (s, e) in enumerate(sl):
-                xa = gx0 + int((gx1 - gx0) * s / n)
-                xb = gx0 + int((gx1 - gx0) * e / n)
-                lv = max(0.0, 1.0 - (now - self.clit.get((b, i), -9)) / 0.35)
-                on_page = page <= i < page + 8
-                base = self.mix(mm.BG, mm.PANEL, 0.9 if i % 2 else 0.6)
-                pygame.draw.rect(c, self.mix(base, mm.ACCENT, 0.55 * lv), (xa, gy0, max(1, xb - xa), gy1 - gy0))
-                pygame.draw.line(c, self.mix(mm.BG, mm.DIM, 0.7), (xa, gy0), (xa, gy1), 1)
-                if xb - xa > 14:
-                    self.text(c, str(i + 1), self.f_small, mm.ACCENT2 if on_page else self.mix(mm.BG, mm.DIM, 0.6),
-                              (xa + 4, gy0 + 2))
-            pts_top, pts_bot = [], []
-            for k in range(cols):
-                x = gx0 + int((gx1 - gx0) * k / cols)
-                pts_top.append((x, cy - int(mx[k] * hh)))
-                pts_bot.append((x, cy - int(mn[k] * hh)))
-            if len(pts_top) > 1:
-                pygame.draw.polygon(c, mm.INK, pts_top + pts_bot[::-1])
-        # pads
-        tw, gap = 70, 6
-        x0 = (W - (8 * tw + 7 * gap)) // 2
-        th = L["tile_h"]
-        for k, btn in enumerate(PADS):
-            i = k + page
-            lv = max(0.0, 1.0 - (now - self.clit.get((b, i), -9)) / 0.25)
-            have = i < len(self.cslices.get(b, []))
-            r = pygame.Rect(x0 + k * (tw + gap), L["tiles_y"], tw, th)
-            pygame.draw.rect(c, self.mix(mm.PANEL if have else mm.BG, mm.ACCENT, lv), r, border_radius=10)
-            self.text(c, str(i + 1), self.f_med, self.mix(mm.INK if have else mm.DIM, mm.BG, lv),
-                      (r.centerx, r.y + th * 38 // 100), center=True)
-            self.text(c, GLYPH[btn], self.f_small, self.mix(mm.DIM, mm.BG, lv), (r.centerx, r.y + th * 76 // 100),
+            self.text(c, "empty pad   SELECT > Pad > Sound", self.f_small, mm.DIM, ((wx0 + wx1) // 2, (wy0 + wy1) // 2 - 9),
                       center=True)
 
     def draw_chop_bar(self, c, now):
-        """Where the keyboard is in Brickchord: the four banks and all 16 pads at a
-        glance, the page you are on (hold L1 for 9-16) and how the bank is chopped."""
+        """Where the keyboard is in Brickchord: the four groups and what is on them."""
         mm = M()
         W, L = mm.BASE_W, mm.L
         ky, kh = L["kb_y"], L["kb_h"]
         pygame.draw.rect(c, mm.BG, (0, ky - 2, W, kh + 4))
-        b = self.cbank
         x = 20
-        for k in range(4):
-            on = k == b
-            r = pygame.Rect(x, ky + 4, 34, kh - 8)
-            filled = bool(self.cslices.get(k))
-            pygame.draw.rect(c, mm.ACCENT if on else self.mix(mm.BG, mm.PANEL, 0.95 if filled else 0.5), r,
-                             border_radius=7)
-            self.text(c, BANKS[k], self.f_small, mm.BG if on else (mm.INK if filled else mm.DIM), r.center, center=True)
-            x += 40
-        x += 14
-        page = 8 if "L1" in self.inp.held else 0
-        n = len(self.cslices.get(b, []))
-        cw = (W - 20 - x - 120) / 16.0
-        for i in range(16):
-            lv = max(0.0, 1.0 - (now - self.clit.get((b, i), -9)) / 0.3)
-            r = pygame.Rect(int(x + i * cw) + (6 if i >= 8 else 0), ky + 8, int(cw) - 3, kh - 16)
-            on_page = page <= i < page + 8
-            base = self.mix(mm.BG, mm.PANEL, 1.0 if i < n else 0.4)
-            if on_page and i < n:
-                base = self.mix(base, mm.ACCENT2, 0.18)
-            pygame.draw.rect(c, self.mix(base, mm.ACCENT, lv), r, border_radius=4)
-        d = self.cbanks[b]
-        self.text(c, CHOPS[d.get("chop", 1) % len(CHOPS)].upper(), self.f_small, mm.DIM, (W - 20, ky + kh // 2 - 9),
-                  right=True)
+        for g in range(4):
+            on = g == self.cgrp
+            grp = self.cgroups[g]
+            r = pygame.Rect(x, ky + 4, 140, kh - 8)
+            pygame.draw.rect(c, mm.ACCENT if on else self.mix(mm.BG, mm.PANEL, 0.9), r, border_radius=8)
+            self.text(c, "%s  %s" % (GROUPS[g], GROUP_NAMES[g]), self.f_small, mm.BG if on else mm.INK,
+                      (r.x + 10, r.centery - 9))
+            if grp.get("keys"):                                 # KEYS: a little keyboard mark
+                for k in range(4):
+                    pygame.draw.rect(c, mm.BG if on else mm.ACCENT2, (r.right - 46 + k * 6, r.centery - 5, 4, 10))
+            hit = max([self.clit.get((g, k), -9) for k in range(12)])
+            lv = max(0.0, 1.0 - (now - hit) / 0.25)
+            pygame.draw.circle(c, self.mix(mm.BG if on else mm.DIM, mm.ACCENT2, lv), (r.right - 14, r.centery), 5)
+            x += 150

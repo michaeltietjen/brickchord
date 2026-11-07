@@ -863,11 +863,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
             return
         if edition.CHOP:
             while q:
-                ev = q.popleft()
-                if ev[0] == "connect":
-                    self.flash("MIDI IN: %s" % ev[1].upper())
-                else:
-                    self.chop_midi(ev)
+                self.chop_midi(q.popleft())
             return
         while q:
             ev = q.popleft()
@@ -1121,6 +1117,10 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
             x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
             self.stick_xy = (x, y)
             self.amb_stick(x, y)
+        elif edition.CHOP and (st.get("lx") or st.get("ly")):
+            x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
+            self.stick_xy = (x, y)
+            self.chop_stick(x, y)
         elif (st.get("lx") or st.get("ly")) and (self.wheel_open or self.imode != "Play"):
             x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
             self.stick_xy = (x, y)
@@ -1193,7 +1193,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         if edition.AMBIENT:
             return "Melody" if self.asel >= 6 else "Voice"
         if edition.CHOP:
-            return "Pads"
+            return "Pad"
         if im == "Effects":
             return "FX"
         if edition.LAB:
@@ -1224,7 +1224,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
     AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
 
     def menu_items(self):
-        if edition.CHOP and self.menu_pg == "Pads":
+        if edition.CHOP and self.menu_pg in ("Pad", "Group"):
             return self.chop_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
@@ -1305,7 +1305,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
-        if edition.CHOP and self.menu_pg == "Pads":
+        if edition.CHOP and self.menu_pg in ("Pad", "Group"):
             self.chop_menu_change(self.menu_pg, name, d)
             return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
@@ -1448,7 +1448,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
-        if edition.CHOP and self.menu_pg == "Pads":
+        if edition.CHOP and self.menu_pg in ("Pad", "Group"):
             self.chop_menu_activate(self.menu_pg, name)
             return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
@@ -1973,7 +1973,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         hint = (("buttons = melody   L-stick <> strum ^v arp   L1/R1 octave   R2+button chord   START stop"
                  if edition.PLAY and self.aprog.get("run") else
                  "chords <^>vXAB  L-stick strum/arp  R2+chord+L-stick scrub  L1 7th  R1 sus4  START play")
-                if edition.AMBIENT else ("pads <^v>YXBA   L1 pads 9-16   R1+pad bank   START whole sample   SELECT chop"
+                if edition.AMBIENT else ("12 pads: shoulders, <^v>, YXBA   SELECT+<^v> group   L3 keys   L-stick tune/level   START whole"
                                          if edition.CHOP else None)) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")

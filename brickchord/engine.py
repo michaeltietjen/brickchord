@@ -2089,7 +2089,7 @@ class Engine:
 
     def c_chop_hit(self, bank, pad, vel=1.0, pan=0.0, choke=True):
         bk = self.__dict__.get("chop", {}).get(int(bank))
-        if not bk or pad >= len(bk[0]):
+        if not bk or pad >= len(bk[0]) or bk[0][int(pad)] is None:
             return
         tag = "chop%d_%d" % (int(bank), int(pad))
         if choke:                                      # the same pad again cuts the last one off
@@ -2099,6 +2099,20 @@ class Engine:
                     v.rel_at, v.rel_len = int(self.t), fast
         self._voice((bk[0][int(pad)], None), float(vel), float(pan), self.t, tag, srev=0.5, sdly=0.4,
                     rel=int(0.01 * self.sr))
+
+    def c_chop_pad(self, bank, pad, arr):
+        bk = self.__dict__.setdefault("chop", {}).setdefault(int(bank), ([None] * 12, None))
+        sl = list(bk[0]) + [None] * (12 - len(bk[0]))
+        sl[int(pad)] = arr
+        self.chop[int(bank)] = (sl, bk[1])
+
+    def c_chop_audition(self, arr):
+        fast = int(0.02 * self.sr)
+        for v in self.voices:
+            if v.tag == "chopfull" and (v.rel_at is None or v.rel_at > self.t):
+                v.rel_at, v.rel_len = int(self.t), fast
+        if arr is not None:
+            self._voice((arr, None), 1.0, 0.0, self.t, "chopfull", srev=0.5, sdly=0.4, rel=int(0.02 * self.sr))
 
     def c_chop_full(self, bank, on=True):
         fast = int(0.02 * self.sr)
