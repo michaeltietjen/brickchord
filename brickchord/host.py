@@ -216,6 +216,38 @@ def _resample(e, r):
     return (rs(a, False), None if l is None else rs(l, True))
 
 
+# ---------------------------------------------------------------- the render server
+def _render_server(conn):
+    """A process of its own that renders notes when the audio process needs one
+    right away. Rendering in the audio process itself held its interpreter lock for
+    a long time and starved the sound (dropouts at launch and on a new sound);
+    waiting on this pipe instead leaves the sound running."""
+    try:
+        os.nice(5)
+    except Exception:
+        pass
+    import numpy as np
+    import synth
+    import render_worker
+    while True:
+        try:
+            msg = conn.recv()
+        except (EOFError, OSError):
+            return
+        if msg is None:
+            return
+        k, path = msg
+        try:
+            a, l = synth.render_note(k[0], json.loads(k[1]), arrays=True)
+            try:
+                render_worker.save_note(np, path, a, l)
+            except Exception:
+                pass
+            conn.send(("ok", a, l))
+        except Exception as ex:
+            conn.send(("err", repr(ex)))
+
+
 # ---------------------------------------------------------------- fallback: threads
 class LocalHost:
     """Audio streams from a dedicated thread in this process. Notes come from a
@@ -226,10 +258,23 @@ class LocalHost:
     IDLE_SEC = 4.0              # only render after this long with nothing sounding
     KEEP_SOUNDS = 10            # sound folders kept in the disk cache
 
-    def __init__(self, sr, block):
+    def __init__(self, sr, block, render_server=False):
         import engine
         import synth
         self.synth = synth
+        self._rs = None
+        if render_server:
+            try:
+                import multiprocessing as mp
+                ctx = mp.get_context("spawn")
+                a, b = ctx.Pipe()
+                p = ctx.Process(target=_render_server, args=(b,), daemon=True)
+                p.start()
+                self._rs, self._rs_proc = a, p
+                _log("render server: pid", p.pid)
+            except Exception as ex:
+                _log("render server unavailable:", ex)
+                self._rs = None
         self.eng = engine.Engine(sr, block, synth.reverb_ir(1.2))
         self.eng.post("drums", False, None, synth.kit_arrays())
         self.eng.post("kits", synth.all_kits(SAMPLES))
@@ -288,6 +333,22 @@ class LocalHost:
     # ---------------- rendering
     def _render(self, k):
         e = self.cache.get(k)
+        if e is None and self._rs is not None:
+            try:
+                t0 = time.time()
+                self._rs.send((k, self._path(k)))
+                while not self._rs.poll(0.01):           # waiting here leaves the sound running
+                    if time.time() - t0 > 30:
+                        raise TimeoutError("render server")
+                st = self._rs.recv()
+                if st[0] == "ok":
+                    e = (st[1], st[2])
+                    self.cache[k] = e
+                else:
+                    _log("render server:", st[1])
+            except Exception as ex:
+                _log("render server failed, rendering here:", ex)
+                self._rs = None
         if e is None:
             e = self.synth.render_note(k[0], json.loads(k[1]), arrays=True)
             self.cache[k] = e
@@ -462,12 +523,7 @@ class LocalHost:
         if missing and standins:
             if not have:
                 k0 = sorted(missing)[len(missing) // 2]
-                e = self.synth.render_note(k0[0], json.loads(k0[1]), arrays=True)
-                try:
-                    import render_worker
-                    render_worker.save_note(np, self._path(k0), e[0], e[1])
-                except Exception as ex:
-                    _log("cache write:", ex)
+                e = self._render(k0)
                 snd[k0[0]] = have[k0[0]] = e
                 missing.remove(k0)
             for k in missing:

@@ -291,6 +291,17 @@ class Engine:
             r.setflags(write=False)
         return r
 
+    _SUMS = {}
+
+    @classmethod
+    def _amb_sums(cls, N):
+        s = cls._SUMS.get(N)
+        if s is None:
+            ramp = cls._ramp(N)[:, 0].astype(np.float64)
+            s = cls._SUMS[N] = (np.arange(N, dtype=np.float64),
+                                np.concatenate(([0.0], np.cumsum(ramp[:-1]))))
+        return s
+
     def _cloud_alive(self, ch):
         """Keep a silent track's chain running only while its Cloud still has
         something to play: Freeze holds forever; the others for the two seconds
@@ -894,9 +905,12 @@ class Engine:
             t0 = 1.0 - v.trem * 0.5 * (1 + math.sin(ph0 * 0.5))
             t1 = 1.0 - v.trem * 0.5 * (1 + math.sin(v.ph * 0.5))
             ramp = self._ramp(N)[:, 0]
-            r = r0 + (r1 - r0) * ramp
-            pos = v.pos + np.concatenate(([0.0], np.cumsum(r[:-1], dtype=np.float64)))
-            v.pos = float(pos[-1] + r[-1])
+            # positions: the running sum of a rate that ramps r0 -> r1 across the
+            # block. The sums of 1 and of the ramp are the same every block, so they
+            # are built once and the positions are two multiply-adds per voice.
+            I, S = self._amb_sums(N)
+            pos = v.pos + r0 * I + (r1 - r0) * S
+            v.pos = float(pos[-1] + r1)
             total = len(v.a) + (1e18 if v.l is not None else 0)
             if pos[0] >= total:
                 continue

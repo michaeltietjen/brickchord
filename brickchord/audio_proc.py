@@ -57,7 +57,7 @@ def main():
     except Exception:
         pass
     import host as H
-    h = H.LocalHost(sr, block)
+    h = H.LocalHost(sr, block, render_server=True)
     conn.send(("ready", h.eng.sink))
     # The garbage collector can pause for milliseconds at a random moment, which on
     # the Brick is enough to make an audio block late. Everything built at startup
