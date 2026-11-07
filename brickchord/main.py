@@ -1227,7 +1227,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
     AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
 
     def menu_items(self):
-        if edition.CHOP and self.menu_pg in ("Pad", "Group"):
+        if edition.CHOP and self.menu_pg in ("Pad", "Group", "Seq"):
             return self.chop_menu_items(self.menu_pg)
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
             return self.amb_menu_items(self.menu_pg)
@@ -1308,7 +1308,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         name = self.menu_items()[self.menu_i][0]
         if name.startswith("A "):
             name = name[2:]                 # bus A rows share the Brickchord handlers
-        if edition.CHOP and self.menu_pg in ("Pad", "Group"):
+        if edition.CHOP and self.menu_pg in ("Pad", "Group", "Seq"):
             self.chop_menu_change(self.menu_pg, name, d)
             return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
@@ -1451,7 +1451,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
 
     def menu_activate(self):
         name = self.menu_items()[self.menu_i][0]
-        if edition.CHOP and self.menu_pg in ("Pad", "Group"):
+        if edition.CHOP and self.menu_pg in ("Pad", "Group", "Seq"):
             self.chop_menu_activate(self.menu_pg, name)
             return
         if edition.AMBIENT and self.menu_pg in ("Songs", "Voice", "Chords", "Melody", "Scenes"):
@@ -1976,7 +1976,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, modes.ModesMixin):
         hint = (("buttons = melody   L-stick <> strum ^v arp   L1/R1 octave   R2+button chord   START stop"
                  if edition.PLAY and self.aprog.get("run") else
                  "chords <^>vXAB  L-stick strum/arp  R2+chord+L-stick scrub  L1 7th  R1 sus4  START play")
-                if edition.AMBIENT else ("SELECT+<^v> group   L3 keys   L-stick tune/level   R-stick punch-in FX   START whole"
+                if edition.AMBIENT else ("START play  R3 rec  SELECT+<^v> group  L3 keys  L-stick tune/level  R-stick punch-in"
                                          if edition.CHOP else None)) or \
             self.mode_hint() or ("R2 rec layer   START play/stop   SELECT menu (hold: song)   L3 modes" if edition.LAB
                                     else "SELECT menu   START beat   L3 modes")

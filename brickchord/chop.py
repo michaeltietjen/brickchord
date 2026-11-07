@@ -11,8 +11,10 @@
 #   SELECT + < ^ v >   group A, B, C or D        SELECT (tap)   Settings
 #   L3                 KEYS: the last pad's sound across all 12 pads, chromatically
 #   left stick         the fader: up/down tunes the last pad, left/right its level
-#   START              play the last pad's whole sound (again: stop)
-#   right stick        filter and space
+#   START              play / stop the patterns (every group's, together)
+#   R3 (click)         record: what you play goes into the group's pattern, on the 16ths
+#   R3 held + pad      erase that pad from the pattern
+#   right stick        punch-in FX, only while held
 #
 # Sounds are built here, in the UI process (a kit part, a synth note, a WAV or a
 # slice of one), and sent to the engine once; a pad press is just a trigger.
@@ -233,6 +235,14 @@ class ChopMixin:
         self.cchop_src = st.get("chop_src")
         self.cwave = {}
         self.csel_down = self.csel_combo = False
+        self.cbpm = float(st.get("bpm", 100))
+        self.cclick = bool(st.get("click", True))
+        self.cplay = self.crec_on = False
+        self.cplay_t0 = 0.0
+        self.cr3_down = self.cr3_combo = False
+        self.ccommit = None
+        for grp in self.cgroups:
+            grp.setdefault("pattern", {"bars": 1, "ev": []})
         import shutil
         print("Brickchop: audio inputs %s, arecord %s" % (usb_capture_devices() or "none",
                                                           shutil.which("arecord") or "missing"), flush=True)
@@ -242,10 +252,65 @@ class ChopMixin:
                 self.chop_to_group(3, loop, quiet=True)      # D starts with one of your loops, chopped
         for g in range(4):
             self.chop_send_group(g)
+            self.chop_send_seq(g)
 
     def chop_state(self):
         return {"v": 2, "group": self.cgrp, "last": self.clast, "groups": self.cgroups, "rec_secs": self.crec_secs,
-                "chop_src": self.cchop_src}
+                "chop_src": self.cchop_src, "bpm": self.cbpm, "click": self.cclick}
+
+    # ------------------------------------------------------------ the sequencer
+    def chop_send_seq(self, g):
+        pt = self.cgroups[g]["pattern"]
+        self.eng.post("chop_seq", g, pt["bars"] * 16, [[e[0], e[1], e[2], False] for e in pt["ev"]])
+
+    def chop_pos(self):
+        """Where the playhead is, in 16ths since START (the engine keeps the same clock)."""
+        return (time.perf_counter() - self.cplay_t0) * self.cbpm / 60.0 * 4 if self.cplay else 0.0
+
+    def chop_transport(self, play):
+        self.cplay = play
+        if play:
+            self.cplay_t0 = time.perf_counter()
+        else:
+            self.crec_on = False
+        self.eng.post("chop_transport", play, self.cbpm, self.cclick and self.crec_on)
+
+    def chop_record_hit(self, g, i, vel):
+        """While recording: the hit lands on the nearest 16th of the group's pattern."""
+        pt = self.cgroups[g]["pattern"]
+        L = pt["bars"] * 16
+        # what you hear is about 0.1 s behind the clock here (the engine's block, then the
+        # sound card's buffer), so a hit on the beat you hear is moved back by that much
+        cur = (self.chop_pos() - 0.1 * self.cbpm / 60.0 * 4) % L
+        q = int(round(cur)) % L
+        ahead = (q > cur) or (q == 0 and cur > L - 0.5)    # rounded up: the sequencer would play it again
+        pt["ev"] = [e for e in pt["ev"] if not (e[0] == q and e[1] == i)] + [[q, i, round(vel, 2)]]
+        self.eng.post("chop_add", g, q, i, float(vel), bool(ahead))
+
+    def chop_erase_pad(self, g, i):
+        pt = self.cgroups[g]["pattern"]
+        n = len(pt["ev"])
+        pt["ev"] = [e for e in pt["ev"] if e[1] != i]
+        self.chop_send_seq(g)
+        self.flash("ERASED PAD %d FROM GROUP %s   %d HITS" % (i + 1, GROUPS[g], n - len(pt["ev"])))
+
+    def chop_commit(self):
+        """Commit: play every pattern once from the top and record what comes out,
+        punch-ins and all, into a new sound on group D."""
+        bars = max(1, max(grp["pattern"]["bars"] for grp in self.cgroups))
+        if not any(grp["pattern"]["ev"] for grp in self.cgroups):
+            self.flash("NOTHING TO COMMIT   RECORD A PATTERN FIRST")
+            return
+        secs = bars * 16 * 60.0 / self.cbpm / 4
+        os.makedirs(synth.SAMPLE_DIR, exist_ok=True)
+        fn = "commit_%s.wav" % time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(synth.SAMPLE_DIR, fn)
+        self.chop_transport(False)
+        self.chop_transport(True)
+        self.eng.post("commit", path, secs)
+        self.ccommit = {"path": path, "file": fn, "due": time.perf_counter() + secs + 0.4}
+        self.menu = False
+        self.flash("COMMITTING %d BAR%s..." % (bars, "" if bars == 1 else "S"))
 
     # ------------------------------------------------------------ building sounds
     def chop_pad_array(self, g, i):
@@ -305,6 +370,8 @@ class ChopMixin:
         choke = grp["pads"][grp.get("keys_pad", 0) if keys else i].get("choke", True)
         self.eng.post("chop_hit", g, i, float(vel), -0.3 + 0.6 * (i % 4) / 3.0, bool(choke) and not keys)
         self.clit[(g, i)] = time.perf_counter()
+        if self.cplay and self.crec_on:
+            self.chop_record_hit(g, i, vel)
         if not keys:
             self.clast = i
             self.cview = (g, i)
@@ -324,6 +391,10 @@ class ChopMixin:
             if not down:
                 return True
             i = PADS.index(name)
+            if self.cr3_down:                                 # R3 held + a pad: erase it from the pattern
+                self.cr3_combo = True
+                self.chop_erase_pad(self.cgrp, i)
+                return True
             if self.csel_down and name in ("LEFT", "UP", "DOWN", "RIGHT"):
                 self.csel_combo = True
                 g = ("LEFT", "UP", "DOWN", "RIGHT").index(name)
@@ -339,11 +410,20 @@ class ChopMixin:
             return True
         if name == "START":
             if down:
-                self.caudition = not self.caudition
-                g, i = self.cgrp, self.clast
-                arr = self.chop_pad_array(g, i) if self.caudition else None
-                self.eng.post("chop_audition", arr)
-                self.flash(("PLAYING PAD %d WHOLE" % (i + 1)) if self.caudition else "STOPPED")
+                self.chop_transport(not self.cplay)
+                self.flash("PLAY   %d BPM" % self.cbpm if self.cplay else "STOPPED")
+            return True
+        if name == "R3":
+            if down:
+                self.cr3_down, self.cr3_combo = True, False
+            elif self.cr3_down:
+                self.cr3_down = False
+                if not self.cr3_combo:
+                    self.crec_on = not self.crec_on
+                    if self.crec_on and not self.cplay:
+                        self.chop_transport(True)
+                    self.eng.post("chop_transport", self.cplay, self.cbpm, self.cclick and self.crec_on)
+                    self.flash("RECORDING INTO GROUP %s" % GROUPS[self.cgrp] if self.crec_on else "RECORD OFF")
             return True
         return False
 
@@ -443,6 +523,21 @@ class ChopMixin:
         self.menu = False
 
     def chop_tick(self, now):
+        cm = self.ccommit
+        if cm is not None and now >= cm["due"]:
+            if os.path.exists(cm["path"]):
+                self.ccommit = None
+                self.cfiles = chop_files()
+                self.csrcs = sources()
+                pads = self.cgroups[3]["pads"]
+                i = next((k for k, p in enumerate(pads) if not p.get("src")), self.clast if self.cgrp == 3 else 11)
+                pads[i] = {"src": ["file", cm["file"]], "tune": 0, "level": 0.9, "choke": True, "reverse": False}
+                self.cgroups[3]["keys"] = False
+                self.chop_send_group(3)
+                self.flash("COMMITTED ONTO GROUP D PAD %d   %s" % (i + 1, cm["file"]))
+            elif now > cm["due"] + 5:
+                self.ccommit = None
+                self.flash("COMMIT FAILED   SEE THE LOG")
         r = self.crec
         if r is None:
             return
@@ -468,11 +563,22 @@ class ChopMixin:
 
     # ------------------------------------------------------------ settings
     def chop_menu_pages(self):
-        return ["Pad", "Group", "Global", "FX"]
+        return ["Pad", "Group", "Seq", "Global", "FX"]
 
     def chop_menu_items(self, pg):
         g = self.cedit_g
         grp = self.cgroups[g]
+        if pg == "Seq":
+            pt = grp["pattern"]
+            return [("Group", "%s  %s" % (GROUPS[g], GROUP_NAMES[g])),
+                    ("Tempo", "%d BPM" % self.cbpm),
+                    ("Bars", "%d" % pt["bars"]),
+                    ("Click", "On while recording" if self.cclick else "Off"),
+                    ("Hits", "%d in this group's pattern" % len(pt["ev"])),
+                    ("Clear pattern", "A clears group %s" % GROUPS[g]),
+                    ("Clear all", "A clears every group"),
+                    ("Commit", "A records every pattern into a new sound on D"),
+                    ("Audition pad", "A plays pad %d's whole sound" % (self.clast + 1))]
         if pg == "Group":
             files = [s for s in self.csrcs if s[0] == "file"]
             cs = self.cchop_src or (files[0][1] if files else None)
@@ -503,6 +609,23 @@ class ChopMixin:
         if name == "Group":
             self.cedit_g = (g + d) % 4
             self.cgrp = self.cedit_g
+            return
+        if pg == "Seq":
+            pt = grp["pattern"]
+            if name == "Tempo":
+                self.cbpm = float(max(50, min(220, self.cbpm + d)))
+                self.eng.post("chop_transport", self.cplay, self.cbpm, self.cclick and self.crec_on)
+                if self.cplay:                                # keep the UI clock in step
+                    self.chop_transport(False)
+                    self.chop_transport(True)
+            elif name == "Bars":
+                opts = [1, 2, 4]
+                pt["bars"] = opts[(opts.index(pt["bars"]) + d) % 3 if pt["bars"] in opts else 0]
+                L = pt["bars"] * 16
+                pt["ev"] = [e for e in pt["ev"] if e[0] < L]
+                self.chop_send_seq(g)
+            elif name == "Click":
+                self.cclick = not self.cclick
             return
         if pg == "Group":
             if name == "Mode":
@@ -551,6 +674,21 @@ class ChopMixin:
 
     def chop_menu_activate(self, pg, name):
         g = self.cedit_g
+        if pg == "Seq":
+            if name == "Clear pattern":
+                self.cgroups[g]["pattern"]["ev"] = []
+                self.chop_send_seq(g)
+                self.flash("GROUP %s PATTERN CLEARED" % GROUPS[g])
+            elif name == "Clear all":
+                for k in range(4):
+                    self.cgroups[k]["pattern"]["ev"] = []
+                    self.chop_send_seq(k)
+                self.flash("ALL PATTERNS CLEARED")
+            elif name == "Commit":
+                self.chop_commit()
+            elif name == "Audition pad":
+                self.eng.post("chop_audition", self.chop_pad_array(self.cgrp, self.clast))
+            return
         if name == "Chop to group" and self.cchop_src:
             self.chop_to_group(g, self.cchop_src)
             self.cgrp = g
@@ -583,7 +721,9 @@ class ChopMixin:
 
     def chop_header_info(self):
         grp = self.cgroups[self.cgrp]
-        return "GROUP %s  %s%s" % (GROUPS[self.cgrp], GROUP_NAMES[self.cgrp].upper(), "  KEYS" if grp.get("keys") else "")
+        tr = ("  REC" if self.crec_on else "  PLAY") if self.cplay else ""
+        return "GROUP %s  %s%s   %d BPM%s" % (GROUPS[self.cgrp], GROUP_NAMES[self.cgrp].upper(),
+                                              "  KEYS" if grp.get("keys") else "", self.cbpm, tr)
 
     # ------------------------------------------------------------ screen
     def chop_wave(self, g, i):
@@ -673,7 +813,7 @@ class ChopMixin:
             mn, mx = w
             n = len(mn)
             pk = max(1e-6, float(max(abs(mn.min()), abs(mx.max()))))
-            cy, hh = (wy0 + wy1) // 2, (wy1 - wy0) // 2 - 6
+            cy, hh = (wy0 + wy1 - 22) // 2, (wy1 - 22 - wy0) // 2 - 4    # room for the steps below
             lv = max(0.0, 1.0 - (now - self.clit.get((g, i if not keys else -1), -9)) / 0.4)
             top = [(wx0 + 8 + int((wx1 - wx0 - 16) * k / n), cy - int(mx[k] / pk * hh)) for k in range(n)]
             bot = [(wx0 + 8 + int((wx1 - wx0 - 16) * k / n), cy - int(mn[k] / pk * hh)) for k in range(n)]
@@ -682,6 +822,29 @@ class ChopMixin:
         else:
             self.text(c, "empty pad   SELECT > Pad > Sound", self.f_small, mm.DIM, ((wx0 + wx1) // 2, (wy0 + wy1) // 2 - 9),
                       center=True)
+        # the group's pattern: 16 steps of the bar the playhead is in
+        pt = grp["pattern"]
+        L = pt["bars"] * 16
+        pos = self.chop_pos() % L if self.cplay else -1
+        bar = int(pos // 16) if pos >= 0 else 0
+        steps = {}
+        for e in pt["ev"]:
+            steps.setdefault(e[0], []).append(e[1])
+        sw = (wx1 - wx0 - 16) / 16.0
+        sy = wy1 - 18
+        for s in range(16):
+            k = bar * 16 + s
+            r = pygame.Rect(int(wx0 + 8 + s * sw) + 1, sy, int(sw) - 3, 12)
+            on = k in steps
+            here = pos >= 0 and int(pos) == k
+            col = self.mix(mm.BG, mm.DIM, 0.35 if s % 4 else 0.6)
+            if on:
+                col = mm.ACCENT2 if self.clast in steps[k] else self.mix(mm.ACCENT2, mm.BG, 0.35)
+            if here:
+                col = mm.ACCENT if not self.crec_on else (235, 60, 60)
+            pygame.draw.rect(c, col, r, border_radius=3)
+        if pt["bars"] > 1:
+            self.text(c, "bar %d/%d" % (bar + 1, pt["bars"]), self.f_small, mm.DIM, (wx1 - 8, wy0 + 4), right=True)
 
     def draw_chop_bar(self, c, now):
         """Where the keyboard is in Brickchord: the four groups and what is on them."""

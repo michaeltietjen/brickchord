@@ -2088,17 +2088,55 @@ class Engine:
         self.__dict__.setdefault("chop", {})[int(bank)] = (list(slices or []), full)
 
     def c_chop_hit(self, bank, pad, vel=1.0, pan=0.0, choke=True):
+        self._chop_trigger(bank, pad, vel, self.t, pan, choke)
+
+    def _chop_trigger(self, bank, pad, vel, when, pan=None, choke=None):
         bk = self.__dict__.get("chop", {}).get(int(bank))
         if not bk or pad >= len(bk[0]) or bk[0][int(pad)] is None:
             return
+        meta = self.__dict__.get("chop_meta", {}).get(int(bank), {})
+        if pan is None:
+            pan = -0.3 + 0.6 * (int(pad) % 4) / 3.0
+        if choke is None:
+            choke = meta.get("choke", True)
         tag = "chop%d_%d" % (int(bank), int(pad))
         if choke:                                      # the same pad again cuts the last one off
             fast = int(0.006 * self.sr)
             for v in self.voices:
-                if v.tag == tag and (v.rel_at is None or v.rel_at > self.t):
-                    v.rel_at, v.rel_len = int(self.t), fast
-        self._voice((bk[0][int(pad)], None), float(vel), float(pan), self.t, tag, srev=0.5, sdly=0.4,
+                if v.tag == tag and v.start < when and (v.rel_at is None or v.rel_at > when):
+                    v.rel_at, v.rel_len = int(when), fast
+        self._voice((bk[0][int(pad)], None), float(vel), float(pan), int(when), tag, srev=0.5, sdly=0.4,
                     rel=int(0.01 * self.sr))
+
+    def c_chop_meta(self, bank, choke):
+        self.__dict__.setdefault("chop_meta", {})[int(bank)] = {"choke": bool(choke)}
+
+    def c_chop_seq(self, bank, length, events):
+        """One group's pattern: length in 16ths, events [[step, pad, vel, skip]]."""
+        cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
+        by = {}
+        for ev in events:
+            by.setdefault(int(ev[0]), []).append([int(ev[0]), int(ev[1]), float(ev[2]), bool(ev[3])])
+        cs["seqs"][int(bank)] = {"len": int(length), "by": by}
+
+    def c_chop_add(self, bank, step, pad, vel, skip):
+        cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
+        seq = cs["seqs"].setdefault(int(bank), {"len": 16, "by": {}})
+        lst = seq["by"].setdefault(int(step), [])
+        lst[:] = [e for e in lst if e[1] != int(pad)]
+        lst.append([int(step), int(pad), float(vel), bool(skip)])
+
+    def c_chop_transport(self, play, bpm, click=False):
+        cs = self.__dict__.setdefault("cs", {"play": False, "step": 0, "next": 0.0, "seqs": {}, "click": False})
+        self.bpm = float(bpm)
+        cs["click"] = bool(click)
+        if play and not cs["play"]:
+            cs["step"], cs["next"] = 0, float(self.t)
+        cs["play"] = bool(play)
+
+    def c_commit(self, path, secs):
+        """Record what comes out for secs, into a WAV (resample, the K.O. II's commit)."""
+        self._cap = {"path": path, "n": int(float(secs) * self.sr), "buf": [], "have": 0}
 
     def c_chop_pad(self, bank, pad, arr):
         bk = self.__dict__.setdefault("chop", {}).setdefault(int(bank), ([None] * 12, None))
@@ -2413,6 +2451,25 @@ class Engine:
             self._on_step(self.step16, int(self.next16))
             self.step16 += 1
             self.next16 += step_len
+        cs = self.__dict__.get("cs")
+        if cs is not None and cs["play"]:
+            # Brickchop's sequencer: every group's pattern, sample-accurate within the block
+            st_len = 60.0 / self.bpm / 4 * sr
+            if cs["next"] < t:
+                cs["next"] = float(t)
+            while cs["next"] < t + N:
+                k, when = cs["step"], int(cs["next"])
+                for grp, seq in cs["seqs"].items():
+                    for ev in seq["by"].get(k % max(1, seq["len"]), ()):
+                        if ev[3]:
+                            ev[3] = False                  # just recorded live: it already sounded
+                            continue
+                        self._chop_trigger(grp, ev[1], ev[2], when)
+                if cs.get("click") and k % 4 == 0 and self.kit and self.kit.get("click"):
+                    self._voice(self.kit["click"], 0.55 if k % 16 == 0 else 0.3, 0.0, when, "drum", srev=0, sdly=0,
+                                rel=int(0.01 * sr))
+                cs["step"] += 1
+                cs["next"] += st_len
         while self.events and self.events[0][0] < t + N:
             when, _, fn, args = heapq.heappop(self.events)
             fn(max(when, t), *args) if fn in (self._ev_note, self._ev_bass) else fn(*args)
@@ -2623,6 +2680,25 @@ class Engine:
         self.load = 0.9 * self.load + 0.1 * (el / (N / sr))
         out = out.astype(np.float32)
         self.scope = out[::2, 0]            # for the on-screen oscilloscope
+        cap = self.__dict__.get("_cap")
+        if cap is not None:
+            cap["buf"].append(out.copy())
+            cap["have"] += N
+            if cap["have"] >= cap["n"]:
+                self._cap = None
+                try:
+                    import wave as _w
+                    a = np.concatenate(cap["buf"])[: cap["n"]]
+                    w = _w.open(cap["path"] + ".part", "wb")
+                    w.setnchannels(2)
+                    w.setsampwidth(2)
+                    w.setframerate(sr)
+                    w.writeframes((np.clip(a, -1, 1) * 32767).astype("<i2").tobytes())
+                    w.close()
+                    os.replace(cap["path"] + ".part", cap["path"])
+                    print("commit: wrote %s" % cap["path"], flush=True)
+                except Exception as ex:
+                    print("commit: failed %s" % ex, flush=True)
         return out
 
     def _take(self, v, n):
