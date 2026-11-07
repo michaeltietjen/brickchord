@@ -368,6 +368,8 @@ class ModesMixin(song.SongMixin):
         return True
 
     def modes_tick(self, now):
+        if not edition.AMBIENT:
+            self.midi_tick(now)                    # USB MIDI in (Brickglide reads its own in amb_tick)
         if edition.LAB:
             self.song_tick(now)
         if edition.AMBIENT:

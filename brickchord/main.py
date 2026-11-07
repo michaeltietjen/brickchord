@@ -426,6 +426,10 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
             self.amb_init()
             self.amb_fx_defaults()
         self.intro()
+        self.midi_held, self.midi_due, self.midi_btn, self.midi_chord = set(), 0.0, None, None
+        if not edition.AMBIENT:
+            import midi
+            self._midi_q = midi.start()               # USB MIDI in (Brickglide starts its own)
         self.queue_precache()
 
         if self.inp.joys and not self.cfg.get("buttons"):
@@ -807,6 +811,9 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
     def play_chord(self, btn, revoice=False):
         deg = CHORD_BUTTONS.index(btn)
         pc, iv, name = build_chord(self.key, self.scale, deg, self.mods())
+        self._play_voicing(deg, pc, iv, name, btn, revoice)
+
+    def _play_voicing(self, deg, pc, iv, name, btn, revoice=False):
         notes, upper = voice(pc, iv, self.prev_upper, self.octave)
         self.prev_upper = upper
         revoice = revoice and self.cur_btn == btn
@@ -831,6 +838,72 @@ class App(ambient.AmbientMixin, modes.ModesMixin):
         self.hit_t, self.hit_big = time.perf_counter(), not revoice
         self.new_hit = True
         self.eng.chord(notes, {m: self.ckey(m) for m in need}, revoice)
+
+    # ---------------- MIDI in (Brickchord, Bricklab; Brickglide has its own in ambient.py)
+    def midi_degree(self, note):
+        """The scale degree a MIDI note falls on in your key (nearest, for notes outside it)."""
+        sc = SCALES[self.scale]
+        pc = (note - self.key) % 12
+        return min(range(7), key=lambda i: min((pc - sc[i]) % 12, (sc[i] - pc) % 12))
+
+    def midi_chord_mode(self):
+        return not edition.LAB or getattr(self, "imode", "Play") in ("Play", "Chord")
+
+    def midi_tick(self, now):
+        """One key plays the chord on that degree, like pressing its button (in Bricklab
+        it presses the button for whatever mode you are in: lead, drone, drums...).
+        Two or more keys together (an Orchid, a chord on a keyboard) play that exact chord."""
+        q = getattr(self, "_midi_q", None)
+        if q is None:
+            return
+        while q:
+            ev = q.popleft()
+            if ev[0] == "connect":
+                self.flash("MIDI IN: %s" % ev[1].upper())
+            elif ev[0] == "disconnect":
+                self.flash("MIDI IN: %s UNPLUGGED" % ev[1].upper())
+            elif ev[0] == "on":
+                self.midi_held.add(ev[1])
+                self.midi_due = now + 0.035                # a chord's notes arrive one by one
+            elif ev[0] == "off":
+                self.midi_held.discard(ev[1])
+                self.midi_due = now + 0.035
+        if not self.midi_due or now < self.midi_due:
+            return
+        self.midi_due = 0.0
+        held = sorted(self.midi_held)
+        btn = self.midi_btn
+        if len(held) >= 2 and self.midi_chord_mode():
+            if btn:
+                self.midi_btn = None
+            notes = held
+            pc = notes[0] % 12
+            iv = sorted({(n - pc) % 12 for n in notes})
+            name = chord_name(pc, iv, False, False, self.key, self.scale)
+            if (pc, tuple(iv)) != self.midi_chord:
+                self.midi_chord = (pc, tuple(iv))
+                self.cur_btn = None
+                self._play_voicing(self.midi_degree(notes[0]), pc, iv, name, None)
+        elif held:
+            new = CHORD_BUTTONS[self.midi_degree(held[-1])]
+            if new != btn:
+                if btn:
+                    self.inp.held.discard(btn)
+                    self.handle(btn, False)
+                self.inp.held.add(new)
+                self.handle(new, True)
+                self.midi_btn = new
+            self.midi_chord = None
+        else:
+            if btn:
+                self.inp.held.discard(btn)
+                self.handle(btn, False)
+                self.midi_btn = None
+            if self.midi_chord is not None:
+                self.midi_chord = None
+                if not self.latch:
+                    self.stop_chord()
+                    self.cur = None
 
     def stop_chord(self):
         self.eng.post("clear")

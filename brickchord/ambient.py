@@ -1170,81 +1170,10 @@ class AmbientMixin:
 
     # ------------------------------------------------------------ MIDI in (Brickglide Play)
     def amb_midi_start(self):
-        """Watch for USB MIDI devices (an Orchid, an OP-Z, a keyboard) and read them on
-        a thread: notes arrive in a queue the UI drains every frame. Plug in or out
-        at any time; what is found is written to the log."""
-        import collections
-        import glob
-        import select
-        import threading
-        self._midi_q = collections.deque()
+        """USB MIDI in (see midi.py): chords from an Orchid or a keyboard glide in."""
+        import midi
+        self._midi_q = midi.start()
         self.amidi_held, self.amidi_applied, self.amidi_due = set(), frozenset(), 0.0
-
-        def card_name(path):
-            try:
-                n = os.path.basename(path)[5:].split("D")[0]
-                return open("/proc/asound/card%s/id" % n).read().strip()
-            except Exception:
-                return os.path.basename(path)
-
-        def run():
-            fds, status, logged = {}, {}, [0]
-            while True:
-                try:
-                    for p in glob.glob("/dev/snd/midiC*D*"):
-                        if p not in fds.values():
-                            try:
-                                fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
-                                fds[fd] = p
-                                status[fd] = 0
-                                nm = card_name(p)
-                                print("MIDI in: opened %s (%s)" % (p, nm), flush=True)
-                                self._midi_q.append(("connect", nm))
-                            except OSError as ex:
-                                print("MIDI in: cannot open %s: %s" % (p, ex), flush=True)
-                    if not fds:
-                        time.sleep(1.0)
-                        continue
-                    r, _, _ = select.select(list(fds), [], [], 1.0)
-                    for fd in r:
-                        try:
-                            data = os.read(fd, 256)
-                        except OSError:
-                            data = b""
-                        if not data:
-                            print("MIDI in: %s went away" % fds[fd], flush=True)
-                            self._midi_q.append(("disconnect", card_name(fds[fd])))
-                            os.close(fd)
-                            del fds[fd]
-                            continue
-                        msg = []
-                        for b in data:
-                            if b >= 0xF8:
-                                continue                  # clock and other real-time bytes
-                            if b & 0x80:
-                                status[fd] = b
-                                msg = []
-                                continue
-                            msg.append(b)
-                            st = status[fd] & 0xF0
-                            if st in (0x80, 0x90) and len(msg) == 2:
-                                note, vel = msg
-                                on = st == 0x90 and vel > 0
-                                self._midi_q.append(("on" if on else "off", note, vel))
-                                if logged[0] < 40:
-                                    logged[0] += 1
-                                    print("MIDI in: note %s %d vel %d" % ("on" if on else "off", note, vel),
-                                          flush=True)
-                                msg = []
-                            elif st in (0xA0, 0xB0, 0xE0) and len(msg) == 2:
-                                msg = []
-                            elif st in (0xC0, 0xD0) and len(msg) == 1:
-                                msg = []
-                except Exception as ex:
-                    print("MIDI in: error %s" % ex, flush=True)
-                    time.sleep(1.0)
-
-        threading.Thread(target=run, daemon=True).start()
 
     def amb_midi_tick(self, now):
         q = getattr(self, "_midi_q", None)
