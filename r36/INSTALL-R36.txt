@@ -29,6 +29,8 @@ ports/brickglide/brickglide.log). It says which Python the device has and
 what went wrong.
  - "python3 not found": the stock firmware has no Python. Install ArkOS
    (or dArkOS) on a fresh card, then try again.
+ - "this download has no libraries for Python 3.x": the firmware's Python is
+   newer than this download knows. Get the latest release.
  - Black screen or no sound: send the log to whoever gave you this.
  - Crackles: Settings > Global > Latency > Safe, then relaunch.
 
@@ -36,5 +38,5 @@ These chips are slower than the TrimUI Brick's, so a sound you haven't used
 before takes a few seconds to build the first time, and loads instantly after.
 
 Bundled: NumPy (BSD-3-Clause) and pygame (LGPL) wheels for 64-bit ARM,
-Python 3.7 to 3.12; the Inter font (SIL OFL). The bundled pygame is only used
+Python 3.7 to 3.13; the Inter font (SIL OFL). The bundled pygame is only used
 if the firmware has none.
