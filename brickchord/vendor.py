@@ -9,6 +9,7 @@
 # bundled pygame is only used when the system doesn't have one, because the
 # firmware's own pygame/SDL is built for its screen.
 import os
+import re
 import sys
 import zipfile
 
@@ -49,6 +50,13 @@ def setup(need_pygame=True):
     tag = "cp%d%d" % sys.version_info[:2]
     have = os.listdir(wheels)
     base = os.path.join(VENDOR, tag)
+    if not any(("-%s-" % tag) in w for w in have):
+        # nothing here was built for this Python: say which versions are, and make no empty folder
+        tags = sorted({m.group(1) for m in (re.search(r"-cp3(\d+)-", w) for w in have) if m}, key=int)
+        _log("this download has no libraries for Python %d.%d (it has them for %s)."
+             % (sys.version_info[0], sys.version_info[1], ", ".join("3." + t for t in tags) or "none"))
+        _log("get the latest release, or report your firmware and this line.")
+        return
     os.makedirs(base, exist_ok=True)
     for lib in ("numpy", "pygame"):
         if lib == "pygame":

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the R36Max / ArkOS-family zip: app code + NumPy/pygame wheels for
-# aarch64, Python 3.7-3.12 (unpacked on the device at first launch).
+# aarch64, Python 3.7-3.13 (unpacked on the device at first launch).
 # Usage: r36/build_zip.sh [version]
 set -e
 VER="${1:-v0.2.0-alpha}"
@@ -21,6 +21,9 @@ dl 37 numpy==1.21.6
 dl 38 numpy==1.24.4
 for v in 39 310 311 312; do dl $v numpy==1.26.4; done
 for v in 37 38 39 310 311 312; do dl $v pygame==2.5.2; done
+# Python 3.13 (dArkOS RE and other newer firmwares) needs NumPy 2 and pygame 2.6
+dl 313 numpy==2.2.6
+dl 313 pygame==2.6.1
 ZIP="$OUT/brickchord-r36max-$VER.zip"
 rm -f "$ZIP"
 (cd "$STAGE" && COPYFILE_DISABLE=1 zip -qr -X "$ZIP" INSTALL-R36.txt ports)
