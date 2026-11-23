@@ -2566,10 +2566,58 @@ def load_cfg():
     return c
 
 
+def system_sdl():
+    """The firmware's own SDL2 library (the one its games draw with), or None."""
+    import glob
+    for pat in ("/usr/lib/aarch64-linux-gnu/libSDL2-2.0.so.0", "/usr/lib/*/libSDL2-2.0.so.0",
+                "/usr/lib/libSDL2-2.0.so.0", "/usr/lib64/libSDL2-2.0.so.0", "/usr/local/lib/libSDL2-2.0.so.0"):
+        hits = sorted(glob.glob(pat))
+        if hits:
+            return hits[0]
+    try:
+        import ctypes.util
+        return ctypes.util.find_library("SDL2")       # a bare name the loader can find
+    except Exception:
+        return None
+
+
+def visible_display():
+    """Make sure the picture goes to a real screen.
+
+    The SDL inside the bundled pygame only knows desktop displays (X11, Wayland). On a handheld that
+    draws straight to the panel (KMS/DRM) it finds none and settles for its "offscreen" driver without
+    an error: the app runs, nothing shows. Then start again with the firmware's own SDL loaded first,
+    which pygame uses in place of its bundled one. If that shows nothing either, stop and say so."""
+    if os.environ.get("SDL_VIDEODRIVER"):
+        return                                         # chosen on purpose (tests, the launcher's retry)
+    drv = pygame.display.get_driver()
+    print("display driver: %s (SDL %d.%d.%d)" % ((drv,) + tuple(pygame.get_sdl_version())), flush=True)
+    if drv not in ("offscreen", "dummy"):
+        return
+    if not os.environ.get("BRICK_SYSTEM_SDL") and sys.platform.startswith("linux"):
+        lib = system_sdl()
+        if lib:
+            print("display: the bundled SDL found no screen; starting again with the firmware's SDL (%s)" % lib,
+                  flush=True)
+            pygame.display.quit()
+            env = dict(os.environ, BRICK_SYSTEM_SDL=lib, PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1")
+            env["LD_PRELOAD"] = (lib + " " + env.get("LD_PRELOAD", "")).strip()
+            os.execve(sys.executable, [sys.executable, "-u", "-B"] + sys.argv, env)
+        print("display: no SDL2 library found on this firmware", flush=True)
+    print("display: no screen found (driver %s), so nothing would show. Stopping." % drv, flush=True)
+    print("display: please report this log with your device and firmware.", flush=True)
+    sys.exit(3)
+
+
 def main():
     # let the audio thread grab the interpreter quickly even while the UI draws
     sys.setswitchinterval(0.001)
     lay = os.environ.get("BRICKCHORD_LAYOUT")
+    try:
+        pygame.display.init()
+        visible_display()
+    except pygame.error as e:
+        print("display: %s" % e, flush=True)
     if not lay:
         try:
             pygame.display.init()
