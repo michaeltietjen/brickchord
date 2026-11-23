@@ -1038,7 +1038,11 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
     def learn_sticks(self, only=None):
         if not self.inp.joys:
             return
-        j = self.inp.joys[0]
+        joys = self.inp.joys
+        for n, jj in enumerate(joys):                  # for the log: what the firmware exposes
+            print("stick setup: joystick %d %r axes %d buttons %d hats %d" % (
+                n, jj.get_name(), jj.get_numaxes(), jj.get_numbuttons(), jj.get_numhats()), flush=True)
+        AX = [(n, a) for n, jj in enumerate(joys) for a in range(jj.get_numaxes())]   # every axis of every pad
         steps = [("lx", "Push the LEFT stick", "RIGHT"), ("ly", "Push the LEFT stick", "UP"),
                  ("ry", "Push the RIGHT stick", "UP"), ("rx", "Push the RIGHT stick", "RIGHT"),
                  ("R3", "Click the RIGHT stick", "DOWN"), ("L3", "Click the LEFT stick", "DOWN")]
@@ -1048,9 +1052,12 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         clock = pygame.time.Clock()
         start_btn = [s for s, n in self.inp.map.items() if n == "START"]
         i = 0
-        rest = [j.get_axis(a) for a in range(j.get_numaxes())]
+        rest = {k: joys[k[0]].get_axis(k[1]) for k in AX}
         armed = True
-        used = set(v[0] for k, v in result.items() if k not in [st[0] for st in steps])
+        # a learned stick is [axis, sign] (first pad) or [axis, sign, peak, pad]
+        used = set((v[3] if len(v) > 3 else 0, v[0]) for k, v in result.items()
+                   if k not in [st[0] for st in steps] and isinstance(v, list))
+        cand, peak, t_cand = None, 0.0, 0.0
         while i < len(steps):
             skip = False
             key = steps[i][0]
@@ -1069,25 +1076,47 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                         self.eng.post("click")
                         skip = True
             if skip:
+                if cand is None and key not in ("R3", "L3"):
+                    print("stick setup: %s skipped, largest movement %s" % (
+                        key, max(((round(joys[k[0]].get_axis(k[1]) - rest[k], 2), k) for k in AX),
+                                 key=lambda t: abs(t[0]), default=None)), flush=True)
                 i += 1
                 armed = True
+                cand, peak = None, 0.0
                 continue
             if key not in ("R3", "L3"):
-                best, bv = None, 0.0
-                for a in range(j.get_numaxes()):
-                    if a in used:
-                        continue
-                    d = j.get_axis(a) - rest[a]
-                    if abs(d) > abs(bv):
-                        best, bv = a, d
-                if armed and best is not None and abs(bv) > 0.7:
-                    result[key] = [best, 1 if bv > 0 else -1]
-                    used.add(best)
-                    self.eng.post("click")
-                    i += 1
-                    armed = False
-                if not armed and all(abs(j.get_axis(a) - rest[a]) < 0.3 for a in range(j.get_numaxes())):
-                    armed = True
+                now = time.perf_counter()
+                moves = sorted(((joys[k[0]].get_axis(k[1]) - rest[k], k) for k in AX if k not in used),
+                               key=lambda t: -abs(t[0]))
+                bv, best = moves[0] if moves else (0.0, None)
+                second = abs(moves[1][0]) if len(moves) > 1 else 0.0
+                # Cheap sticks (R36 clones) often reach only half of their range. Take a push as soon as
+                # one axis clearly leads: past 0.7 at once, or past 0.35 and twice any other axis for a
+                # moment. Then keep the furthest it got, so the app scales that stick to full range.
+                if armed and best is not None and (abs(bv) > 0.7 or (abs(bv) > 0.35 and abs(bv) > 2 * second)):
+                    if cand != (best, bv > 0):
+                        cand, peak, t_cand = (best, bv > 0), abs(bv), now
+                    peak = max(peak, abs(bv))
+                    if abs(bv) > 0.7 or now - t_cand > 0.25:
+                        result[key] = [best[1], 1 if bv > 0 else -1, round(min(1.0, peak), 3), best[0]]
+                        used.add(best)
+                        print("stick setup: %s = pad %d axis %d %s (reached %.2f)" % (
+                            key, best[0], best[1], "+" if bv > 0 else "-", peak), flush=True)
+                        self.eng.post("click")
+                        i += 1
+                        armed = False
+                elif armed:
+                    cand = None
+                if not armed:
+                    if i - 1 >= 0 and steps[i - 1][0] in result:          # still moving out: keep the peak
+                        sp = result[steps[i - 1][0]]
+                        if len(sp) > 3:
+                            v = abs(joys[sp[3]].get_axis(sp[0]) - rest[(sp[3], sp[0])])
+                            if v > sp[2]:
+                                sp[2] = round(min(1.0, v), 3)
+                    if all(abs(joys[kk[0]].get_axis(kk[1]) - rest[kk]) < 0.2 for kk in AX):
+                        armed = True
+                        cand, peak = None, 0.0
             c = self.canvas
             c.fill(BG)
             self.text(c, "STICK SETUP", self.f_med, ACCENT, (BASE_W // 2, 70 + L["dy"]), center=True)
@@ -1116,13 +1145,22 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
 
     # ---------------- analog sticks
     def axis_val(self, spec):
+        """A learned stick axis as -1..1. Sticks that only reached part of their range during setup are
+        scaled up to full, so a short-throw stick (R36 clones) still sweeps every control."""
         if not spec or not self.inp.joys:
             return 0.0
-        ax, sign = spec
-        j = self.inp.joys[0]
+        ax, sign = spec[0], spec[1]
+        peak = spec[2] if len(spec) > 2 and spec[2] else 1.0
+        pad = spec[3] if len(spec) > 3 else 0
+        if pad >= len(self.inp.joys):
+            return 0.0
+        j = self.inp.joys[pad]
         if ax >= j.get_numaxes():
             return 0.0
-        return j.get_axis(ax) * sign
+        v = j.get_axis(ax) * sign
+        if peak < 0.95:
+            v = v / max(0.3, peak * 0.92)
+        return max(-1.0, min(1.0, v))
 
     def update_sticks(self):
         st = self.cfg.get("sticks") or {}
