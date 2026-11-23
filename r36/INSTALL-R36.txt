@@ -31,6 +31,8 @@ what went wrong.
    (or dArkOS) on a fresh card, then try again.
  - "this download has no libraries for Python 3.x": the firmware's Python is
    newer than this download knows. Get the latest release.
+ - "display: no screen found": neither the bundled libraries nor the firmware's
+   own SDL could reach the screen. Send the log to whoever gave you this.
  - Black screen or no sound: send the log to whoever gave you this.
  - Crackles: Settings > Global > Latency > Safe, then relaunch.
 

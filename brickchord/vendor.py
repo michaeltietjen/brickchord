@@ -8,6 +8,8 @@
 # device's Python is unpacked into _vendor/cpXY/ and reused after that. The
 # bundled pygame is only used when the system doesn't have one, because the
 # firmware's own pygame/SDL is built for its screen.
+# The bundled pygame's SDL knows X11 and Wayland only, not the KMS/DRM screen of
+# a handheld: main.visible_display() switches it to the firmware's SDL when needed.
 import os
 import re
 import sys
