@@ -46,8 +46,6 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterInt>(ParameterID{"arpoct", 1}, "Arp octaves", 1, 4, 1));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"latch", 1}, "Latch", false));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
-    l.add(std::make_unique<AudioParameterBool>(ParameterID{"internal", 1}, "Built-in sound", true));
-    l.add(std::make_unique<AudioParameterBool>(ParameterID{"midiout", 1}, "MIDI out", BricklabStudioProcessor::kMidiFx));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"space", 1}, "Space", 0.f, 1.f, 0.3f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"volume", 1}, "Volume", 0.f, 1.f, 0.8f));
     return l;
@@ -411,8 +409,9 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
     const int n = buffer.getNumSamples();
     buffer.clear();
     const bool audio = buffer.getNumChannels() >= 2;
-    const bool internal = audio && params.getRawParameterValue("internal")->load() > 0.5f;
-    const bool out = params.getRawParameterValue("midiout")->load() > 0.5f;
+    // the instrument is the sound; the MIDI FX is the notes for the instrument after it
+    const bool internal = audio && !kMidiFx;
+    const bool out = kMidiFx;
     const int pg = page();
     juce::MidiBuffer flush;
     if (pg != lastPage) {                                    // a new page: the old one lets go

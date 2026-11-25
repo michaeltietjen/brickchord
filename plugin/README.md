@@ -36,16 +36,12 @@ The plugin is built on JUCE (https://juce.com). To release it as open source, JU
 terms mean this plugin folder would be AGPLv3 (the rest of the repository stays MIT).
 That choice is made before the first release.
 
-## Play your other instruments
+## Two plugins: the sound, or the notes
 
-Turn on **MIDI out** and Bricklab Studio sends every chord it plays as MIDI: the chord on
-channel 1, the synth bass note on channel 2. Keep **Built-in sound** on to layer both, or
-turn it off to use only your own instruments.
-
-- Ableton Live, Bitwig, Reaper, FL Studio: put your synth on another track and set its MIDI
-  input to the Bricklab Studio track.
-- Logic Pro: Logic doesn't take MIDI from instruments, so use **Bricklab Studio MIDI**, a
-  MIDI FX build of the same plugin. Put it in the MIDI FX slot above any instrument.
+- **Bricklab Studio** (AU, VST3, Standalone) is the instrument: its own sounds.
+- **Bricklab Studio MIDI** (AU MIDI FX, for Logic) has no sound of its own: put it in the MIDI FX
+  slot above any instrument and that instrument plays its chords (channel 1, the bass on
+  channel 2), leads and drones (the drone's pulse goes out as expression, CC 11).
 
 ## Pages: one layer per instance
 
@@ -53,9 +49,8 @@ Each instance plays one page, saved with your project. Layer them on separate tr
 
 - **Chord**: the chord pads, play modes, bass modes, latch.
 - **Lead**: one note at a time with glide. Pads are the notes of the scale; a keyboard plays
-  as is. Mod wheel adds vibrato, pitch bend bends 2 semitones (both sent on with MIDI out).
+  as is. Mod wheel adds vibrato, pitch bend bends 2 semitones.
 - **Drone**: tap a pad or key to drone on it (root, fifth, octaves; 3rd adds the third), the
   same again to stop. Slide glides to the next drone. Pulse | Swell and Thin | Bloom shape it;
-  the mod wheel pulses it and pitch bend thins or blooms it. With MIDI out the pulse goes out
-  as expression (CC 11), so other synths pulse too.
+  the mod wheel pulses it and pitch bend thins or blooms it.
 - **Glide**: coming next.

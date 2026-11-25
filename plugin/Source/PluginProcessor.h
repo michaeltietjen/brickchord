@@ -21,7 +21,7 @@ public:
     bool hasEditor() const override { return true; }
     const juce::String getName() const override { return "Bricklab Studio"; }
     bool acceptsMidi() const override { return true; }
-    bool producesMidi() const override { return true; }      // MIDI out: play other instruments with these chords
+    bool producesMidi() const override { return kMidiFx; }   // the MIDI FX: plays the instrument after it
     bool isMidiEffect() const override { return kMidiFx; }
 #if BRICK_MIDI_FX
     static constexpr bool kMidiFx = true;      // the Logic MIDI FX build: no sound of its own, only MIDI out

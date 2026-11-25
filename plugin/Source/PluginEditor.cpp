@@ -70,7 +70,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     slideL.setText("Slide", juce::dontSendNotification);
     pulseL.setText("Pulse | Swell", juce::dontSendNotification);
     bloomL.setText("Thin | Bloom", juce::dontSendNotification);
-    for (auto* l : {&octL, &glideL, &slideL, &pulseL, &bloomL}) addAndMakeVisible(l);
+    for (auto* l : {&octL, &glideL, &slideL, &pulseL, &bloomL}) { l->setColour(juce::Label::textColourId, dim); addAndMakeVisible(l); }
     // the sound list, grouped as on the handheld: chord sounds, lead sounds, drone sounds
     const char* groups[] = {"Chord sounds", "Lead sounds", "Drone sounds"};
     int lastGroup = -1;
@@ -88,8 +88,6 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     arpL.setText("Arp", juce::dontSendNotification);
     bassL.setText("Bass", juce::dontSendNotification);
     for (auto* l : {&modeL, &arpL, &bassL}) { l->setColour(juce::Label::textColourId, dim); addAndMakeVisible(l); }
-    addAndMakeVisible(internal);
-    addAndMakeVisible(midiOut);
     outNote.setText("MIDI: chords ch 1, bass ch 2", juce::dontSendNotification);
     outNote.setJustificationType(juce::Justification::centredRight);
     outNote.setColour(juce::Label::textColourId, dim);
@@ -125,8 +123,6 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aSpace = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "space", space);
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
     aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
-    aInternal = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "internal", internal);
-    aMidiOut = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "midiout", midiOut);
 
     auto& lf = getLookAndFeel();
     lf.setColour(juce::TextButton::buttonColourId, plate);
@@ -165,14 +161,14 @@ void BricklabStudioEditor::showTab(int t) {
     show({&leadSound}, lead && sounds);
     show({&droneSound}, drone && sounds);
     show({&key, &scale}, playing);
-    show({&space, &volume, &spaceL, &volumeL, &internal, &midiOut}, playing && sounds);
+    show({&space, &volume, &spaceL, &volumeL}, playing && sounds);
     show({&mode, &arpOct, &bassMode, &modeL, &arpL, &bassL}, chord);
     show({&octave, &octL}, lead || drone);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
-    outNote.setText(chord ? "MIDI: chords ch 1, bass ch 2" : (lead ? "Mod wheel: vibrato  Bend: 2 st" : "Mod wheel pulses, bend thins or blooms"),
+    outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
                     juce::dontSendNotification);
-    outNote.setVisible(playing);
+    outNote.setVisible(chord || lead);
     for (auto* p : pads) p->lit = false;
     litDrone = -2;
     soon.setText(SOON[t], juce::dontSendNotification);
@@ -227,7 +223,7 @@ void BricklabStudioEditor::paint(juce::Graphics& g) {
         if (ready < want) sub += (sub.isEmpty() ? "" : "   ") + juce::String("making the sound: ") + juce::String(ready) + " / " + juce::String(want) + " notes";
         if (sub.isEmpty()) sub = tab == 0 ? "play a pad, or chords from your MIDI keyboard"
                                : (tab == 1 ? "play a pad, or your MIDI keyboard: one note at a time"
-                                           : "tap a pad or a key to drone on it, the same again to stop");
+                                           : "tap a pad or key to drone on it, again to stop. Mod wheel pulses, bend thins or blooms");
         g.drawText(sub, in.removeFromBottom(20), juce::Justification::centred);
     }
 }
@@ -246,8 +242,6 @@ void BricklabStudioEditor::resized() {
     modRow.removeFromLeft(16);
     latch.setBounds(modRow.removeFromLeft(86));
     third.setBounds(22, modRow.getY(), 86, modRow.getHeight());
-    midiOut.setBounds(modRow.removeFromRight(96)); modRow.removeFromRight(8);
-    internal.setBounds(modRow.removeFromRight(136));
     r.removeFromTop(16);
     auto row = r.removeFromTop(30);
     sound.setBounds(row.removeFromLeft(240)); row.removeFromLeft(10);

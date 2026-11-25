@@ -38,11 +38,10 @@ private:
     juce::TextButton third{"3rd"};
     juce::Label octL, glideL, slideL, pulseL, bloomL;
     int litDrone = -2;
-    juce::ToggleButton internal{"Built-in sound"}, midiOut{"MIDI out"};
     juce::Slider space, volume, bassLvl;
     juce::Label spaceL, volumeL, soon, outNote, modeL, arpL, bassL;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aSound, aKey, aScale, aMode, aArpOct, aBassMode, aLeadSound, aDroneSound, aOctave, aDroneSlide;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aInternal, aMidiOut, aLatch, aThird;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aLatch, aThird;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aSpace, aVolume, aBassLvl, aLeadGlide, aDroneY, aDroneX;
     int keyDown = -1;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BricklabStudioEditor)
