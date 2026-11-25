@@ -16,6 +16,9 @@ import theory
 
 SR = 22050
 BUSES = ((0, "Hall", "Ping-Pong", 0.75), (1, "Plate", "Tape", 1.0))
+MODES = ["Chord", "Strum Folk", "Strum Pop", "Strum Skank", "Slop", "Harp Up", "Harp Down",       # main.PLAY_MODES
+         "Arp 1/8 Up", "Arp 1/16 Up", "Arp 1/16 Up-Down", "Arp 1/8 Down", "Arp 1/16 Random",
+         "Repeat 1/4", "Repeat 1/8", "Repeat 1/16"]
 
 
 class Live:
@@ -25,7 +28,10 @@ class Live:
         e.post("drums", False, None, synth.kit_arrays())
         e.post("kits", synth.all_kits(synth.SAMPLE_DIR))
         self.bpm, self.beat_i, self.beat_on = 96, 1, False
-        e.post("params", self.bpm, 1.4, True, 0, "Chord", True, 1)
+        self.mode, self.arp_oct = "Chord", 2
+        self.sound = 0
+        self.params()
+        e.post("arp_oct", self.arp_oct)
         e.post("fx", 0.25, 0.0, 0.75, 0.8)
         for b in BUSES:
             e.post("busfx", *b)
@@ -34,12 +40,25 @@ class Live:
         self.key, self.scale = 0, "Major"
         self.prev = []
         self.notes = {}             # midi -> (attack, loop) in the current sound
-        self.sound = 0
+
+    def params(self):
+        """Tempo, the sound's release and sustain, and the play mode, as the app sends them."""
+        p = synth.PATCHES[self.sound % len(synth.PATCHES)]
+        self.e.post("params", self.bpm, p["r"], p["s"] > 0.001, 0, self.mode, True, 0)
+
+    def set_mode(self, mode):
+        self.mode = str(mode)
+        self.params()
+
+    def set_bass(self, mode):
+        if mode in synth.BASS_MODES:
+            self.e.post("bass", mode, None)
 
     # ---------------- the sound
     def set_sound(self, i):
         self.sound = int(i)
         self.notes = {}
+        self.params()
         return self.patch_json()
 
     def patch_json(self):
@@ -64,7 +83,7 @@ class Live:
             for m in notes[1:] + [notes[1] + 12]:
                 if m not in first:
                     first.append(m)
-        rest = [m for m in range(40, 92) if m not in first]
+        rest = [m for m in range(36, 100) if m not in first]       # harp and arp reach up here
         return first + rest
 
     def _standin(self, m):
@@ -87,9 +106,19 @@ class Live:
         mods = json.loads(mods_json) if isinstance(mods_json, str) else dict(mods_json)
         pc, iv, name = theory.build_chord(self.key, self.scale, int(degree), mods)
         notes, upper = theory.voice(pc, iv, self.prev, 0)
-        need = set(notes) | {notes[1] + 12}
+        core = set(notes) | {notes[1] + 12}
+        extra = set()                       # what the play mode reaches for (main.py _play_voicing)
+        if self.mode.startswith("Harp"):
+            pcs = set(m % 12 for m in notes)
+            lo = (notes[1] // 12) * 12 - 2
+            extra |= {m for m in range(lo, lo + 36) if m % 12 in pcs}
+        if self.mode.startswith("Arp"):
+            base = sorted(set(notes[1:]))
+            extra |= {m + 12 * k for k in range(self.arp_oct) for m in base if m + 12 * k <= 118}
+            if base[0] + 12 * self.arp_oct <= 118:
+                extra.add(base[0] + 12 * self.arp_oct)
         snd, missing = {}, 0
-        for m in need:
+        for m in core:
             if m in self.notes:
                 snd[m] = self.notes[m]
             else:
@@ -98,6 +127,9 @@ class Live:
                     return json.dumps({"name": name, "ready": False})
                 snd[m] = s
                 missing += 1
+        for m in extra - core:              # runs and arpeggios use what is ready; the rest fill in later
+            if m in self.notes:
+                snd[m] = self.notes[m]
         self.prev = upper
         self.e.post("chord", notes, snd, False)
         return json.dumps({"name": name, "ready": True, "standins": missing,
@@ -115,7 +147,7 @@ class Live:
             self.beat_i = int(i) % len(synth.BEATS)
         if bpm:
             self.bpm = int(bpm)
-            self.e.post("params", self.bpm, 1.4, True, 0, "Chord", True, 1)
+            self.params()
         self.beat_on = bool(on) and self.beat_i > 0
         self.e.post("drums", self.beat_on, synth.BEATS[self.beat_i][1])
 
@@ -125,6 +157,7 @@ class Live:
 
     def names(self):
         return json.dumps({"sounds": [p["name"] for p in synth.PATCHES],
+                           "modes": MODES, "bass": list(synth.BASS_MODES),
                            "beats": [b[0] for b in synth.BEATS],
                            "chords": [[theory.build_chord(self.key, self.scale, d, {})[2] for d in range(7)]]})
 

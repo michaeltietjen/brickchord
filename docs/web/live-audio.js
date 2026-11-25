@@ -41,6 +41,8 @@ self.onmessage = async (ev) => {
     else if (op === "key") { L.set_key(arg.key, arg.scale); const w = L.wanted(); r = { names: JSON.parse(L.names()).chords[0], wanted: w.toJs() }; w.destroy(); }
     else if (op === "chord") { r = JSON.parse(L.chord(arg.degree, JSON.stringify(arg.mods || {}))); fill(); }
     else if (op === "release") { L.release(); }
+    else if (op === "mode") { L.set_mode(arg.mode); }
+    else if (op === "bass") { L.set_bass(arg.mode); }
     else if (op === "beat") { L.beat(arg.on, arg.i, arg.bpm); }
     else if (op === "ahead") { ahead = arg.frames; }
     else if (op === "stats") { r = { buffered: produced - used, under }; }

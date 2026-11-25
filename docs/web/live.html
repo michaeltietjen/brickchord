@@ -52,7 +52,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
 
 <main>
   <div class="screen" aria-live="polite">
-    <div class="top"><span id="keyname">A MINOR</span><span id="soundname">JUNO PAD</span></div>
+    <div class="top"><span id="keyname">A MINOR</span><span id="modename">CHORD</span><span id="soundname">JUNO PAD</span></div>
     <div class="big" id="big">-</div>
     <div class="sub" id="sub">press a chord</div>
   </div>
@@ -62,7 +62,9 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
   <div class="mods" id="mods"></div>
 
   <div class="row">
+    <label class="f">PLAY<select id="sMode"></select></label>
     <label class="f">SOUND<select id="sSound"></select></label>
+    <label class="f">BASS<select id="sBass"></select></label>
     <label class="f">KEY<select id="sKey"></select></label>
     <label class="f">SCALE<select id="sScale"><option>Major</option><option selected>Minor</option><option>Dorian</option><option>Mixolydian</option></select></label>
     <label class="f">BEAT<select id="sBeat"></select></label>
@@ -70,7 +72,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
     <label class="f">DELAY<select id="sAhead"><option value="2">Low (riskier)</option><option value="3" selected>Normal</option><option value="5">Safe</option></select></label>
   </div>
 
-  <p class="hint"><kbd>1</kbd>–<kbd>7</kbd> or <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> play the seven chords of the key. Hold <kbd>Q</kbd> for a 7th, <kbd>W</kbd> sus4, <kbd>E</kbd> 9th, <kbd>R</kbd> to flip major and minor. <kbd>Space</kbd> starts and stops the beat. A MIDI keyboard works too in Chrome and Edge: each key plays the chord on that degree.</p>
+  <p class="hint"><kbd>1</kbd>–<kbd>7</kbd> or <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> play the seven chords of the key. Hold <kbd>Q</kbd> for a 7th, <kbd>W</kbd> sus4, <kbd>E</kbd> 9th, <kbd>R</kbd> to flip major and minor. <kbd>Space</kbd> starts and stops the beat. <kbd>Z</kbd> and <kbd>X</kbd> step through the play modes: Chord, Strum, Slop, Harp, Arp and Repeat (the patterns follow the BPM). A MIDI keyboard works too in Chrome and Edge: each key plays the chord on that degree.</p>
   <p class="hint">The status line shows the delay between pressing a key and hearing it. Lower is tighter; if you hear clicks, pick Safe.</p>
 </main>
 
@@ -110,6 +112,8 @@ async function start() {
   await rpc(AW, "out", null, [toOut.port2]);
   for (const [i, n] of names.sounds.entries()) $("sSound").append(el("option", {value: i}, n));
   for (const [i, n] of names.beats.entries()) $("sBeat").append(el("option", {value: i}, n));
+  for (const n of names.modes) $("sMode").append(el("option", {value: n}, n));
+  for (const n of names.bass) $("sBass").append(el("option", {value: n}, n));
   $("sBeat").value = 1;
   for (let k = 0; k < 12; k++) $("sKey").append(el("option", {value: k}, NOTE_NAMES[k]));
   $("sKey").value = 9;
@@ -179,6 +183,9 @@ async function midi() {
 }
 $("go").onclick = () => start().catch(e => { $("startmsg").textContent = "Couldn't start: " + e.message; $("go").disabled = false; });
 $("sSound").onchange = (e) => setSound(+e.target.value);
+function setMode(m) { $("sMode").value = m; rpc(AW, "mode", { mode: m }); $("modename").textContent = m.toUpperCase(); if (held.length) press(held.pop()); }
+$("sMode").onchange = (e) => setMode(e.target.value);
+$("sBass").onchange = (e) => rpc(AW, "bass", { mode: e.target.value });
 $("sKey").onchange = setKey; $("sScale").onchange = setKey;
 $("sBeat").onchange = () => { if (beatOn) beat(true); };
 $("iBpm").onchange = () => { if (beatOn) beat(true); };
@@ -188,6 +195,7 @@ document.addEventListener("keydown", (e) => {
   if (e.code in KEYS) { e.preventDefault(); press(KEYS[e.code]); }
   else if (e.code in MODKEYS) setMod(MODKEYS[e.code], true);
   else if (e.code === "Space") { e.preventDefault(); beat(!beatOn); }
+  else if (e.code === "KeyZ" || e.code === "KeyX") { const m = names.modes, i = m.indexOf($("sMode").value); setMode(m[(i + (e.code === "KeyX" ? 1 : m.length - 1)) % m.length]); }
 });
 document.addEventListener("keyup", (e) => { if (e.code in KEYS) lift(KEYS[e.code]); else if (e.code in MODKEYS) setMod(MODKEYS[e.code], false); });
 </script>
