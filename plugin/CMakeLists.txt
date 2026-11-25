@@ -75,7 +75,8 @@ foreach(t BricklabStudio BricklabStudioMIDI BricklabStudioMIDIVST)
         Source/PluginEditor.cpp
         Source/core/Render.cpp
         Source/core/Engine.cpp
-        Source/core/Patterns.cpp)
+        Source/core/Patterns.cpp
+        Source/core/Glide.cpp)
     target_compile_definitions(${t} PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0

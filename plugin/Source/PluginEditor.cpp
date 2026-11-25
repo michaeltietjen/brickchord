@@ -5,9 +5,9 @@ namespace {
 const juce::Colour chassis(0xffe4e2dc), plate(0xffefede8), ink(0xff18161c), dim(0xff6d6874),
     seam(0xffcfccc4), orange(0xffff5a1f), screen(0xff121016), sink(0xffece4d6), teal(0xff3f9e95);
 const char* TAB_NAMES[] = {"Chord", "Lead", "Drone", "Glide"};
-const char* SOON[] = {"", "", "",
-    "Glide: six voices gliding from chord to chord, blooms, Moves, the progression with a melody over it. "
-    "Play it from your keyboard, with the mod wheel and pitch bend shaping the glide. Coming next."};
+const char* SOON[] = {"", "", "", ""};
+const juce::Colour VCOL[] = {juce::Colour(110, 200, 190), juce::Colour(190, 140, 255), juce::Colour(255, 170, 110),
+                             juce::Colour(120, 200, 140), juce::Colour(255, 120, 160), juce::Colour(140, 170, 255)};
 }
 
 void Pad::paint(juce::Graphics& g) {
@@ -55,6 +55,25 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     addAndMakeVisible(latch);
     third.setClickingTogglesState(true);
     addAndMakeVisible(third);
+    // the Glide page
+    for (int i : BricklabStudioProcessor::glideSounds()) glideSound.addItem(brick::kPatches[i].name, glideSound.getNumItems() + 1);
+    for (int i = 0; i < brick::kNumGlideChords; ++i) glideChord.addItem(brick::kGlideChords[i], i + 1);
+    for (int i = 0; i < brick::kNumGlidePaths; ++i) glidePath.addItem(juce::String("Path: ") + brick::kGlidePaths[i], i + 1);
+    for (int i = 0; i < brick::kNumGlideTimings; ++i) glideTiming.addItem(juce::String("Timing: ") + brick::kGlideTimings[i], i + 1);
+    for (int i = 0; i < brick::kNumGlideMoves; ++i) glideMove.addItem(brick::kGlideMoves[i], i + 1);
+    for (int i = 0; i < brick::kNumGlideTimes; ++i) glideTime.addItem("Glide " + juce::String(brick::kGlideTimes[i]) + " s", i + 1);
+    for (int i = 0; i < brick::kNumGlideFades; ++i) glideFade.addItem("Fade " + juce::String(brick::kGlideFades[i]) + " s", i + 1);
+    for (int i = 0; i < brick::kNumGlideBends; ++i) glideBend.addItem("Bend " + juce::String(brick::kGlideBends[i]) + " st", i + 1);
+    glideMpe.addItemList({"Out: MPE", "Out: notes"}, 1);
+    for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideTime, &glideFade, &glideBend, &glideMpe})
+        addAndMakeVisible(c);
+    glideSub.setClickingTogglesState(true);
+    bloomBtn.onClick = [this] { proc.uiPad(101, true); };
+    stopBtn.onClick = [this] { proc.uiPad(100, true); };
+    for (auto* b : {&bloomBtn, &stopBtn, &glideSub}) addAndMakeVisible(b);
+    glideChordL.setText("Chord", juce::dontSendNotification);
+    glideChordL.setColour(juce::Label::textColourId, dim);
+    addAndMakeVisible(glideChordL);
     for (int i : BricklabStudioProcessor::soundsOf(1)) leadSound.addItem(brick::kPatches[i].name, leadSound.getNumItems() + 1);
     for (int i : BricklabStudioProcessor::soundsOf(2)) droneSound.addItem(brick::kPatches[i].name, droneSound.getNumItems() + 1);
     octave.addItemList({"Oct -2", "Oct -1", "Oct 0", "Oct +1", "Oct +2"}, 1);
@@ -116,6 +135,17 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aLeadGlide = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "leadglide", leadGlide);
     aDroneY = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "droney", droneY);
     aDroneX = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "dronex", droneX);
+    using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    aGlideSound = std::make_unique<CA>(ps, "glidesound", glideSound);
+    aGlideChord = std::make_unique<CA>(ps, "glidechord", glideChord);
+    aGlidePath = std::make_unique<CA>(ps, "glidepath", glidePath);
+    aGlideTiming = std::make_unique<CA>(ps, "glidetiming", glideTiming);
+    aGlideMove = std::make_unique<CA>(ps, "glidemove", glideMove);
+    aGlideTime = std::make_unique<CA>(ps, "glidetime", glideTime);
+    aGlideFade = std::make_unique<CA>(ps, "glidefade", glideFade);
+    aGlideBend = std::make_unique<CA>(ps, "glidebend", glideBend);
+    aGlideMpe = std::make_unique<CA>(ps, "glidempe", glideMpe);
+    aGlideSub = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "glidesub", glideSub);
     aLatch = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "latch", latch);
     aMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "mode", mode);
     aArpOct = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "arpoct", arpOct);
@@ -152,7 +182,7 @@ BricklabStudioEditor::~BricklabStudioEditor() { stopTimer(); }
 void BricklabStudioEditor::showTab(int t) {
     tab = t;
     for (int i = 0; i < tabs.size(); ++i) tabs[i]->setToggleState(i == t, juce::dontSendNotification);
-    const bool chord = t == 0, lead = t == 1, drone = t == 2, playing = t <= 2, sounds = !proc.kMidiFx;
+    const bool chord = t == 0, lead = t == 1, drone = t == 2, gl = t == 3, playing = true, sounds = !proc.kMidiFx;
     auto show = [](std::initializer_list<juce::Component*> cs, bool on) { for (auto* c : cs) c->setVisible(on); };
     for (auto* p : pads) p->setVisible(playing);
     for (auto* b : modButtons) b->setVisible(chord);
@@ -163,7 +193,10 @@ void BricklabStudioEditor::showTab(int t) {
     show({&key, &scale}, playing);
     show({&space, &volume, &spaceL, &volumeL}, playing && sounds);
     show({&mode, &arpOct, &bassMode, &modeL, &arpL, &bassL}, chord);
-    show({&octave, &octL}, playing);
+    show({&octave, &octL}, !gl);
+    show({&glideSound}, gl && sounds);
+    show({&glideChord, &glideChordL, &glidePath, &glideTiming, &glideMove, &glideTime, &glideFade, &glideBend, &bloomBtn, &stopBtn, &glideSub}, gl);
+    show({&glideMpe}, gl && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
@@ -182,7 +215,7 @@ void BricklabStudioEditor::padPress(int d, bool down) {
     if (pg == 0) {
         if (down) { ++proc.padsDown; proc.padDown(d); }
         else { proc.padsDown = std::max(0, proc.padsDown - 1); proc.padUp(); }
-    } else if (pg == 1 || (pg == 2 && down))
+    } else if (pg == 1 || ((pg == 2 || pg == 3) && down))
         proc.uiPad(d, down);
 }
 
@@ -209,8 +242,39 @@ void BricklabStudioEditor::paint(juce::Graphics& g) {
     g.setFont(juce::FontOptions(13.f));
     auto top = in.removeFromTop(18);
     g.drawText((key.getText() + " " + scale.getText()).toUpperCase(), top, juce::Justification::centredLeft);
-    auto* sc = tab == 0 ? &sound : (tab == 1 ? &leadSound : &droneSound);
-    g.drawText(TAB_NAMES[tab] + juce::String("  ") + (tab <= 2 && !proc.kMidiFx ? sc->getText().toUpperCase() : ""), top, juce::Justification::centredRight);
+    auto* sc = tab == 0 ? &sound : (tab == 1 ? &leadSound : (tab == 2 ? &droneSound : &glideSound));
+    g.drawText(TAB_NAMES[tab] + juce::String("  ") + (!proc.kMidiFx ? sc->getText().toUpperCase() : ""), top, juce::Justification::centredRight);
+    if (tab == 3) {                                       // the voices' paths over the last 10 seconds, as on the Brick
+        auto area = in.toFloat().withTrimmedBottom(4).withTrimmedLeft(in.getWidth() * 0.3f);
+        float lo = 1e9f, hi = -1e9f;                       // the range the voices used, with room around it
+        for (auto& tv : trail) for (float c : tv) if (c > 0) { lo = std::min(lo, c); hi = std::max(hi, c); }
+        if (lo > hi) { lo = 3600; hi = 7200; }
+        lo -= 300; hi += 300;
+        if (hi - lo < 2400) { float m = (hi + lo) / 2; lo = m - 1200; hi = m + 1200; }
+        auto y = [&](float cents) { return area.getBottom() - (cents - lo) / (hi - lo) * area.getHeight(); };
+        for (int v = 0; v < 6; ++v) {
+            juce::Path p;
+            bool started = false;
+            for (int k = 0; k < 150; ++k) {
+                float c = trail[(size_t) v][(size_t) ((trailAt + k) % 150)];
+                float x = area.getX() + area.getWidth() * (float) k / 149.0f;
+                if (c <= 0) { started = false; continue; }
+                if (!started) { p.startNewSubPath(x, y(c)); started = true; } else p.lineTo(x, y(c));
+            }
+            g.setColour(VCOL[v].withAlpha(0.35f + 0.65f * juce::jlimit(0.0f, 1.0f, trailLvl[(size_t) v] / 0.6f)));
+            g.strokePath(p, juce::PathStrokeType(2.2f));
+        }
+        auto name = proc.chordName();
+        g.setColour(orange);
+        g.setFont(juce::FontOptions(44.f, juce::Font::bold));
+        g.drawText(name.isEmpty() ? "" : name, in.removeFromLeft(in.getWidth() / 2).withTrimmedTop(4).removeFromTop(52), juce::Justification::centredLeft);
+        g.setColour(sink);
+        g.setFont(juce::FontOptions(14.f));
+        int ready = proc.soundsReady(), want = proc.soundsWanted();
+        juce::String sub = ready < want ? "making the sound: " + juce::String(ready) + " / " + juce::String(want) + " notes"
+                                        : (name.isEmpty() ? "play a pad or chords: the voices glide from one to the next. Mod wheel stretches, bend bends" : "");
+        g.drawText(sub, scr.reduced(22, 16).removeFromBottom(20), juce::Justification::centred);
+    }
     if (tab <= 2) {
         auto name = proc.chordName();
         g.setColour(orange);
@@ -246,6 +310,7 @@ void BricklabStudioEditor::resized() {
     auto row = r.removeFromTop(30);
     sound.setBounds(row.removeFromLeft(240)); row.removeFromLeft(10);
     leadSound.setBounds(sound.getBounds());
+    glideSound.setBounds(sound.getBounds());
     droneSound.setBounds(sound.getBounds());
     key.setBounds(row.removeFromLeft(80)); row.removeFromLeft(10);
     scale.setBounds(row.removeFromLeft(130)); row.removeFromLeft(18);
@@ -265,6 +330,19 @@ void BricklabStudioEditor::layoutRows() {           // the bottom row: what this
     } else if (tab == 1) {
         octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(100)); outRow.removeFromLeft(18);
         glideL.setBounds(outRow.removeFromLeft(46)); leadGlide.setBounds(outRow.removeFromLeft(180));
+    } else if (tab == 3) {
+        auto mod = juce::Rectangle<int>(22, 260 + 110 + 14, getWidth() - 44, 34);
+        bloomBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(8);
+        stopBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(20);
+        glideChordL.setBounds(mod.removeFromLeft(48)); glideChord.setBounds(mod.removeFromLeft(140).reduced(0, 2)); mod.removeFromLeft(10);
+        glideSub.setBounds(mod.removeFromLeft(70));
+        glideMpe.setBounds(mod.removeFromRight(130).reduced(0, 2));
+        glideTime.setBounds(outRow.removeFromLeft(118)); outRow.removeFromLeft(8);
+        glidePath.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(8);
+        glideTiming.setBounds(outRow.removeFromLeft(170)); outRow.removeFromLeft(8);
+        glideMove.setBounds(outRow.removeFromLeft(130)); outRow.removeFromLeft(8);
+        glideFade.setBounds(outRow.removeFromLeft(110)); outRow.removeFromLeft(8);
+        glideBend.setBounds(outRow.removeFromLeft(110));
     } else if (tab == 2) {
         octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(96)); outRow.removeFromLeft(12);
         slideL.setBounds(outRow.removeFromLeft(42)); droneSlide.setBounds(outRow.removeFromLeft(120)); outRow.removeFromLeft(12);
@@ -275,6 +353,12 @@ void BricklabStudioEditor::layoutRows() {           // the bottom row: what this
 }
 
 void BricklabStudioEditor::timerCallback() {
+    for (int v = 0; v < 6; ++v) {                          // the Glide trails
+        const bool on = proc.glide.level[(size_t) v] > 0.01f;
+        trail[(size_t) v][(size_t) trailAt] = on ? proc.glide.cents[(size_t) v].load() : 0.0f;
+        trailLvl[(size_t) v] = proc.glide.level[(size_t) v];
+    }
+    trailAt = (trailAt + 1) % 150;
     if (proc.page() != tab) showTab(proc.page());       // the host changed it (automation, a preset)
     if (tab == 2 && proc.droneDegree() != litDrone) {   // the pad that's droning stays lit
         litDrone = proc.droneDegree();
@@ -302,7 +386,7 @@ static int padForKey(int code) {
 
 bool BricklabStudioEditor::keyPressed(const juce::KeyPress& k) {
     int d = padForKey(k.getKeyCode());
-    if (d < 0 || tab > 2) return false;
+    if (d < 0) return false;
     if (d != keyDown) {
         if (keyDown >= 0) {
             pads[keyDown]->lit = false; pads[keyDown]->repaint();

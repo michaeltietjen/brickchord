@@ -56,4 +56,12 @@ Each instance plays one page, saved with your project. Layer them on separate tr
 - **Drone**: tap a pad or key to drone on it (root, fifth, octaves; 3rd adds the third), the
   same again to stop. Slide glides to the next drone. Pulse | Swell and Thin | Bloom shape it;
   the mod wheel pulses it and pitch bend thins or blooms it.
-- **Glide**: coming next.
+- **Glide**: Brickglide's five voices and a sub hold a chord and glide into the next one, each
+  on its own path. Pads play chords on the scale's degrees (the same one again lets go); a
+  keyboard plays one note as that degree's chord, or any chord you hold. Let go and the chord
+  holds. Chord type, glide time, path (Smooth, Ease, Bounce, Scale steps...), timing (bass lags,
+  by distance...), moves (Bloom, Cascade, Spiral, Swoop...), fade and sub as on the Brick; bloom
+  fans the chord out of one note. Pitch bend bends the whole chord (Bend sets the range), the mod
+  wheel stretches the glides up to 4x and swells them. The screen draws the voices' paths.
+  The MIDI build sends Glide as MPE (each voice its own channel, its glide as pitch bend, a
+  48-semitone range) for MPE synths like Pigments or Vital, or as plain notes for the rest.

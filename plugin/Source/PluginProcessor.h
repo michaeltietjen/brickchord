@@ -6,6 +6,7 @@
 #include <set>
 #include "core/Engine.h"
 #include "core/Patterns.h"
+#include "core/Glide.h"
 
 class BricklabStudioProcessor : public juce::AudioProcessor, private juce::Timer {
 public:
@@ -68,6 +69,8 @@ private:
     void playHeld(int pos);                   // MIDI: what the held keys ask for
     void runChord(juce::AudioBuffer<float>&, juce::MidiBuffer&, int n, bool audio, bool internal, bool out);
     void runMono(juce::AudioBuffer<float>&, juce::MidiBuffer&, int n, bool audio, bool internal, bool out, int pg);
+    void runGlide(juce::AudioBuffer<float>&, juce::MidiBuffer&, int n, bool audio, bool out);
+    void glideOut(juce::MidiBuffer&, int pos, bool allOff);   // MIDI out for Glide: MPE, or plain notes
     void leadPlay(int m, int pos, juce::MidiBuffer&, bool internal, bool out);
     void leadPress(int id, int m, int pos, juce::MidiBuffer&, bool internal, bool out);
     void leadRelease(int id, int pos, juce::MidiBuffer&, bool internal, bool out);
@@ -83,6 +86,14 @@ private:
     int dronePc = -1, lastPage = -1;
     std::atomic<int> droneDegLit{-1};
     float bendSemis = 0, vibDepth = 0;
+public:
+    brick::GlideEngine glide{cache};
+    static std::vector<int> glideSounds();    // the Glide page's sounds: the drones, then the chord sounds
+private:
+    std::array<int, brick::kGlideVoices> mpeNote{}, mpeBend{};
+    std::vector<int> glideNotesOut;           // the Notes mode's chord on MIDI out
+    bool mpeReady = false;
+    float glideSwell = 0;
     int lastExpr = 127;                               // the expression MIDI out last sent (the drone's pulse)
     void queueOut(bool on, int pos);          // a chord just started (or was let go): for Patterns
 
