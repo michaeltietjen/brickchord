@@ -42,6 +42,16 @@ self.onmessage = async (ev) => {
     else if (op === "chord") { r = JSON.parse(L.chord(arg.degree, JSON.stringify(arg.mods || {}))); fill(); }
     else if (op === "release") { L.release(); }
     else if (op === "mode") { L.set_mode(arg.mode); }
+    else if (op === "lead") { r = JSON.parse(L.lead_on(arg.degree, !!arg.up, !!arg.down, !!arg.sharp)); fill(); }
+    else if (op === "lead_off") { L.lead_off(); }
+    else if (op === "lead_mod") { L.lead_mod(arg.bend, arg.vib); }
+    else if (op === "drone") { r = JSON.parse(L.drone(arg.degree, !!arg.third)); fill(); }
+    else if (op === "drone_off") { L.drone_off(); }
+    else if (op === "drone_mod") { L.drone_mod(arg.x, arg.y); }
+    else if (op === "chord_mod") { r = L.chord_mod(arg.x, arg.y); r = r === undefined ? null : r; }
+    else if (op === "right") { L.right_stick(arg.x, arg.y); }
+    else if (op === "fx") { L.set_fx(arg.name, !!arg.on, arg.amount, arg.rate); }
+    else if (op === "space") { L.set_space(arg.rev, arg.dly, arg.time, arg.vol); }
     else if (op === "bass") { L.set_bass(arg.mode); }
     else if (op === "beat") { L.beat(arg.on, arg.i, arg.bpm); }
     else if (op === "ahead") { ahead = arg.frames; }
