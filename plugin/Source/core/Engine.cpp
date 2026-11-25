@@ -160,7 +160,7 @@ void Player::start(const std::vector<int>& notes) {
         while (root < 28) root += 12;
         Voice b;
         b.note = cache_.bass(root);
-        if (b.note) { b.rate = kSR / sr_; b.bass = true; b.gain = 1.0f; b.midi = root; voices_.push_back(b); }
+        if (b.note) { b.rate = kSR / sr_; b.bass = true; b.gain = bassGain_; b.midi = root; voices_.push_back(b); }
     }
     if (voices_.size() > 48) {                           // keep the count bounded: oldest tails go first
         for (size_t i = 0; i + 48 < voices_.size(); ++i)

@@ -63,6 +63,7 @@ public:
     Scale scale() const { return scale_; }
     void setRelease(float secs) { relSecs_ = secs; }
     void setBass(bool on) { bassOn_ = on; }
+    void setBassLevel(float g) { bassGain_ = g; }
     std::vector<int> wanted() const;                     // every note a chord button can ask for, likely first
     void render(float* L, float* R, int n);              // adds into L and R
 
@@ -76,6 +77,7 @@ private:
     double sr_ = 44100;
     float relSecs_ = 0.4f;
     bool bassOn_ = true;
+    float bassGain_ = 0.3f;
     std::mutex vmx_;                                      // the UI thread starts chords too
 };
 

@@ -60,7 +60,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     scale.addItemList({"Major", "Minor", "Dorian", "Mixolydian"}, 1);
     for (auto* c : {&sound, &key, &scale}) addAndMakeVisible(c);
     addAndMakeVisible(bass);
-    for (auto* s : {&space, &volume}) {
+    for (auto* s : {&space, &volume, &bassLvl}) {
         s->setSliderStyle(juce::Slider::LinearHorizontal);
         s->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         addAndMakeVisible(s);
@@ -79,6 +79,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aBass = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "bass", bass);
     aSpace = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "space", space);
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
+    aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
 
     auto& lf = getLookAndFeel();
     lf.setColour(juce::TextButton::buttonColourId, plate);
@@ -112,7 +113,7 @@ void BricklabStudioEditor::showTab(int t) {
     for (auto* p : pads) p->setVisible(chord);
     for (auto* b : modButtons) b->setVisible(chord);
     for (juce::Component* c : {(juce::Component*) &sound, (juce::Component*) &key, (juce::Component*) &scale,
-                               (juce::Component*) &bass, (juce::Component*) &space, (juce::Component*) &volume,
+                               (juce::Component*) &bass, (juce::Component*) &bassLvl, (juce::Component*) &space, (juce::Component*) &volume,
                                (juce::Component*) &spaceL, (juce::Component*) &volumeL})
         c->setVisible(chord);
     soon.setText(SOON[t], juce::dontSendNotification);
@@ -170,7 +171,8 @@ void BricklabStudioEditor::resized() {
     r.removeFromTop(14);
     auto modRow = r.removeFromTop(34);
     for (auto* b : modButtons) { b->setBounds(modRow.removeFromLeft(86)); modRow.removeFromLeft(8); }
-    bass.setBounds(modRow.removeFromRight(130));
+    bassLvl.setBounds(modRow.removeFromRight(110));
+    bass.setBounds(modRow.removeFromRight(120));
     r.removeFromTop(16);
     auto row = r.removeFromTop(30);
     sound.setBounds(row.removeFromLeft(240)); row.removeFromLeft(10);

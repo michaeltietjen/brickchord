@@ -18,6 +18,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         StringArray{"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 9));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"scale", 1}, "Scale", StringArray{"Major", "Minor", "Dorian", "Mixolydian"}, 1));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"bass", 1}, "Synth bass", true));
+    l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"space", 1}, "Space", 0.f, 1.f, 0.3f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"volume", 1}, "Volume", 0.f, 1.f, 0.8f));
     return l;
@@ -49,6 +50,7 @@ void BricklabStudioProcessor::applySoundAndKey() {
     int key = (int) params.getRawParameterValue("key")->load();
     int sc = (int) params.getRawParameterValue("scale")->load();
     player.setBass(params.getRawParameterValue("bass")->load() > 0.5f);
+    player.setBassLevel(0.75f * params.getRawParameterValue("basslevel")->load());   // engine.py _bass: 0.75 x level
     if (snd == lastSound && key == lastKey && sc == lastScale) return;
     if (snd != lastSound) {
         cache.setSound(snd);
