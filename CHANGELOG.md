@@ -2,6 +2,8 @@
 
 ## Unreleased
 - Bricklab web (michaeltietjen.github.io/brickchord/web/): make Bricklab songs in a browser. 16 patterns of 6 tracks, a drum grid and a note grid in the song's key, each track's machine, sound, level, pan and sends, the song chain, and your own samples (WAV, AIFF or MP3). Play renders with the handheld's own engine running in the browser, so it sounds like the Brick. Download for the Brick saves a zip with the song in the slot you pick and the samples it uses.
+- Bricklab web live test (web/live.html): Brickchord played live in the browser. Chords from the computer keyboard, the on-screen pads or a MIDI keyboard (Chrome, Edge), the 7th, sus4, 9th and flip modifiers, all 23 sounds, the preset beats, and a delay setting. The engine streams in small blocks; notes render in a second worker so a new sound never interrupts the audio, with stand-ins until they arrive.
+- The chord theory (scales, chords on a scale degree, names, the voicing) moved from main.py to theory.py so the apps and the browser share one copy.
 - `brickchord/songrender.py` renders any Bricklab song file to a WAV on a computer: `python3 songrender.py song.json out.wav`.
 - Bricklab: a song opened at launch now plays at its own tempo, key and scale, as when switching songs.
 

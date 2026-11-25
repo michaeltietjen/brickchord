@@ -3,6 +3,8 @@
   "py/engine.py",
   "py/synth.py",
   "py/songrender.py",
+  "py/theory.py",
+  "py/live.py",
   "kits/808/clap.wav",
   "kits/808/hat.wav",
   "kits/808/kick.wav",

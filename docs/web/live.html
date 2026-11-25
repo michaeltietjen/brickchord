@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brickchord live: play chords in your browser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--chassis:#e4e2dc;--plate:#efede8;--ink:#18161c;--dim:#6d6874;--seam:#cfccc4;--orange:#ff5a1f;--screen:#121016;--sink:#ece4d6;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--chassis);color:var(--ink);font-family:Archivo,Helvetica,sans-serif}
+button,select{font:inherit;color:inherit}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:14px 22px;border-bottom:1px solid var(--seam)}
+.logo{font-weight:800;font-size:21px;letter-spacing:-.4px;text-decoration:none;color:var(--ink)}
+.logo span{font-weight:500;color:var(--dim)}
+main{max-width:980px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:18px}
+.screen{background:var(--screen);color:var(--sink);border-radius:16px;padding:18px 22px;min-height:220px;display:flex;flex-direction:column;justify-content:space-between;border:8px solid #26242b}
+.top{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;letter-spacing:1px;color:#a39fae}
+.big{font-weight:900;font-size:clamp(64px,14vw,120px);letter-spacing:-3px;line-height:1;color:var(--orange);text-align:center}
+.sub{font-family:var(--mono);font-size:14px;text-align:center;color:var(--sink);min-height:20px}
+.pads{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.pad{height:96px;border-radius:14px;border:0;background:var(--plate);box-shadow:0 4px 0 var(--seam);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;touch-action:none;user-select:none}
+.pad b{font-size:22px;font-weight:800}
+.pad span{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.pad.on{background:var(--orange);color:var(--ink);box-shadow:0 1px 0 #c33f0e;transform:translateY(3px)}
+.pad.on span{color:var(--ink)}
+.mods{display:flex;flex-wrap:wrap;gap:8px}
+.mod{padding:10px 14px;border-radius:999px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600;touch-action:none;user-select:none}
+.mod.on{background:var(--ink);color:var(--plate);border-color:var(--ink)}
+.row{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end}
+label.f{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--dim)}
+select,input[type=number]{background:var(--plate);border:1px solid var(--seam);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:13px}
+.btn{padding:10px 16px;border-radius:10px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600}
+.btn.primary{background:var(--orange);border-color:var(--orange)}
+.stat{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.hint{font-size:14px;line-height:1.55;color:#4a4650;margin:0}
+kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px solid var(--seam);border-radius:5px;padding:1px 6px}
+.start{position:fixed;inset:0;background:rgba(228,226,220,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:9;text-align:center;padding:20px}
+.start b{font-size:30px;font-weight:900}
+@media (max-width:640px){.pads{grid-template-columns:repeat(4,minmax(0,1fr))}.pad{height:80px}}
+</style>
+</head>
+<body>
+<div class="start" id="start"><b>Brickchord live</b><p class="hint" id="startmsg">The Brick's engine, playing in your browser. Loads about 10 MB the first time.</p><button class="btn primary" id="go">Start</button></div>
+
+<header>
+  <a class="logo" href="./">bricklab <span>web</span></a>
+  <span class="stat">LIVE TEST · CHORD MODE</span>
+  <span class="stat" id="stat" style="margin-left:auto" role="status"></span>
+</header>
+
+<main>
+  <div class="screen" aria-live="polite">
+    <div class="top"><span id="keyname">A MINOR</span><span id="soundname">JUNO PAD</span></div>
+    <div class="big" id="big">-</div>
+    <div class="sub" id="sub">press a chord</div>
+  </div>
+
+  <div class="pads" id="pads"></div>
+
+  <div class="mods" id="mods"></div>
+
+  <div class="row">
+    <label class="f">SOUND<select id="sSound"></select></label>
+    <label class="f">KEY<select id="sKey"></select></label>
+    <label class="f">SCALE<select id="sScale"><option>Major</option><option selected>Minor</option><option>Dorian</option><option>Mixolydian</option></select></label>
+    <label class="f">BEAT<select id="sBeat"></select></label>
+    <label class="f">BPM<input type="number" id="iBpm" value="96" min="50" max="200" style="width:76px"></label>
+    <label class="f">DELAY<select id="sAhead"><option value="2">Low (riskier)</option><option value="3" selected>Normal</option><option value="5">Safe</option></select></label>
+  </div>
+
+  <p class="hint"><kbd>1</kbd>–<kbd>7</kbd> or <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> play the seven chords of the key. Hold <kbd>Q</kbd> for a 7th, <kbd>W</kbd> sus4, <kbd>E</kbd> 9th, <kbd>R</kbd> to flip major and minor. <kbd>Space</kbd> starts and stops the beat. A MIDI keyboard works too in Chrome and Edge: each key plays the chord on that degree.</p>
+  <p class="hint">The status line shows the delay between pressing a key and hearing it. Lower is tighter; if you hear clicks, pick Safe.</p>
+</main>
+
+<script>
+"use strict";
+const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const SCALES = {Major:[0,2,4,5,7,9,11], Minor:[0,2,3,5,7,8,10], Dorian:[0,2,3,5,7,9,10], Mixolydian:[0,2,4,5,7,9,10]};
+const KEYS = {Digit1:0,Digit2:1,Digit3:2,Digit4:3,Digit5:4,Digit6:5,Digit7:6,KeyA:0,KeyS:1,KeyD:2,KeyF:3,KeyG:4,KeyH:5,KeyJ:6};
+const MODKEYS = {KeyQ:"seventh",KeyW:"sus",KeyE:"ninth",KeyR:"flip"};
+const MODLABEL = {seventh:"7th",sus:"sus4",ninth:"9th",flip:"flip"};
+const $ = (id) => document.getElementById(id);
+const el = (t, a, ...k) => { const e = document.createElement(t); for (const [x, v] of Object.entries(a || {})) { if (x === "class") e.className = v; else if (x.startsWith("on")) e.addEventListener(x.slice(2), v); else e.setAttribute(x, v); } e.append(...k); return e; };
+
+let AW, RW, AC, NODE, files, names, SOUND = 0, held = [], mods = {}, beatOn = false;
+let rid = 0; const wait = {};
+function rpc(w, op, arg, ports) { const id = ++rid; return new Promise((res, rej) => { wait[id] = {res, rej}; w.postMessage({id, op, arg}, ports || []); }); }
+function onmsg(e) { if (e.data.progress) return progress(e.data.progress); const w = wait[e.data.id]; delete wait[e.data.id]; if (w) e.data.ok ? w.res(e.data.r) : w.rej(new Error(e.data.err)); }
+
+let prog = "";
+function progress(p) { if (p.sound === SOUND) prog = p.done < p.total ? "sound " + p.done + "/" + p.total : ""; }
+
+async function start() {
+  $("go").disabled = true; $("startmsg").textContent = "Loading the engine...";
+  AC = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050, latencyHint: "interactive" });
+  await AC.audioWorklet.addModule("live-worklet.js?t=" + Date.now());
+  NODE = new AudioWorkletNode(AC, "brick-out", { outputChannelCount: [2] });
+  NODE.connect(AC.destination);
+  const man = await (await fetch("manifest.json", { cache: "no-cache" })).json();
+  files = man.files;
+  AW = new Worker("live-audio.js?t=" + Date.now()); AW.onmessage = onmsg;
+  RW = new Worker("live-render.js?t=" + Date.now()); RW.onmessage = onmsg;
+  const toAudio = new MessageChannel(), toOut = new MessageChannel();
+  names = await rpc(AW, "init", { files });
+  await rpc(RW, "init", { files: files.filter(f => f.startsWith("py/")) }, [toAudio.port1]);
+  await rpc(AW, "notes", null, [toAudio.port2]);
+  NODE.port.postMessage({ port: toOut.port1 }, [toOut.port1]);
+  await rpc(AW, "out", null, [toOut.port2]);
+  for (const [i, n] of names.sounds.entries()) $("sSound").append(el("option", {value: i}, n));
+  for (const [i, n] of names.beats.entries()) $("sBeat").append(el("option", {value: i}, n));
+  $("sBeat").value = 1;
+  for (let k = 0; k < 12; k++) $("sKey").append(el("option", {value: k}, NOTE_NAMES[k]));
+  $("sKey").value = 9;
+  for (const [m, l] of Object.entries(MODLABEL)) $("mods").append(el("button", {class: "mod", "data-m": m,
+    onpointerdown: (e) => { e.preventDefault(); setMod(m, true); }, onpointerup: () => setMod(m, false), onpointerleave: () => setMod(m, false)}, l));
+  await setKey(); await setSound(0);
+  $("start").remove();
+  statLoop(); midi();
+}
+async function setKey() {
+  const r = await rpc(AW, "key", { key: +$("sKey").value, scale: $("sScale").value });
+  $("keyname").textContent = (NOTE_NAMES[+$("sKey").value] + " " + $("sScale").value).toUpperCase();
+  const box = $("pads"); box.replaceChildren();
+  const roman = ["I","II","III","IV","V","VI","VII"];
+  r.names.forEach((n, d) => box.append(el("button", {class: "pad", "data-d": d, "aria-label": "Chord " + n,
+    onpointerdown: (e) => { e.preventDefault(); press(d); }, onpointerup: () => lift(d), onpointerleave: () => lift(d)}, el("b", {}, n), el("span", {}, roman[d] + " · " + (d + 1)))));
+  if (CUR_PJ) rpc(RW, "render", { sound: SOUND, pj: CUR_PJ, midis: r.wanted });   // the new key's notes first
+}
+let CUR_PJ = null;
+async function setSound(i) {
+  SOUND = i;
+  const r = await rpc(AW, "sound", { i });
+  CUR_PJ = r.pj;
+  $("soundname").textContent = names.sounds[i].toUpperCase();
+  await rpc(RW, "render", { sound: i, pj: r.pj, midis: r.wanted });
+}
+async function press(d) {
+  if (held.includes(d)) return;
+  held = held.filter(x => x !== d); held.push(d);
+  for (const p of document.querySelectorAll(".pad")) p.classList.toggle("on", +p.dataset.d === d);
+  const r = await rpc(AW, "chord", { degree: d, mods });
+  $("big").textContent = r.name;
+  $("sub").textContent = r.ready ? (r.roman || "") + (r.standins ? "  · " + r.standins + " notes still rendering" : "") : "sound still loading...";
+}
+function lift(d) {
+  if (!held.includes(d)) return;
+  held = held.filter(x => x !== d);
+  document.querySelector('.pad[data-d="' + d + '"]')?.classList.remove("on");
+  if (held.length) press(held.pop()); else rpc(AW, "release");
+}
+function setMod(m, on) {
+  if (!!mods[m] === on) return;
+  if (on) mods[m] = true; else delete mods[m];
+  document.querySelector('.mod[data-m="' + m + '"]')?.classList.toggle("on", on);
+  if (held.length) { const d = held.pop(); press(d); }
+}
+function beat(on) { beatOn = on; rpc(AW, "beat", { on, i: +$("sBeat").value, bpm: +$("iBpm").value || 96 }); }
+async function statLoop() {
+  const s = await rpc(AW, "stats");
+  const ms = Math.round(1000 * (s.buffered / 22050 + (AC.baseLatency || 0) + (AC.outputLatency || 0)));
+  $("stat").textContent = "delay ≈ " + ms + " ms · dropouts " + s.under + (prog ? " · " + prog : "") + (AC.sampleRate !== 22050 ? " · resampling from " + AC.sampleRate : "");
+  setTimeout(statLoop, 400);
+}
+async function midi() {
+  if (!navigator.requestMIDIAccess) return;
+  try {
+    const acc = await navigator.requestMIDIAccess();
+    const on = new Set();
+    const hook = (inp) => inp.onmidimessage = (m) => {
+      const [st, note, vel] = m.data, cmd = st & 0xf0;
+      const sc = SCALES[$("sScale").value], pc = (note - +$("sKey").value + 120) % 12;
+      let d = 0, best = 99; sc.forEach((s, i) => { const dd = Math.min(Math.abs(s - pc), 12 - Math.abs(s - pc)); if (dd < best) { best = dd; d = i; } });
+      if (cmd === 0x90 && vel > 0) { on.add(note); press(d); } else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) { on.delete(note); if (!on.size) { held = []; for (const p of document.querySelectorAll(".pad")) p.classList.remove("on"); rpc(AW, "release"); } }
+    };
+    acc.inputs.forEach(hook); acc.onstatechange = () => acc.inputs.forEach(hook);
+  } catch (e) {}
+}
+$("go").onclick = () => start().catch(e => { $("startmsg").textContent = "Couldn't start: " + e.message; $("go").disabled = false; });
+$("sSound").onchange = (e) => setSound(+e.target.value);
+$("sKey").onchange = setKey; $("sScale").onchange = setKey;
+$("sBeat").onchange = () => { if (beatOn) beat(true); };
+$("iBpm").onchange = () => { if (beatOn) beat(true); };
+$("sAhead").onchange = (e) => rpc(AW, "ahead", { frames: +e.target.value * 512 });
+document.addEventListener("keydown", (e) => {
+  if (e.repeat || ["INPUT","SELECT"].includes(document.activeElement.tagName)) return;
+  if (e.code in KEYS) { e.preventDefault(); press(KEYS[e.code]); }
+  else if (e.code in MODKEYS) setMod(MODKEYS[e.code], true);
+  else if (e.code === "Space") { e.preventDefault(); beat(!beatOn); }
+});
+document.addEventListener("keyup", (e) => { if (e.code in KEYS) lift(KEYS[e.code]); else if (e.code in MODKEYS) setMod(MODKEYS[e.code], false); });
+</script>
+</body>
+</html>
