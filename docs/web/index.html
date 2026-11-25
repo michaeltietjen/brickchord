@@ -154,7 +154,7 @@ let CAT = null;                 // catalog from the engine
 const SAMPLES = {};             // name -> WAV bytes the user added (go into the zip)
 
 // ---------------------------------------------------------------- engine worker
-const W = new Worker("worker.js");
+const W = new Worker("worker.js?t=" + Date.now());      // never a stale engine thread
 let reqId = 0; const waiting = {};
 W.onmessage = (e) => { const w = waiting[e.data.id]; delete waiting[e.data.id]; if (!w) return; e.data.ok ? w.res(e.data.out) : w.rej(new Error(e.data.err)); };
 function ask(op, arg, transfer) { const id = ++reqId; return new Promise((res, rej) => { waiting[id] = {res, rej}; W.postMessage({id, op, arg}, transfer || []); }); }
