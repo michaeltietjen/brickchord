@@ -19,6 +19,7 @@ import ambient
 import chop
 import modes
 import song
+import vsticks
 import synth
 from synth import SR
 
@@ -72,7 +73,7 @@ MENU_PAGES = {
                "Click sound",
                "Click level",
                "Volume", "Latency",
-               "Relearn buttons", "Learn sticks", "Quit"],
+               "Relearn buttons", "Learn sticks", "Sticks", "Stick buttons", "Quit"],
     "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
                "Lead glide", "Drone slide", "Bass", "Bass Level"],
     "Drums": None,
@@ -237,6 +238,7 @@ class Input:
         self.hat = {}
         self.axis = {}
         self.held = set()
+        self.ghost = set()                # pressed, but taken by the virtual sticks: still report the release
         self.joys = []
         self.scan()
 
@@ -291,6 +293,9 @@ class Input:
             elif not down and name in self.held:
                 self.held.discard(name)
                 res.append((name, False))
+            elif not down and name in self.ghost:
+                self.ghost.discard(name)
+                res.append((name, False))
         return res
 
 
@@ -303,7 +308,7 @@ KEYMAP_SIG = {"k:" + v: v for v in KEYMAP.values()}
 
 
 # ------------------------------------------------------------------ app
-class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.ModesMixin):
+class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.ModesMixin, vsticks.VSticksMixin):
     def __init__(self, eng, cfg):
         self.cfg = cfg
         s = self.cfg["settings"]
@@ -448,6 +453,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                 self.learn_sticks(only=("rx", "R3", "L3"))
             elif not self.cfg.get("l3_learned"):
                 self.learn_sticks(only=("L3",))            # new: mode wheel
+        self.vs_setup()                                    # no sticks: F1/F2 stand in for them
 
     # ---------------- engine glue
     def push_params(self):
@@ -996,11 +1002,14 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         """Learn the buttons. With only=(...), just those (the rest keep their map)."""
         mapping = {} if not only else {s: n for s, n in (self.cfg.get("buttons") or {}).items() if n not in only}
         order = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "X", "Y", "L1", "R1", "SELECT", "START", "R2", "L2"]
+        if self.vs_on() or (only and set(only) & {"F1", "F2"}):
+            order += ["F1", "F2"]                       # no sticks: the two buttons that stand in for them
         if only:
             order = [n for n in order if n in only]
         tmp = Input({})
         i = 0
         clock = pygame.time.Clock()
+        self.vs_raw = True                                  # this screen names the real buttons
         while i < len(order):
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
@@ -1008,6 +1017,10 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                 if ev.type == pygame.JOYDEVICEADDED:
                     tmp.scan()
                 for sig, down in tmp.raw(ev):
+                    if down and i < len(order) and order[i] in ("F1", "F2") and (
+                            mapping.get(sig) == "START" or self.inp.map.get(sig) == "START"):
+                        i += 1                              # START skips an optional stick button
+                        break
                     if down and not sig.startswith("k:") and sig not in mapping:
                         mapping[sig] = order[i]
                         i += 1
@@ -1024,12 +1037,21 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             self.text(c, "BUTTON SETUP", self.f_med, ACCENT, (BASE_W // 2, 70 + L["dy"]), center=True)
             self.text(c, "Press", self.f_med, DIM, (BASE_W // 2, 170 + L["dy"]), center=True)
             if i < len(order):
-                lab = {"R2": "R2 (right trigger)", "L2": "L2 (left trigger)"}.get(order[i], order[i])
+                lab = {"R2": "R2 (right trigger)", "L2": "L2 (left trigger)",
+                       "F1": "F1 (your left stick)", "F2": "F2 (your right stick)"}.get(order[i], order[i])
                 self.text(c, lab, self.f_huge if len(lab) < 8 else self.f_big, INK, (BASE_W // 2, 250 + L["dy"]), center=True)
             self.text(c, "%d / %d" % (min(i + 1, len(order)), len(order)), self.f_small, DIM, (BASE_W // 2, 340 + L["dy"]), center=True)
-            self.text(c, "This happens once. Relearn any time from the menu.", self.f_small, DIM, (BASE_W // 2, 420 + L["dy"]), center=True)
+            if i < len(order) and order[i] in ("F1", "F2"):
+                self.text(c, "No sticks? Hold it and use the D-pad to push a stick, tap it to click.",
+                          self.f_small, DIM, (BASE_W // 2, 385 + L["dy"]), center=True)
+                self.text(c, "Any spare button works. START skips.", self.f_small, DIM,
+                          (BASE_W // 2, 420 + L["dy"]), center=True)
+            else:
+                self.text(c, "This happens once. Relearn any time from the menu.", self.f_small, DIM,
+                          (BASE_W // 2, 420 + L["dy"]), center=True)
             self.present()
             clock.tick(60)
+        self.vs_raw = False
         if mapping:
             self.cfg["buttons"] = mapping
             self.inp.map = mapping
@@ -1147,6 +1169,8 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
     def axis_val(self, spec):
         """A learned stick axis as -1..1. Sticks that only reached part of their range during setup are
         scaled up to full, so a short-throw stick (R36 clones) still sweeps every control."""
+        if spec and spec[0] == "v":
+            return self.vs_val(spec[1])                # no-sticks mode: F1/F2 + D-pad
         if not spec or not self.inp.joys:
             return 0.0
         ax, sign = spec[0], spec[1]
@@ -1163,7 +1187,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         return max(-1.0, min(1.0, v))
 
     def update_sticks(self):
-        st = self.cfg.get("sticks") or {}
+        st = self.stick_specs()
         if edition.AMBIENT and (st.get("lx") or st.get("ly")):
             x, y = self.axis_val(st.get("lx")), self.axis_val(st.get("ly"))
             self.stick_xy = (x, y)
@@ -1275,7 +1299,8 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             self.beat_pick = b if b else self.beat_pick
         self.menu_i %= max(1, len(self.menu_items()))
 
-    AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Quit"]
+    AMB_GLOBAL = ["Key", "Scale", "Volume", "Latency", "Relearn buttons", "Learn sticks", "Sticks", "Stick buttons",
+                  "Quit"]
 
     def menu_items(self):
         if edition.CHOP and self.menu_pg in ("Songs", "Pad", "Group", "Seq", "Master"):
@@ -1351,6 +1376,8 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             ("Latency", {512: "Low", 1024: "Normal", 2048: "Safe"}.get(self.block, str(self.block))),
             ("Relearn buttons", ""),
             ("Learn sticks", "on" if self.cfg.get("sticks") else "off"),
+            ("Sticks", "%s (%s)" % (self.vs_mode(), "F1 / F2 + D-pad" if self.vs_on() else "analog")),
+            ("Stick buttons", " ".join(sorted(self.vs_learned())) or "not set"),
             ("Quit", ""),
         ]
 
@@ -1485,6 +1512,11 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             else:
                 self.metro_lvl = clamp(round(self.metro_lvl + 0.1 * d, 1), 0.0, 1.0)
             self.push_metro(sound=name == "Click sound", hear=name != "Metronome")
+        elif name == "Sticks":
+            ms = vsticks.STICK_MODES
+            self.cfg["settings"]["stick_mode"] = ms[(ms.index(self.vs_mode()) + d) % len(ms)]
+            self.flash("STICKS: F1 / F2 + D-PAD" if self.vs_on() else "STICKS: ANALOG")
+            self.save_cfg()
         elif name == "Latency":
             self.block = {512: 1024, 1024: 2048, 2048: 512}[self.block] if d > 0 else {512: 2048, 1024: 512, 2048: 1024}[self.block]
             self.flash("latency applies next launch")
@@ -1538,7 +1570,16 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             self.menu = False
         elif name == "Learn sticks":
             self.stop_chord()
+            if not self.vs_has_analog():
+                self.flash("NO STICKS FOUND: F1 / F2 + D-PAD PLAY THEM (STICK BUTTONS)")
+                return
             self.learn_sticks()
+            self.menu = False
+        elif name == "Stick buttons":
+            self.stop_chord()
+            self.learn(only=("F1", "F2"))
+            self.cfg["fkeys_asked"] = True
+            self.save_cfg()
             self.menu = False
         elif name == "Edit Sound" and (self.bank[self.patch].get("sample") or self.bank[self.patch].get("macro") is not None):
             self.flash("THIS MACHINE HAS ITS OWN SETTINGS PAGE")
@@ -1767,6 +1808,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
     # ---------------- drawing
     def render(self, font, s, col):
         """font.render with a cache: most labels are the same every frame."""
+        s = self.vs_text(s)                             # no-sticks mode: "left stick" reads "F1 + D-pad"
         k = (id(font), s, col)
         img = self._tc.get(k)
         if img is None:
@@ -1915,7 +1957,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                 self.text(c, lab, self.f_small, self.mix(DIM, MOD_ON, lv), r.center, center=True)
                 x += 142
 
-            if (self.cfg.get("sticks") or {}).get("lx"):
+            if self.stick_specs().get("lx"):
                 self.draw_stick(c)
             self.draw_fx(c)
 
@@ -2565,8 +2607,9 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                     self.inp.scan()
                 elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                     self.running = False
-                for name, down in self.inp.logical(ev):
+                for name, down in self.vs_filter(self.inp.logical(ev)):
                     self.handle(name, down)
+            self.vs_tick()
             if not self.menu:
                 self.update_sticks()
             if self.audition_until and time.perf_counter() > self.audition_until:
