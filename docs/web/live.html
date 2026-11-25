@@ -293,24 +293,29 @@ function beat(on) { beatOn = on; rpc(AW, "beat", { on, i: +$("sBeat").value, bpm
 async function statLoop() {
   const s = await rpc(AW, "stats");
   const ms = Math.round(1000 * (s.buffered / 22050 + (AC.baseLatency || 0) + (AC.outputLatency || 0)));
-  $("stat").textContent = "delay ≈ " + ms + " ms · dropouts " + s.under + (prog ? " · " + prog : "") + (AC.sampleRate !== 22050 ? " · resampling from " + AC.sampleRate : "");
+  $("stat").textContent = "delay ≈ " + ms + " ms · dropouts " + s.under + (prog ? " · " + prog : "") + (MIDI ? " · " + MIDI : "") + (AC.sampleRate !== 22050 ? " · resampling from " + AC.sampleRate : "");
   setTimeout(statLoop, 400);
 }
+let MIDI = "";
 async function midi() {
-  if (!navigator.requestMIDIAccess) return;
+  if (!navigator.requestMIDIAccess) { MIDI = "MIDI: not in this browser (use Chrome or Edge)"; return; }
   try {
     const acc = await navigator.requestMIDIAccess(), on = new Map();
     const hook = (inp) => inp.onmidimessage = (m) => {
       const [st, a, b] = m.data, cmd = st & 0xf0;
+      MIDI = "MIDI: " + inp.name;
       if (cmd === 0xE0) { if (MODE === "lead") rpc(AW, "lead_mod", { bend: ((b << 7 | a) - 8192) / 8192, vib: 0 }); return; }
       if (cmd === 0xB0 && a === 1) { if (MODE === "lead") rpc(AW, "lead_mod", { bend: 0, vib: b / 127 }); return; }
+      if (cmd !== 0x90 && cmd !== 0x80) return;
       const sc = SCALES[$("sScale").value], pc = (a - +$("sKey").value + 120) % 12;
       let d = 0, best = 99; sc.forEach((s, i) => { const dd = Math.min(Math.abs(s - pc), 12 - Math.abs(s - pc)); if (dd < best) { best = dd; d = i; } });
       if (cmd === 0x90 && b > 0) { on.set(a, d); press(d); }
-      else if (cmd === 0x80 || (cmd === 0x90 && b === 0)) { const dd = on.get(a); on.delete(a); if (dd !== undefined && ![...on.values()].includes(dd)) lift(dd); }
+      else { const dd = on.get(a); on.delete(a); if (dd !== undefined && ![...on.values()].includes(dd)) lift(dd); }
     };
-    acc.inputs.forEach(hook); acc.onstatechange = () => acc.inputs.forEach(hook);
-  } catch (e) {}
+    const scan = () => { const ins = [...acc.inputs.values()]; ins.forEach(hook);
+      MIDI = ins.length ? "MIDI: " + ins.map(i => i.name).join(", ") : "MIDI: no keyboard found (plug one in)"; };
+    scan(); acc.onstatechange = scan;
+  } catch (e) { MIDI = "MIDI: permission refused (allow it in the address bar)"; }
 }
 
 // ---------------------------------------------------------------- wiring
