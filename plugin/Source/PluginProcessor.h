@@ -20,8 +20,13 @@ public:
     bool hasEditor() const override { return true; }
     const juce::String getName() const override { return "Bricklab Studio"; }
     bool acceptsMidi() const override { return true; }
-    bool producesMidi() const override { return false; }
-    bool isMidiEffect() const override { return false; }
+    bool producesMidi() const override { return true; }      // MIDI out: play other instruments with these chords
+    bool isMidiEffect() const override { return kMidiFx; }
+#if BRICK_MIDI_FX
+    static constexpr bool kMidiFx = true;      // the Logic MIDI FX build: no sound of its own, only MIDI out
+#else
+    static constexpr bool kMidiFx = false;
+#endif
     double getTailLengthSeconds() const override { return 3.0; }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -32,8 +37,8 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     // the Chord page and MIDI both play through these
-    void padDown(int degree);
-    void padUp();
+    void padDown(int degree, int pos = 0);
+    void padUp(int pos = 0);
     brick::Mods mods;                         // 7th, sus4, 9th, flip: set by the page's buttons
     juce::String chordName() const;
     juce::String chordRoman() const;
@@ -47,7 +52,13 @@ public:
 private:
     void timerCallback() override;            // follows sound, key and scale changes (message thread)
     void applySoundAndKey();
-    void playHeld();                          // MIDI: what the held keys ask for
+    void playHeld(int pos);                   // MIDI: what the held keys ask for
+    void queueOut(bool on, int pos);          // MIDI out: the chord just started (or let go)
+
+    struct OutEvent { int pos; std::vector<std::pair<int, int>> on; };   // (channel, note); empty = let go
+    juce::SpinLock outLock;
+    std::vector<OutEvent> outQueue;           // filled by the page and by playHeld, sent from processBlock
+    std::vector<std::pair<int, int>> sounding; // notes we sent on and have not sent off yet (audio thread)
 
     brick::NoteCache cache;
     brick::Player player{cache};

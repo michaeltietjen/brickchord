@@ -142,6 +142,7 @@ Chord Player::playExact(const std::vector<int>& keys) {
 
 void Player::start(const std::vector<int>& notes) {
     std::lock_guard<std::mutex> l(vmx_);
+    last_ = notes;
     const int xf = (int) (0.025 * sr_);
     for (auto& v : voices_)                             // the last chord lets go (engine c_chord: release "held")
         if (v.relAt < 0) { v.relAt = 0; v.relLen = v.bass ? (int) (0.02 * sr_) : std::max(xf, (int) (relSecs_ * sr_)); }

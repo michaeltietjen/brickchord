@@ -60,6 +60,13 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     scale.addItemList({"Major", "Minor", "Dorian", "Mixolydian"}, 1);
     for (auto* c : {&sound, &key, &scale}) addAndMakeVisible(c);
     addAndMakeVisible(bass);
+    addAndMakeVisible(internal);
+    addAndMakeVisible(midiOut);
+    outNote.setText(proc.kMidiFx ? "Sends its chords to the instrument after it: chords on channel 1, bass on channel 2"
+                                 : "MIDI out plays your other instruments too: chords on channel 1, bass on channel 2",
+                    juce::dontSendNotification);
+    outNote.setColour(juce::Label::textColourId, dim);
+    addAndMakeVisible(outNote);
     for (auto* s : {&space, &volume, &bassLvl}) {
         s->setSliderStyle(juce::Slider::LinearHorizontal);
         s->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
@@ -80,6 +87,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aSpace = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "space", space);
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
     aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
+    aInternal = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "internal", internal);
+    aMidiOut = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "midiout", midiOut);
 
     auto& lf = getLookAndFeel();
     lf.setColour(juce::TextButton::buttonColourId, plate);
@@ -114,8 +123,11 @@ void BricklabStudioEditor::showTab(int t) {
     for (auto* b : modButtons) b->setVisible(chord);
     for (juce::Component* c : {(juce::Component*) &sound, (juce::Component*) &key, (juce::Component*) &scale,
                                (juce::Component*) &bass, (juce::Component*) &bassLvl, (juce::Component*) &space, (juce::Component*) &volume,
-                               (juce::Component*) &spaceL, (juce::Component*) &volumeL})
-        c->setVisible(chord);
+                               (juce::Component*) &spaceL, (juce::Component*) &volumeL,
+                               (juce::Component*) &internal, (juce::Component*) &midiOut})
+        c->setVisible(chord && !proc.kMidiFx);       // the MIDI FX build has no sound of its own
+    bass.setVisible(chord);
+    outNote.setVisible(chord);
     soon.setText(SOON[t], juce::dontSendNotification);
     soon.setVisible(!chord);
     repaint();
@@ -180,6 +192,11 @@ void BricklabStudioEditor::resized() {
     scale.setBounds(row.removeFromLeft(130)); row.removeFromLeft(18);
     spaceL.setBounds(row.removeFromLeft(56)); space.setBounds(row.removeFromLeft(120)); row.removeFromLeft(10);
     volumeL.setBounds(row.removeFromLeft(62)); volume.setBounds(row.removeFromLeft(120));
+    r.removeFromTop(14);
+    auto outRow = r.removeFromTop(30);
+    internal.setBounds(outRow.removeFromLeft(140)); outRow.removeFromLeft(10);
+    midiOut.setBounds(outRow.removeFromLeft(110)); outRow.removeFromLeft(14);
+    outNote.setBounds(outRow);
 }
 
 void BricklabStudioEditor::timerCallback() {

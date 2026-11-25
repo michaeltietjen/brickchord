@@ -26,24 +26,43 @@ juce_add_plugin(BricklabStudio
     DESCRIPTION "The Brick suite: chords, songs, glides and chops"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    NEEDS_MIDI_OUTPUT FALSE
+    NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
     VST3_CATEGORIES Instrument Synth
     COPY_PLUGIN_AFTER_BUILD TRUE)
 
-target_sources(BricklabStudio PRIVATE
-    Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp
-    Source/core/Render.cpp
-    Source/core/Engine.cpp)
+# the same code, built twice: the instrument (AU, VST3, Standalone; MIDI out included)
+# and, for Logic, a MIDI FX that only sends its chords to the instrument after it
+juce_add_plugin(BricklabStudioMIDI
+    COMPANY_NAME "Michael Tietjen"
+    BUNDLE_ID "io.github.michaeltietjen.bricklabstudiomidi"
+    PLUGIN_MANUFACTURER_CODE Mtie
+    PLUGIN_CODE BrkM
+    FORMATS AU
+    PRODUCT_NAME "Bricklab Studio MIDI"
+    DESCRIPTION "Bricklab Studio's chords, sent to any instrument"
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT TRUE
+    IS_MIDI_EFFECT TRUE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    AU_MAIN_TYPE kAudioUnitType_MIDIProcessor
+    COPY_PLUGIN_AFTER_BUILD TRUE)
 
-target_compile_definitions(BricklabStudio PUBLIC
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0)
-
-target_link_libraries(BricklabStudio
-    PRIVATE juce::juce_audio_utils juce::juce_dsp
-    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+foreach(t BricklabStudio BricklabStudioMIDI)
+    target_sources(${t} PRIVATE
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp
+        Source/core/Render.cpp
+        Source/core/Engine.cpp)
+    target_compile_definitions(${t} PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0)
+    target_link_libraries(${t}
+        PRIVATE juce::juce_audio_utils juce::juce_dsp
+        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+endforeach()
+target_compile_definitions(BricklabStudioMIDI PRIVATE BRICK_MIDI_FX=1)

@@ -64,6 +64,8 @@ public:
     void setRelease(float secs) { relSecs_ = secs; }
     void setBass(bool on) { bassOn_ = on; }
     void setBassLevel(float g) { bassGain_ = g; }
+    bool bassOn() const { return bassOn_; }
+    std::vector<int> lastNotes() const { std::lock_guard<std::mutex> l(vmx_); return last_; }   // the last chord as voiced
     std::vector<int> wanted() const;                     // every note a chord button can ask for, likely first
     void render(float* L, float* R, int n);              // adds into L and R
 
@@ -71,14 +73,14 @@ private:
     void start(const std::vector<int>& notes);
     NoteCache& cache_;
     std::vector<Voice> voices_;
-    std::vector<int> prev_;
+    std::vector<int> prev_, last_;
     int key_ = 9;
     Scale scale_ = Scale::Minor;
     double sr_ = 44100;
     float relSecs_ = 0.4f;
     bool bassOn_ = true;
     float bassGain_ = 0.3f;
-    std::mutex vmx_;                                      // the UI thread starts chords too
+    mutable std::mutex vmx_;                                      // the UI thread starts chords too
 };
 
 int degreeOf(int note, int key, Scale scale);           // which degree of the key a MIDI note is nearest

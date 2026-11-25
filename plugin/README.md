@@ -35,3 +35,14 @@ plays MIDI into it offline and prints the level:
 The plugin is built on JUCE (https://juce.com). To release it as open source, JUCE's
 terms mean this plugin folder would be AGPLv3 (the rest of the repository stays MIT).
 That choice is made before the first release.
+
+## Play your other instruments
+
+Turn on **MIDI out** and Bricklab Studio sends every chord it plays as MIDI: the chord on
+channel 1, the synth bass note on channel 2. Keep **Built-in sound** on to layer both, or
+turn it off to use only your own instruments.
+
+- Ableton Live, Bitwig, Reaper, FL Studio: put your synth on another track and set its MIDI
+  input to the Bricklab Studio track.
+- Logic Pro: Logic doesn't take MIDI from instruments, so use **Bricklab Studio MIDI**, a
+  MIDI FX build of the same plugin. Put it in the MIDI FX slot above any instrument.
