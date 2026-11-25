@@ -75,7 +75,11 @@
   "kits/Modular/snare.wav",
   "kits/Modular/tom.wav",
   "samples/drift_choir.wav",
-  "samples/drift_vox.wav"
+  "samples/drift_vox.wav",
+  "voice/brickchop_chip.wav",
+  "voice/brickchop_clean.wav",
+  "voice/brickchop_deep.wav",
+  "voice/brickchop_robot.wav"
  ],
  "demos": [
   {

@@ -20,6 +20,7 @@ build() {   # build <folder name> <launcher> <edition or empty> <image prefix>
     mkdir -p "$APP/_vendor" "$APP/samples" "$STAGE/images"
     cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$ROOT/brickchord/samples_README.txt" "$APP/"
     cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$APP/"
+    [ "$ED" = chop ] && cp -R "$ROOT/brickchord/voice" "$APP/"      # the robot voice the Brickchop demos use
     cp "$ROOT"/brickchord/samples/*.wav "$APP/samples/" 2>/dev/null || true
     [ -d "$ROOT/brickchord/samples/textures" ] && cp -R "$ROOT/brickchord/samples/textures" "$APP/samples/"
     [ -f "$ROOT/brickchord/samples/samples.json" ] && cp "$ROOT/brickchord/samples/samples.json" "$APP/samples/"

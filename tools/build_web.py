@@ -12,7 +12,7 @@ APP = os.path.join(ROOT, "brickchord")
 WEB = os.path.join(ROOT, "docs", "web")
 
 files = []
-for sub in ("py", "kits", "samples", "demos"):
+for sub in ("py", "kits", "samples", "demos", "voice"):
     shutil.rmtree(os.path.join(WEB, sub), ignore_errors=True)
 os.makedirs(os.path.join(WEB, "py"))
 for f in ("engine.py", "synth.py", "songrender.py", "theory.py", "live.py", "edition.py", "ambient.py", "glideweb.py", "chop.py", "chopweb.py"):
@@ -32,6 +32,11 @@ for w in sorted(os.listdir(os.path.join(APP, "samples"))):
     if w.lower().endswith(".wav") and os.path.isfile(os.path.join(APP, "samples", w)):
         shutil.copy(os.path.join(APP, "samples", w), os.path.join(WEB, "samples", w))
         files.append("samples/" + w)
+os.makedirs(os.path.join(WEB, "voice"))                     # the robot voice of the Brickchop demos
+for w in sorted(os.listdir(os.path.join(APP, "voice"))):
+    if w.startswith("brickchop_") and w.endswith(".wav"):
+        shutil.copy(os.path.join(APP, "voice", w), os.path.join(WEB, "voice", w))
+        files.append("voice/" + w)
 os.makedirs(os.path.join(WEB, "demos"))
 demos = []
 for f in sorted(os.listdir(os.path.join(APP, "demos"))):

@@ -42,12 +42,15 @@ def M():
     return main
 
 
+VOICE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice")   # the robot voice (tools/make_voice.py)
+
+
 def chop_files():
     """Every WAV the Brick apps can see: Brickchop's own samples and Bricklab's,
     Brickchord's and Brickglide's, so your loops are already here."""
     d = synth.SAMPLE_DIR
     ports = os.path.dirname(os.path.dirname(d))
-    dirs = [d] + [os.path.join(ports, a, "samples") for a in ("bricklab", "brickchord", "brickglide")]
+    dirs = [d, VOICE_DIR] + [os.path.join(ports, a, "samples") for a in ("bricklab", "brickchord", "brickglide")]
     out, seen = [], set()
     for k, sd in enumerate(dirs):
         try:
@@ -603,11 +606,301 @@ def demo_neon():
             "fx": {"rev": 0.3, "dly": 0.3}}
 
 
-DEMOS = [("Night Bus", "lo-fi, A minor, 88 BPM", None), ("Neon Drift", "deep house, F minor, 122 BPM", None)]
+def voice_part(take, which=None, **fx):
+    """A pad holding "brick" (0), "chop" (1) or the whole phrase (None) of one robot
+    voice take (robot, deep, chip, clean). "chop" starts 37% of the way in on every
+    take: tools/make_voice.py builds them all on one timeline."""
+    path = os.path.join(VOICE_DIR, "brickchop_%s.wav" % take)
+    x = synth._sample_audio(path)
+    n = len(x) if x is not None else 0
+    cut = int(n * 0.374)
+    src = ["file", path] if which is None else ["file", path, which, 0 if which == 0 else cut, cut if which == 0 else n]
+    d = {"src": src, "tune": 0, "level": 1.0, "choke": True, "reverse": False, "rev": 0.2, "dly": 0.0}
+    d.update(fx)
+    return d
+
+
+def voice_pads():
+    """Group D for the voice demos: 0 robot phrase, 1 robot "brick", 2 robot "chop",
+    3 deep phrase, 4 deep "brick", 5 deep "chop", 6 chip "brick", 7 chip "chop",
+    8 and 9 robot "brick" up 3 and 7 semitones, 10 robot "chop" reversed, 11 clean phrase."""
+    v = voice_part
+    return [v("robot", rev=0.3), v("robot", 0), v("robot", 1, dly=0.3),
+            v("deep", rev=0.5), v("deep", 0), v("deep", 1, rev=0.6),
+            v("chip", 0, pan=0.3), v("chip", 1, pan=-0.3),
+            v("robot", 0, tune=3), v("robot", 0, tune=7),
+            v("robot", 1, reverse=True, rev=0.5), v("clean", rev=0.4)]
+
+
+def demo_footwork():
+    """The third demo: "Brick Chop", footwork in F minor at 160 BPM, built around
+    the robot voice saying the app's name (brickchord/voice, from tools/make_voice.py).
+    A: 808 footwork kicks, claps on 2 and 4, 16th hats with triplet rolls, rim triplets.
+    B: Sub bass in Keys, locked to the kick.  C: a dark Choir Pad, Fm then Db.
+    D: the voice, chopped: "brick" and "chop" on their own pads at three pitches
+       (robot, deep, chip), stuttered in triplets, tuned into a little melody,
+       reversed, and the whole phrase slowed down at the end of the four bars."""
+    g = default_groups()
+    for grp in g:
+        grp["pattern"] = {"bars": 2, "ev": []}
+    A, B, C, D = g
+    # ---- A drums: 808 on pads 4-11 (kick 4, snare 5, hat 6, open hat 7, clap 8, rim 9, tom 10, shaker 11)
+    p = A["pads"]
+    p[4].update(level=0.8, drive=0.15, length=0.3)                     # a short, punchy 808 kick
+    p[8].update(level=0.9, rev=0.5)
+    p[2].update(level=0.5, rev=0.3)                                    # 909 clap layered on the 4
+    p[6].update(level=0.4, filter=0.35, pan=0.2, length=0.5)
+    p[9].update(level=0.5, pan=-0.3, dly=0.3)
+    p[10].update(level=0.6, tune=-5, rev=0.4)
+    ev = A["pattern"]["ev"]
+    for s, v in ((0, 1.0), (3, 0.85), (6, 0.9), (10, 0.85), (13, 0.8),
+                 (16, 1.0), (19, 0.85), (22, 0.9), (26, 0.85), (28, 0.7), (30, 0.8)):
+        ev.append([s, 4, v])                                          # footwork kick, three against four
+    for s in (4, 12, 20, 28):
+        ev.append([s, 8, 1.0])                                        # claps on 2 and 4
+    for s in (12, 28):
+        ev.append([s, 2, 0.7])
+    for s in range(32):
+        if s not in (23, 24, 25, 26, 27):
+            ev.append([s, 6, 0.85 if s % 4 == 2 else 0.5])            # 16th hats, accent on the off-beat
+    for k in range(8):                                                # 1/16 triplet hat roll into bar 2's last beat
+        ev.append([round(23 + k * 2.0 / 3.0, 3), 6, 0.35 + 0.08 * k])
+    for b in (8, 24):
+        for k in range(3):
+            ev.append([round(b + k * 4.0 / 3.0, 3), 9, 0.7 - 0.1 * k])   # rim in quarter-note triplets
+    ev.append([31, 10, 0.8])
+    A["fx"] = {"volume": 0.6}
+    # ---- B bass: Sub (pad 2) in Keys; +5 puts the bottom on F. F=0 Ab=3 Bb=5 C=7 Db=8 Eb=10
+    B["keys"], B["keys_pad"] = True, 1
+    B["pads"][1].update(level=0.6, drive=0.15, fade=0.5, length=0.3, rev=0.0, dly=0.0, choke=True)
+    B["fx"] = {"tune": 5, "volume": 0.6}
+    for s, n, v in ((0, 0, 1.0), (3, 0, 0.8), (6, 3, 0.9), (10, 0, 0.8), (13, 10, 0.8),
+                    (16, 8, 1.0), (19, 8, 0.8), (22, 5, 0.9), (26, 7, 0.9), (28, 7, 0.7), (30, 10, 0.8)):
+        B["pattern"]["ev"].append([s, n, v])
+    # ---- C pad: Choir Pad in Keys, low and filtered, Fm then Db
+    C["keys"], C["keys_pad"] = True, 8
+    C["pads"][8] = {"src": ["keys", "Choir Pad"], "tune": 0, "level": 0.55, "choke": False, "reverse": False,
+                    "filter": -0.35, "rev": 1.0, "dly": 0.3, "attack": 0.15, "fade": 0.6}
+    C["fx"] = {"tune": 5, "volume": 0.7}
+    for n in (0, 3, 7):                                               # Fm: F Ab C
+        C["pattern"]["ev"].append([0, n, 0.8])
+    for n in (8, 0, 3):                                               # Db: Db F Ab
+        C["pattern"]["ev"].append([16, n, 0.8])
+    # ---- D the voice, four bars
+    D["keys"] = False
+    D["pads"] = voice_pads()
+    D["fx"] = {"volume": 1.1, "crush": 0.1}
+    D["pattern"] = {"bars": 4, "ev": []}
+    t3 = lambda b, k: round(b + k * 4.0 / 3.0, 3)                     # quarter-note triplets
+    hits = [(0, 0, 1.0), (12, 2, 0.9), (14, 2, 0.8),                  # bar 1: "brick chop" ... "chop, chop"
+            (16, 1, 1.0), (t3(17, 1), 1, 0.85), (t3(17, 2), 1, 0.85), (21, 1, 0.9), (22, 2, 1.0),
+            (26, 1, 0.9), (t3(26, 1), 1, 0.8), (t3(26, 2), 2, 1.0), (30, 10, 0.8),   # bar 2: stutters
+            (32, 1, 1.0), (35, 8, 0.9), (38, 9, 0.9), (40, 6, 0.9), (42, 7, 0.9),  # bar 3: "brick" in tune
+            (44, 1, 1.0), (46, 2, 1.0),
+            (48, 3, 1.0), (58, 5, 0.9)]                               # bar 4: the deep voice
+    for k in range(6):                                                # and a chip roll into the top
+        hits.append((round(60 + k * 2.0 / 3.0, 3), 6, 0.6 + 0.07 * k))
+    for s, i, v in hits:
+        D["pattern"]["ev"].append([s, i, v])
+    state = {"v": 2, "group": 3, "last": 0, "groups": g, "rec_secs": 4, "chop_src": None, "bpm": 160,
+             "click": False, "quant": 0, "qstr": 1.0,
+             "master": {"comp": 0.4, "width": 1.2}}
+    return {"version": 1, "name": "Brick Chop (demo)", "key": 5, "scale": "Minor", "chop": state,
+            "fx": {"rev": 0.25, "dly": 0.2}}
+
+
+def _voice_demo(name, bpm, key, kit_a, kit_b=None):
+    """Shared start for the voice demos: groups with empty patterns, group A
+    loaded with one kit's eight parts on pads 4-11 (and another's kick, snare,
+    clap, hat on 0-3), group D holding the robot voice."""
+    g = default_groups()
+    for grp in g:
+        grp["pattern"] = {"bars": 2, "ev": []}
+    kits = kit_list()
+    ka = kit_a if kit_a in kits else kits[0]
+    kb = kit_b if kit_b in kits else ka
+    pad = lambda src: {"src": src, "tune": 0, "level": 0.9, "choke": True, "reverse": False}
+    g[0]["pads"] = ([pad(["kit", "%s/%s" % (kb, q)]) for q in ("kick", "snare", "clap", "hat")] +
+                    [pad(["kit", "%s/%s" % (ka, q)]) for q in KIT_PARTS])
+    g[3]["keys"] = False
+    g[3]["pads"] = voice_pads()
+    g[3]["pattern"] = {"bars": 4, "ev": []}
+    return g
+
+
+def _voice_song(name, bpm, key, g, master, fx):
+    state = {"v": 2, "group": 3, "last": 0, "groups": g, "rec_secs": 4, "chop_src": None, "bpm": bpm,
+             "click": False, "quant": 0, "qstr": 1.0, "master": master}
+    return {"version": 1, "name": "%s (demo)" % name, "key": key, "scale": "Minor", "chop": state, "fx": fx}
+
+
+def demo_electro():
+    """"Brick Bot", electro in A minor at 124 BPM: robot funk in the Kraftwerk line.
+    A: 808 kick on the syncopated electro pattern, clap on 2 and 4, 16th hats, rim as a cowbell.
+    B: Acid Bass in Keys, a 16th-note octave line.  C: Square Keys stabs, Am then G.
+    D, the hook: "brick" sung as a four-note robot melody, "chop" answering on the 4."""
+    g = _voice_demo("Brick Bot", 124, 9, "808", "Modular")
+    A, B, C, D = g
+    p = A["pads"]
+    p[4].update(level=0.85, length=0.4)
+    p[8].update(level=0.8, rev=0.6)
+    p[6].update(level=0.4, filter=0.4, length=0.4)
+    p[9].update(level=0.5, tune=7, dly=0.5, pan=0.3)
+    p[3].update(level=0.3, pan=-0.3)                                   # Modular hat
+    ev = A["pattern"]["ev"]
+    for s in (0, 6, 10, 16, 22, 26, 29):
+        ev.append([s, 4, 1.0])
+    for s in (4, 12, 20, 28):
+        ev.append([s, 8, 1.0])
+    for s in range(32):
+        ev.append([s, 6, 0.8 if s % 2 == 0 else 0.45])
+    for s in (3, 7, 11, 14, 19, 23, 27, 30):
+        ev.append([s, 9, 0.6])
+    for s in (2, 18):
+        ev.append([s, 3, 0.6])
+    A["fx"] = {"volume": 0.65}
+    # B: Acid Bass (pad 3) in Keys, transpose -3 puts pad 1 on A. A=0 C=3 D=5 E=7 G=10
+    B["keys"], B["keys_pad"] = True, 3
+    B["pads"][3].update(level=0.6, length=0.25, filter=-0.1, drive=0.2, rev=0.0, dly=0.0, choke=True)
+    B["fx"] = {"tune": -3, "volume": 0.6}
+    line = [0, 0, 12 - 12, 0, 7, 0, 0, 10, 0, 0, 3, 0, 5, 0, 7, 10]
+    for s in range(32):
+        n = line[s % 16] if s < 16 else (line[s % 16] - 2) % 12
+        if s % 16 in (1, 5, 9, 13):
+            continue
+        B["pattern"]["ev"].append([s, n, 1.0 if s % 4 == 0 else 0.7])
+    # C: Square Keys stabs, Am (A C E) then G (G B D)
+    C["keys"], C["keys_pad"] = True, 3
+    C["pads"][3].update(level=0.5, length=0.15, rev=0.6, dly=0.5, filter=-0.1, choke=False)
+    C["fx"] = {"tune": -3, "volume": 0.7}
+    for s in (2, 7, 10):
+        for n in (0, 3, 7):
+            C["pattern"]["ev"].append([s, n, 0.8])
+    for s in (18, 23, 26):
+        for n in (10, 2, 5):
+            C["pattern"]["ev"].append([s, n, 0.8])
+    # D the hook: "brick" up a melody (pads 1, 8, 9 are +0, +3, +7; 4 is the deep one), "chop" on the 4
+    D["fx"] = {"volume": 1.1, "crush": 0.2}
+    hook = [(0, 1), (2, 1), (4, 8), (6, 9), (12, 2),                 # brick brick brick-brick ... CHOP
+            (16, 1), (18, 1), (20, 9), (22, 8), (28, 2),
+            (32, 1), (34, 1), (36, 8), (38, 9), (44, 2), (46, 2),
+            (48, 0), (56, 4), (58, 4), (60, 5)]                      # the full phrase, then the deep voice
+    for s, i in hook:
+        D["pattern"]["ev"].append([s, i, 1.0])
+    return _voice_song("Brick Bot", 124, 9, g, {"comp": 0.4, "width": 1.3}, {"rev": 0.3, "dly": 0.3})
+
+
+def demo_jungle():
+    """"Chop Shop", jungle in D minor at 170 BPM.
+    A: an Acoustic kit played as a chopped break: kick, snare with ghost notes, rides of hats, rolls.
+    B: Reese bass in Keys, long notes, D then Bb.  C: Air Pad, Dm9 held, far back.
+    D, the hook: "chop" stuttered in 32nds and pitched up, with the deep voice dropping the full phrase."""
+    g = _voice_demo("Chop Shop", 170, 2, "Acoustic", "Lo-fi")
+    A, B, C, D = g
+    p = A["pads"]
+    p[4].update(level=0.85, length=0.5)
+    p[5].update(level=0.9, rev=0.1)
+    p[6].update(level=0.35, filter=0.3, pan=0.2)
+    p[7].update(level=0.4, pan=0.2, length=0.4)
+    p[1].update(level=0.5, filter=0.2)                                 # Lo-fi snare for ghosts
+    ev = A["pattern"]["ev"]
+    for s, v in ((0, 1.0), (10, 0.9), (16, 1.0), (18, 0.7), (26, 0.9)):
+        ev.append([s, 4, v])
+    for s in (4, 12, 20, 28):
+        ev.append([s, 5, 1.0])
+    for s in (7, 9, 14, 15, 23, 25, 30):
+        ev.append([s, 1, 0.45])
+    for s in (29.5, 30.5, 31, 31.5):
+        ev.append([s, 5, 0.55])                                        # a snare roll into the top
+    for s in range(0, 32, 2):
+        ev.append([s, 6, 0.7])
+    for s in (6, 22):
+        ev.append([s, 7, 0.6])
+    A["fx"] = {"volume": 0.7, "drive": 0.15}
+    # B: Reese (pad 4) in Keys, +2 puts pad 1 on D. D=0 F=3 A=7 Bb=8 C=10
+    B["keys"], B["keys_pad"] = True, 4
+    B["pads"][4].update(level=0.55, filter=-0.2, fade=0.4, rev=0.0, dly=0.0, choke=True)
+    B["fx"] = {"tune": 2, "volume": 0.6}
+    for s, n in ((0, 0), (12, 3), (16, 8), (28, 7)):
+        B["pattern"]["ev"].append([s, n, 1.0])
+    # C: Air Pad, Dm9 (D F A C E)
+    C["keys"], C["keys_pad"] = True, 11
+    C["pads"][11] = {"src": ["keys", "Air Pad"], "tune": 0, "level": 0.3, "choke": False, "reverse": False,
+                     "filter": -0.5, "rev": 0.6, "dly": 0.0, "attack": 0.3}
+    C["fx"] = {"tune": 2, "volume": 0.4}
+    for n in (0, 3, 7, 10, 2):
+        C["pattern"]["ev"].append([0, n, 0.7])
+    # D the hook: "chop" in 32nds (pad 2), rising (pads 7 chip), the deep phrase on bar 3
+    D["fx"] = {"volume": 1.1}
+    for b in (0, 16):
+        for k in range(4):
+            D["pattern"]["ev"].append([b + 12 + k * 0.5, 2, 0.7 + 0.1 * k])   # chop-chop-chop-chop
+        D["pattern"]["ev"].append([b + 14, 7, 1.0])                          # CHOP (chip)
+    D["pattern"]["ev"].append([0, 0, 1.0])                                   # "brick chop" on the one
+    D["pattern"]["ev"].append([32, 3, 1.0])                                  # the deep phrase
+    for k in range(8):
+        D["pattern"]["ev"].append([44 + k * 0.5, 7 if k % 2 else 2, 0.6 + 0.05 * k])
+    D["pattern"]["ev"] += [[48, 1, 1.0], [50, 1, 0.9], [52, 10, 1.0], [56, 5, 1.0], [60, 11, 1.0]]
+    return _voice_song("Chop Shop", 170, 2, g, {"comp": 0.45, "width": 1.2}, {"rev": 0.3, "dly": 0.25})
+
+
+def demo_trap():
+    """"Brick Trap", trap in C minor at 140 BPM, half-time.
+    A: 808 kick, clap on beat 3 of each bar, hats in 8ths with 1/32 and triplet rolls, open hat.
+    B: Sub as a long 808 bass, C then Ab then G.  C: FM Bell melody in the minor scale.
+    D, the hook: call and response, the full "brick chop" answered by the chip voice,
+    with "brick" ad-libs between."""
+    g = _voice_demo("Brick Trap", 140, 0, "808")
+    A, B, C, D = g
+    p = A["pads"]
+    p[4].update(level=0.75, length=0.4)
+    p[8].update(level=0.9, rev=0.4)
+    p[6].update(level=0.4, filter=0.4, pan=0.15, length=0.35)
+    p[7].update(level=0.45, pan=-0.2)
+    ev = A["pattern"]["ev"]
+    for s in (0, 3, 10, 16, 19, 23, 26):
+        ev.append([s, 4, 1.0])
+    for s in (8, 24):
+        ev.append([s, 8, 1.0])
+    for s in range(0, 32, 2):
+        if s not in (12, 28):
+            ev.append([s, 6, 0.75])
+    for k in range(4):
+        ev.append([12 + k * 0.5, 6, 0.45 + 0.08 * k])                    # 1/32 roll
+    for k in range(6):
+        ev.append([round(28 + k * 2.0 / 3.0, 3), 6, 0.5 + 0.06 * k])     # triplet roll
+    ev.append([14, 7, 0.6])
+    A["fx"] = {"volume": 0.55}
+    # B: Sub (pad 1) long; C=0 D=2 Eb=3 F=5 G=7 Ab=8 Bb=10
+    B["keys"], B["keys_pad"] = True, 1
+    B["pads"][1].update(level=0.6, drive=0.25, rev=0.0, dly=0.0, choke=True, fade=0.3)
+    B["fx"] = {"volume": 0.45}
+    for s, n in ((0, 0), (10, 0), (16, 8), (23, 7), (26, 7)):
+        B["pattern"]["ev"].append([s, n, 1.0])
+    # C: FM Bell, a slow minor melody, four bars
+    C["keys"], C["keys_pad"] = True, 9
+    C["pads"][9] = {"src": ["keys", "FM Bell"], "tune": 12, "level": 0.4, "choke": False, "reverse": False,
+                    "rev": 0.9, "dly": 0.6, "pan": 0.2}
+    C["pattern"] = {"bars": 4, "ev": []}
+    for s, n in ((0, 7), (3, 3), (6, 2), (8, 0), (16, 8), (19, 7), (22, 3), (24, 2),
+                 (32, 7), (35, 3), (38, 5), (40, 7), (48, 10), (51, 8), (54, 7), (56, 3)):
+        C["pattern"]["ev"].append([s, n, 0.7])
+    # D the hook: call ("brick chop") and response (chip "brick... chop"), ad-libs between
+    D["fx"] = {"volume": 1.1}
+    D["pattern"]["ev"] += [[0, 0, 1.0], [8, 6, 0.9], [10, 7, 0.9],           # BRICK CHOP / brick chop (chip)
+                           [20, 4, 0.8], [22, 4, 0.8],                       # deep "brick, brick"
+                           [32, 0, 1.0], [40, 6, 0.9], [round(41 + 1 / 3, 3), 6, 0.8], [42, 7, 1.0],
+                           [52, 10, 0.9], [56, 3, 1.0]]
+    return _voice_song("Brick Trap", 140, 0, g, {"comp": 0.4, "width": 1.3}, {"rev": 0.35, "dly": 0.3})
+
+
+DEMOS = [("Night Bus", "lo-fi, A minor, 88 BPM", None), ("Neon Drift", "deep house, F minor, 122 BPM", None),
+         ("Brick Chop", "footwork, F minor, 160 BPM", None), ("Brick Bot", "electro, A minor, 124 BPM", None),
+         ("Chop Shop", "jungle, D minor, 170 BPM", None), ("Brick Trap", "trap, C minor, 140 BPM", None)]
 
 
 def demo_by_index(i):
-    return (demo_song, demo_neon)[i % 2]()
+    return (demo_song, demo_neon, demo_footwork, demo_electro, demo_jungle, demo_trap)[i % 6]()
 
 
 class ChopMixin:  # noqa (the intro film is in ChopIntroMixin, below)
