@@ -1,0 +1,107 @@
+{
+ "files": [
+  "py/engine.py",
+  "py/synth.py",
+  "py/songrender.py",
+  "kits/808/clap.wav",
+  "kits/808/hat.wav",
+  "kits/808/kick.wav",
+  "kits/808/ohat.wav",
+  "kits/808/rim.wav",
+  "kits/808/shk.wav",
+  "kits/808/snare.wav",
+  "kits/808/tom.wav",
+  "kits/909/clap.wav",
+  "kits/909/hat.wav",
+  "kits/909/kick.wav",
+  "kits/909/ohat.wav",
+  "kits/909/rim.wav",
+  "kits/909/shk.wav",
+  "kits/909/snare.wav",
+  "kits/909/tom.wav",
+  "kits/Acoustic/clap.wav",
+  "kits/Acoustic/hat.wav",
+  "kits/Acoustic/kick.wav",
+  "kits/Acoustic/ohat.wav",
+  "kits/Acoustic/rim.wav",
+  "kits/Acoustic/shk.wav",
+  "kits/Acoustic/snare.wav",
+  "kits/Acoustic/tom.wav",
+  "kits/Classic/clap.wav",
+  "kits/Classic/hat.wav",
+  "kits/Classic/kick.wav",
+  "kits/Classic/ohat.wav",
+  "kits/Classic/rim.wav",
+  "kits/Classic/shk.wav",
+  "kits/Classic/snare.wav",
+  "kits/Classic/tom.wav",
+  "kits/Glitch/clap.wav",
+  "kits/Glitch/hat.wav",
+  "kits/Glitch/kick.wav",
+  "kits/Glitch/ohat.wav",
+  "kits/Glitch/rim.wav",
+  "kits/Glitch/shk.wav",
+  "kits/Glitch/snare.wav",
+  "kits/Glitch/tom.wav",
+  "kits/Industrial/clap.wav",
+  "kits/Industrial/hat.wav",
+  "kits/Industrial/kick.wav",
+  "kits/Industrial/ohat.wav",
+  "kits/Industrial/rim.wav",
+  "kits/Industrial/shk.wav",
+  "kits/Industrial/snare.wav",
+  "kits/Industrial/tom.wav",
+  "kits/Lo-fi/clap.wav",
+  "kits/Lo-fi/hat.wav",
+  "kits/Lo-fi/kick.wav",
+  "kits/Lo-fi/ohat.wav",
+  "kits/Lo-fi/rim.wav",
+  "kits/Lo-fi/shk.wav",
+  "kits/Lo-fi/snare.wav",
+  "kits/Lo-fi/tom.wav",
+  "kits/Modular/clap.wav",
+  "kits/Modular/hat.wav",
+  "kits/Modular/kick.wav",
+  "kits/Modular/ohat.wav",
+  "kits/Modular/rim.wav",
+  "kits/Modular/shk.wav",
+  "kits/Modular/snare.wav",
+  "kits/Modular/tom.wav",
+  "samples/drift_choir.wav",
+  "samples/drift_vox.wav"
+ ],
+ "demos": [
+  {
+   "file": "acid_room.json",
+   "name": "Acid Room"
+  },
+  {
+   "file": "analog_drift.json",
+   "name": "Analog Drift"
+  },
+  {
+   "file": "cathedral.json",
+   "name": "Cathedral"
+  },
+  {
+   "file": "night_drive.json",
+   "name": "Night Drive"
+  },
+  {
+   "file": "patch_bay.json",
+   "name": "Patch Bay"
+  },
+  {
+   "file": "resonators.json",
+   "name": "Resonators"
+  },
+  {
+   "file": "slow_light.json",
+   "name": "Slow Light"
+  },
+  {
+   "file": "tape_lofi.json",
+   "name": "Tape Lo-fi"
+  }
+ ]
+}

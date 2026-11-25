@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- Bricklab web (michaeltietjen.github.io/brickchord/web/): make Bricklab songs in a browser. 16 patterns of 6 tracks, a drum grid and a note grid in the song's key, each track's machine, sound, level, pan and sends, the song chain, and your own samples (WAV, AIFF or MP3). Play renders with the handheld's own engine running in the browser, so it sounds like the Brick. Download for the Brick saves a zip with the song in the slot you pick and the samples it uses.
+- `brickchord/songrender.py` renders any Bricklab song file to a WAV on a computer: `python3 songrender.py song.json out.wav`.
+- Bricklab: a song opened at launch now plays at its own tempo, key and scale, as when switching songs.
+
 ## v0.5.0 (Nov 24, 2026): no-sticks mode, KNULLI, R36 and PortMaster
 - No-sticks mode for Brickchord, Bricklab and Brickglide, for the original TrimUI Brick and other handhelds without analog sticks. Two buttons stand in for the sticks (F1 and F2 on the Brick; any spare button can be used): tap one to click that stick, hold it and use the D-pad to push the stick, stronger the longer you hold. On a D-pad some controls work their own way: Brickchord and Bricklab chord types latch (pick one, then play; the same direction again turns it off), the mode wheel steers with the plain D-pad and Brickglide's strum sweeps across the chord. On-screen hints name the buttons. It turns on by itself when no sticks are found; Settings > Global > Sticks forces it on or off, and Stick buttons relearns F1 and F2.
 - R36 family: the stick setup now registers short-throw sticks. Many R36 clones only reach about half of a stick's range, so the setup, which waited for a push past 70%, never took the right stick (issue #5). A push now counts once one axis clearly leads for a moment, the furthest it reached is saved, and the app scales that stick back up to full range. Sticks on a second input device are found too, and the log lists every axis the firmware exposes and what each setup step took.

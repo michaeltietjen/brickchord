@@ -194,6 +194,15 @@ class SongMixin:
             # the earlier looper becomes pattern 1
             lp = self.cfg["loop"]
             data = {"bars": [lp.get("bars", 2)], "pats": [{"tracks": lp.get("tracks") or []}]}
+        if isinstance(data, dict):
+            # the song's own tempo, key and scale, as when switching songs: a song
+            # copied in from Bricklab web plays at its tempo from the first launch
+            if data.get("bpm"):
+                self.bpm = int(data["bpm"])
+            if "key" in data:
+                self.key = int(data["key"]) % 12
+            if data.get("scale") in M().SCALES:
+                self.scale = data["scale"]
         self.song_apply(data)
 
     def song_apply(self, data):
