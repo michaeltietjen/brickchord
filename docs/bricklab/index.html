@@ -10,7 +10,7 @@
 <meta name="twitter:image" content="https://michaeltietjen.github.io/brickchord/bricklab-card.png">
 <link rel="icon" href="../bricklab-image.png" type="image/png">
 <title>Bricklab</title>
-<meta name="description" content="Bricklab: a pocket groovebox for the TrimUI Brick Pro running KNULLI. Looper, 16 patterns of 6 tracks, Chord, Lead, Bass, Drone and Sample machines, a drum machine, per-track effects.">
+<meta name="description" content="Bricklab: a pocket groovebox for the TrimUI Brick, R36 handhelds and PortMaster. Looper, 16 patterns of 6 tracks, Chord, Lead, Bass, Drone and Sample machines, a drum machine, per-track effects.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -227,6 +227,10 @@ footer p { margin: 0; max-width: 56em; }
   .chordname.drop span { animation: none; }
   .key, .btn { transition: none; }
 }
+
+/* v0.5.0 update banner */
+.update{border:1px solid currentColor;border-radius:12px;padding:12px 16px;margin:18px 0 6px;font-size:.95em;line-height:1.5;background:rgba(127,127,127,.08)}
+.update b{display:block;margin-bottom:2px}
 </style>
 <style>
 :root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
@@ -254,15 +258,16 @@ body { background: var(--chassis); color: var(--ink); }
 </style>
 </head>
 <body>
-<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/" aria-current="page">Bricklab</a><a href="../brickglide/">Brickglide</a><a href="../brickchop/">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide, Brickchop</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/" aria-current="page">Bricklab</a><a href="../brickglide/">Brickglide</a><a href="../brickchop/">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">New: v0.5.0, no sticks needed</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
   <section class="module" id="top">
     <div class="wrap">
       <img class="hero-img" src="../bricklab-lockup.png" alt="Bricklab">
-      <div class="label">For the TrimUI Brick Pro on KNULLI</div>
+      <div class="label">For the TrimUI Brick, R36 handhelds and PortMaster</div>
       <h1>A pocket groovebox</h1>
       <p class="intro">Jam a loop in seconds, then open it up: 16 patterns of 6 tracks, a machine per track, Moog-style leads and basses, your own samples, a drum machine, and effects on every track. Same engine and buttons as <a href="../">Brickchord</a>, built out into a pocket Digitakt.</p>
-      <p><a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/download/v0.4.0-beta/bricklab-v0.4.0-beta-knulli.zip">Download the Bricklab beta</a> <a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/download/v0.3.0/bricklab-v0.3.0-knulli.zip">v0.3.0 (stable)</a></p>
-      <p class="xlink">New in the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">beta</a>: USB MIDI in. Plug a keyboard or an Orchid into the Brick's USB-C: one key presses the matching button in whatever mode you're in, several keys play that exact chord, and it all records into the looper.</p>
+      <p><a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">Download v0.5.0</a> <a class="btn" href="#install">Which zip?</a></p>
+      <p class="update"><b>New in v0.5.0: no sticks needed.</b>Bricklab now plays on the original TrimUI Brick and other handhelds without analog sticks, and installs on R36 handhelds and any firmware with PortMaster. F1 and F2 stand in for the sticks: tap one to click, hold it and use the D-pad to push. <a href="#nosticks">How it works</a></p>
+      <p class="xlink">Also in <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">v0.5.0</a>: USB MIDI in. Plug a keyboard or an Orchid into the Brick's USB-C: one key presses the matching button in whatever mode you're in, several keys play that exact chord, and it all records into the looper.</p>
       <p class="xlink">Just want to play chords? <a href="../">Brickchord is the simple one.</a> Want them to glide? <a href="../brickglide/">That's Brickglide.</a></p>
     </div>
   </section>
@@ -364,13 +369,17 @@ body { background: var(--chassis); color: var(--ink); }
   <section class="module" id="install">
     <div class="wrap">
       <div class="label">Install</div>
-      <h2>Two minutes on KNULLI</h2>
+      <h2>Two minutes to install</h2>
       <ol>
-        <li>Download <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.3.0/bricklab-v0.3.0-knulli.zip">bricklab-v0.3.0-knulli.zip</a> (or the <a href="https://github.com/michaeltietjen/brickchord/releases/latest">latest release</a>).</li>
-        <li>Unzip it. Copy the <code>bricklab</code> folder, <code>Bricklab.sh</code> and the <code>images</code> folder into <code>roms/ports</code> on the Brick's SD card (over the network share or with a card reader).</li>
-        <li>Update Gamelists on the Brick. Bricklab appears under Ports.</li>
-        <li>On first launch, press each button once and push each stick once so it learns your controls.</li>
+        <li>Download the zip for your handheld from the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">v0.5.0 release</a>:
+          <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/bricklab-v0.5.0-knulli.zip"><code>bricklab-v0.5.0-knulli.zip</code></a> for KNULLI (TrimUI Brick and Brick Pro),
+          <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brick-family-r36-v0.5.0.zip"><code>brick-family-r36-v0.5.0.zip</code></a> for the R36S, R36 Max and other ArkOS-family handhelds (all three apps in one),
+          or <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/bricklab-v0.5.0-portmaster.zip"><code>bricklab-v0.5.0-portmaster.zip</code></a> for any firmware with PortMaster (NextUI, NX Redux, muOS, ROCKNIX and more).</li>
+        <li>Unzip it and copy everything inside into <code>roms/ports</code> on the SD card (over the network share or with a card reader). PortMaster zips can also go in through PortMaster's own installer.</li>
+        <li>Update Gamelists on the device. Bricklab appears under Ports.</li>
+        <li>On first launch, press each button once and push each stick once so it learns your controls. No sticks? It asks for the two buttons to use instead (F1 and F2 on the Brick).</li>
       </ol>
+      <p class="note" id="nosticks"><b>No sticks?</b> F1 stands in for the left stick and F2 for the right. Tap one to click that stick; hold it and use the D-pad to push the stick, stronger the longer you hold. Chord types latch: pick one with F1 + the D-pad, then play; the same direction again turns it off. It turns on by itself when no sticks are found, and the on-screen hints name the buttons. Settings &gt; Global &gt; Sticks switches it on or off, and Stick buttons picks different buttons. Brick Pro owners can try it there too.</p>
       <p class="note">Tested on <code>knulli-a133-trimui-brick-pro-beta-20260921</code>. Bricklab and Brickchord install side by side and share a sound cache. Samples go in <code>roms/ports/bricklab/samples/</code>.</p>
       <p class="xlink">Source and issues: <a href="https://github.com/michaeltietjen/brickchord">github.com/michaeltietjen/brickchord</a> &middot; <a href="../">Brickchord</a></p>
     </div>

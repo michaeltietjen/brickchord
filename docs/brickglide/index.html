@@ -8,7 +8,7 @@
 <meta property="og:image" content="https://michaeltietjen.github.io/brickchord/brickglide-card.png">
 <link rel="icon" href="../bricklab-image.png" type="image/png">
 <title>Brickglide</title>
-<meta name="description" content="Brickglide: an ambient machine for the TrimUI Brick Pro running KNULLI. Press a chord and the voices glide into it and hold it. Blooms, moves, a sub bass, progressions that play themselves, and a live spectrogram.">
+<meta name="description" content="Brickglide: an ambient machine for the TrimUI Brick, R36 handhelds and PortMaster. Press a chord and the voices glide into it and hold it. Blooms, moves, a sub bass, progressions that play themselves, and a live spectrogram.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -118,6 +118,10 @@ footer p { margin: 0; max-width: 56em; }
   .key .n { font-size: 13px; } .key .r { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { .key, .btn { transition: none; } }
+
+/* v0.5.0 update banner */
+.update{border:1px solid currentColor;border-radius:12px;padding:12px 16px;margin:18px 0 6px;font-size:.95em;line-height:1.5;background:rgba(127,127,127,.08)}
+.update b{display:block;margin-bottom:2px}
 </style>
 <style>
 /* the Brick family bar, the same on all three pages */
@@ -130,7 +134,7 @@ footer p { margin: 0; max-width: 56em; }
 </style>
 </head>
 <body>
-<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/">Bricklab</a><a href="../brickglide/" aria-current="page">Brickglide</a><a href="../brickchop/">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide, Brickchop</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="../">Brickchord</a><a href="../bricklab/">Bricklab</a><a href="../brickglide/" aria-current="page">Brickglide</a><a href="../brickchop/">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">New: v0.5.0, no sticks needed</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
   <header class="strip">
     <div class="wrap">
       <a class="brand" href="#top" aria-label="Brickglide">
@@ -152,14 +156,15 @@ footer p { margin: 0; max-width: 56em; }
   <section class="hero" id="top">
     <div class="wrap">
       <div>
-        <div class="label">Beta &middot; for the TrimUI Brick Pro on KNULLI</div>
+        <div class="label">For the TrimUI Brick &middot; R36 &middot; PortMaster</div>
         <h1>Chords that <em>glide.</em></h1>
         <p class="lede">An ambient machine. Press a chord and five voices slide into it and hold it; press the next and every voice travels there. Let the progression play and the buttons become a melody that always fits; the stick strums and arpeggiates. Plug in a MIDI keyboard or an Orchid, drop in your own samples, and it all glides.</p>
         <div class="ctas">
-          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Download the beta</a>
+          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">Download v0.5.0</a>
           <a class="btn" href="#try">Try it here</a>
         </div>
         <p class="fine">Free and open source. Same engine and the same seven buttons as <a href="../">Brickchord</a>; the third app in the family after <a href="../bricklab/">Bricklab</a>.</p>
+        <p class="update"><b>New in v0.5.0: no sticks needed.</b>Brickglide now plays on the original TrimUI Brick and other handhelds without analog sticks, and installs on R36 handhelds and any firmware with PortMaster. F1 and F2 stand in for the sticks: tap one to click, hold it and use the D-pad to push. <a href="#nosticks">How it works</a></p>
       </div>
       <div class="unit" id="try" aria-label="Playable Brickglide">
         <div class="screen">
@@ -277,6 +282,7 @@ footer p { margin: 0; max-width: 56em; }
         <div><div class="k">L1 / R1 / L1+R1 / Y</div><div class="v">7th, sus4, 9th, flip major and minor. <small>Held with a chord, as in Brickchord.</small></div></div>
         <div><div class="k">LEFT STICK</div><div class="v">Sideways strums, up and down arpeggiates. <small>Hold R2 and a chord, then push the stick, and it scrubs the glide instead. R2 + stick (before the chord) is the Move compass; L2 + stick plays Cloud.</small></div></div>
         <div><div class="k">RIGHT STICK</div><div class="v">Filter and space. <small>Same as Brickchord.</small></div></div>
+        <div><div class="k">NO STICKS? F1 / F2</div><div class="v">Stand in for the left and right stick. <small>Hold F1 and press LEFT or RIGHT to sweep a strum across the chord, UP or DOWN to arpeggiate. <a href="#nosticks">More</a></small></div></div>
         <div><div class="k">R2</div><div class="v">Bloom. <small>R2 + a chord plays it with your chosen Move.</small></div></div>
         <div><div class="k">START</div><div class="v">Play the progression; START again stops everything. <small>While it plays, the seven buttons are melody notes that follow the chords.</small></div></div>
         <div><div class="k">L3</div><div class="v">Glide guides or spectrogram.</div></div>
@@ -289,13 +295,17 @@ footer p { margin: 0; max-width: 56em; }
   <section class="module" id="install">
     <div class="wrap">
       <div class="label">Install</div>
-      <h2>Two minutes on KNULLI</h2>
+      <h2>Two minutes to install</h2>
       <ol class="steps">
-        <li>Download <code>brickglide-v0.4.0-beta-knulli.zip</code> from the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">beta release</a>. On an R36S or R36 Max, get <code>brick-family-r36-v0.4.0-beta.zip</code> from the same page instead: all three apps in one.</li>
-        <li>Unzip it. Copy the <code>brickglide</code> folder, <code>Brickglide.sh</code> and the <code>images</code> folder into <code>roms/ports</code> on the Brick's SD card (over the network share or with a card reader).</li>
-        <li>Update Gamelists on the Brick. Brickglide appears under Ports.</li>
-        <li>On first launch, press each button once and push each stick once so it learns your controls, then follow the guided demo.</li>
+        <li>Download the zip for your handheld from the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">v0.5.0 release</a>:
+          <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brickglide-v0.5.0-knulli.zip"><code>brickglide-v0.5.0-knulli.zip</code></a> for KNULLI (TrimUI Brick and Brick Pro),
+          <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brick-family-r36-v0.5.0.zip"><code>brick-family-r36-v0.5.0.zip</code></a> for the R36S, R36 Max and other ArkOS-family handhelds (all three apps in one),
+          or <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brickglide-v0.5.0-portmaster.zip"><code>brickglide-v0.5.0-portmaster.zip</code></a> for any firmware with PortMaster (NextUI, NX Redux, muOS, ROCKNIX and more).</li>
+        <li>Unzip it and copy everything inside into <code>roms/ports</code> on the SD card (over the network share or with a card reader). PortMaster zips can also go in through PortMaster's own installer.</li>
+        <li>Update Gamelists on the device. Brickglide appears under Ports.</li>
+        <li>On first launch, press each button once and push each stick once so it learns your controls. No sticks? It asks for the two buttons to use instead (F1 and F2 on the Brick), then follow the guided demo.</li>
       </ol>
+      <p class="note" id="nosticks"><b>No sticks?</b> F1 stands in for the left stick and F2 for the right. Tap one to click that stick; hold it and use the D-pad to push the stick, stronger the longer you hold. Brickglide's strum sweeps across the chord while you hold the direction. It turns on by itself when no sticks are found, and the on-screen hints name the buttons. Settings &gt; Global &gt; Sticks switches it on or off, and Stick buttons picks different buttons. Brick Pro owners can try it there too.</p>
       <p class="note">Brickglide, Bricklab and Brickchord install side by side and share a sound cache. Tested on <code>knulli-a133-trimui-brick-pro-beta-20260921</code>.</p>
       <p class="xlink">Source and issues: <a href="https://github.com/michaeltietjen/brickchord">github.com/michaeltietjen/brickchord</a> &middot; <a href="../bricklab/">Bricklab</a> &middot; <a href="../">Brickchord</a></p>
     </div>

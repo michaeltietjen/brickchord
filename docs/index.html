@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta property="og:title" content="Brickchord">
-<meta property="og:description" content="A pocket chord machine with an analog-style synth for the TrimUI Brick Pro running KNULLI.">
+<meta property="og:description" content="A pocket chord machine with an analog-style synth for the TrimUI Brick, R36 handhelds and PortMaster.">
 <meta property="og:image" content="https://michaeltietjen.github.io/brickchord/brickchord-card.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://michaeltietjen.github.io/brickchord/brickchord-card.png">
 <link rel="icon" href="brickchord-icon.svg" type="image/svg+xml">
 <title>Brickchord</title>
-<meta name="description" content="Brickchord: a pocket chord machine with an analog-style synth for the TrimUI Brick Pro running KNULLI.">
+<meta name="description" content="Brickchord: a pocket chord machine with an analog-style synth for the TrimUI Brick, R36 handhelds and PortMaster.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -227,6 +227,10 @@ footer p { margin: 0; max-width: 56em; }
   .chordname.drop span { animation: none; }
   .key, .btn { transition: none; }
 }
+
+/* v0.5.0 update banner */
+.update{border:1px solid currentColor;border-radius:12px;padding:12px 16px;margin:18px 0 6px;font-size:.95em;line-height:1.5;background:rgba(127,127,127,.08)}
+.update b{display:block;margin-bottom:2px}
 </style>
 <style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <style>
@@ -240,7 +244,7 @@ footer p { margin: 0; max-width: 56em; }
 </style>
 </head>
 <body>
-<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="" aria-current="page">Brickchord</a><a href="bricklab/">Bricklab</a><a href="brickglide/">Brickglide</a><a href="brickchop/">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Beta: MIDI in, Brickglide, Brickchop</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
+<nav class="family" aria-label="The Brick apps"><div class="in"><span>The Brick apps:</span><a href="" aria-current="page">Brickchord</a><a href="bricklab/">Bricklab</a><a href="brickglide/">Brickglide</a><a href="brickchop/">Brickchop</a><a class="sp" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">New: v0.5.0, no sticks needed</a><a href="https://github.com/michaeltietjen/brickchord">GitHub</a></div></nav>
 
 
 <header class="strip">
@@ -264,15 +268,16 @@ footer p { margin: 0; max-width: 56em; }
   <section class="hero" id="play">
     <div class="wrap">
       <div>
-        <div class="label">Chord machine for TrimUI Brick Pro · KNULLI</div>
+        <div class="label">Chord machine for TrimUI Brick · R36 · PortMaster</div>
         <h1>Seven keys. Every chord in your <em>key.</em></h1>
         <p class="lede">Brickchord turns a handheld into a pocket chord instrument. Each button plays one chord that fits your song, the sticks bend and color it, and a drum machine and synth bass keep everything on the beat.</p>
         <div class="ctas">
-          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/download/v0.3.0/brickchord-v0.3.0-knulli.zip">Download v0.3.0</a>
-          <a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/download/v0.4.0-beta/brickchord-v0.4.0-beta-knulli.zip">Beta, with MIDI in</a>
+          <a class="btn primary" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">Download v0.5.0</a>
+          <a class="btn" href="#install">Which zip?</a>
           <a class="btn" href="https://github.com/michaeltietjen/brickchord">Source on GitHub</a>
         </div>
-        <p class="fine">Free and open source (MIT). Runs as a Port on KNULLI. Alpha: expect rough edges. <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.3.0">What's new in 0.3.0</a></p>
+        <p class="fine">Free and open source (MIT). Runs as a Port on KNULLI, ArkOS-family firmwares and PortMaster. Alpha: expect rough edges. <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">What's new in 0.5.0</a></p>
+        <p class="update"><b>New in v0.5.0: no sticks needed.</b>Brickchord now plays on the original TrimUI Brick and other handhelds without analog sticks, and installs on R36 handhelds and any firmware with PortMaster. F1 and F2 stand in for the sticks: tap one to click, hold it and use the D-pad to push. <a href="#nosticks">How it works</a></p>
       </div>
 
       <div class="unit" aria-label="Playable Brickchord keypad">
@@ -331,6 +336,7 @@ footer p { margin: 0; max-width: 56em; }
         <div><div class="k">Left stick</div><div class="v">Bend the chord eight ways<small>7, maj7, 9, aug, flip, dim, sus4, sus2</small></div></div>
         <div><div class="k">Right stick ↑ ↓</div><div class="v">Wet and dry<small>Up adds reverb and delay together, down dries the synth out</small></div></div>
         <div><div class="k">Right stick ← →</div><div class="v">Filter and resonance<small>Click the stick to hold the effect where it is</small></div></div>
+        <div><div class="k">No sticks? F1 · F2</div><div class="v">Stand in for the left and right stick<small>Tap to click, hold and use the D-pad to push. <a href="#nosticks">More</a></small></div></div>
         <div><div class="k">Start</div><div class="v">Beat on and off</div></div>
         <div><div class="k">Select</div><div class="v">Settings<small>Select + Start quits</small></div></div>
       </div>
@@ -392,10 +398,10 @@ footer p { margin: 0; max-width: 56em; }
 
   <section class="module" id="midi">
     <div class="wrap">
-      <div class="label">New in the beta</div>
+      <div class="label">MIDI in</div>
       <h2>Play it from a keyboard</h2>
       <p class="intro">All three apps now take USB MIDI in. Plug a class-compliant keyboard or controller into the Brick's USB-C: one key plays the chord on that degree, like its button; several keys together play that exact chord. Tested with the Telepathic Instruments Orchid.</p>
-      <p><a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.4.0-beta">Get the beta</a></p>
+      <p><a class="btn" href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">Get v0.5.0</a></p>
     </div>
   </section>
 
@@ -419,16 +425,20 @@ footer p { margin: 0; max-width: 56em; }
 
   <section class="module" id="install">
     <div class="wrap">
-      <div class="label">Install on KNULLI</div>
+      <div class="label">Install</div>
       <h2>Four steps to your first chord</h2>
       <ol class="steps">
-        <li><span>Download <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.3.0/brickchord-v0.3.0-knulli.zip">brickchord-v0.3.0-knulli.zip</a> from GitHub Releases. It bundles the ARM64 NumPy Brickchord needs.</span></li>
-        <li><span>Copy <code>brickchord/</code> and <code>Brickchord.sh</code> into <code>roms/ports/</code> on the SD card (<code>/userdata/roms/ports/</code> on the device).</span></li>
-        <li><span>On the device, open Start → Game Settings → Update Gamelists, then launch <b>Ports → Brickchord</b>.</span></li>
-        <li><span>On first launch, press each button once and push each stick once so Brickchord learns your controls.</span></li>
+        <li><span>Download the zip for your handheld from the <a href="https://github.com/michaeltietjen/brickchord/releases/tag/v0.5.0">v0.5.0 release</a>:
+          <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brickchord-v0.5.0-knulli.zip"><code>brickchord-v0.5.0-knulli.zip</code></a> for KNULLI (TrimUI Brick and Brick Pro),
+          <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brick-family-r36-v0.5.0.zip"><code>brick-family-r36-v0.5.0.zip</code></a> for the R36S, R36 Max and other ArkOS-family handhelds (all three apps in one),
+          or <a href="https://github.com/michaeltietjen/brickchord/releases/download/v0.5.0/brickchord-v0.5.0-portmaster.zip"><code>brickchord-v0.5.0-portmaster.zip</code></a> for any firmware with PortMaster (NextUI, NX Redux, muOS, ROCKNIX and more).</span></li>
+        <li><span>Unzip it and copy everything inside into <code>roms/ports</code> on the SD card (over the network share or with a card reader). PortMaster zips can also go in through PortMaster's own installer.</span></li>
+        <li><span>Update Gamelists on the device. Brickchord appears under Ports.</span></li>
+        <li><span>On first launch, press each button once and push each stick once so it learns your controls. No sticks? It asks for the two buttons to use instead (F1 and F2 on the Brick).</span></li>
       </ol>
+      <p class="note" id="nosticks"><b>No sticks?</b> F1 stands in for the left stick and F2 for the right. Tap one to click that stick; hold it and use the D-pad to push the stick, stronger the longer you hold. Chord types latch: pick one with F1 + the D-pad, then play; the same direction again turns it off. It turns on by itself when no sticks are found, and the on-screen hints name the buttons. Settings &gt; Global &gt; Sticks switches it on or off, and Stick buttons picks different buttons. Brick Pro owners can try it there too.</p>
       <p class="note">Want every stock sound to open instantly? On a computer with Python 3 and NumPy, run <code>python3 brickchord/factory_render.py</code> in the release folder before copying it over. It pre-renders all 15 sounds (about 355 MB). Otherwise the Brick renders each sound in quiet moments the first time you use it and keeps it for next time. The pack matches sounds with Filter and Resonance at 0 in Settings; use the right stick for live filter moves.</p>
-      <p class="note">Tested firmware: <code>knulli-a133-trimui-brick-pro-beta-20260921</code>. KNULLI for the Brick Pro is still in beta. Get it from the <a href="https://knulli.org">KNULLI project</a> (public builds are on <a href="https://github.com/knulli-cfw/distribution/releases">their GitHub releases</a>); Brickchord doesn't host or support the firmware itself.</p>
+      <p class="note">Tested on KNULLI firmware <code>knulli-a133-trimui-brick-pro-beta-20260921</code>. KNULLI for the Brick Pro is still in beta. Get it from the <a href="https://knulli.org">KNULLI project</a> (public builds are on <a href="https://github.com/knulli-cfw/distribution/releases">their GitHub releases</a>); Brickchord doesn't host or support the firmware itself.</p>
       <p class="note">Updating from 0.1? Copy the new files over the old ones. Your settings and sound edits are kept.</p>
     </div>
   </section>
