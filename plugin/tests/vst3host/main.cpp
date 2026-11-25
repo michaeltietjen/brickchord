@@ -1,0 +1,65 @@
+// Loads a VST3 the way a DAW does (JUCE's VST3 hosting), plays it keys on the Chord, Lead and
+// Drone pages and prints the MIDI it sends out and the level of its audio.
+//   vst3host "~/Library/Audio/Plug-Ins/VST3/Bricklab Studio MIDI.vst3"
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <cmath>
+#include <iostream>
+
+int main(int argc, char** argv) {
+    juce::ScopedJuceInitialiser_GUI gui;
+    if (argc < 2) { std::cout << "usage: vst3host plugin.vst3\n"; return 1; }
+    juce::AudioPluginFormatManager fm;
+    fm.addFormat(new juce::VST3PluginFormat());
+    juce::OwnedArray<juce::PluginDescription> found;
+    juce::VST3PluginFormat vst3;
+    vst3.findAllTypesForFile(found, argv[1]);
+    if (found.isEmpty()) { std::cout << "no plugin in " << argv[1] << "\n"; return 1; }
+    juce::String err;
+    auto p = fm.createPluginInstance(*found[0], 44100, 512, err);
+    if (!p) { std::cout << "load failed: " << err << "\n"; return 1; }
+    std::cout << "loaded: " << p->getName() << " by " << found[0]->manufacturerName
+              << (p->producesMidi() ? ", sends MIDI" : ", no MIDI out") << ", " << p->getTotalNumOutputChannels() << " out\n";
+    p->enableAllBuses();
+    p->prepareToPlay(44100, 512);
+    juce::AudioBuffer<float> buf(std::max(2, p->getTotalNumOutputChannels()), 512);
+    auto setPage = [&](int page) {                                // Page: Chord, Lead, Drone, Glide
+        for (auto* q : p->getParameters())
+            if (q->getName(64) == "Page") q->setValueNotifyingHost((float) page / 3.0f);
+    };
+    juce::MidiBuffer pend;
+    auto run = [&](double secs, const char* label) {
+        juce::String s;
+        double sum = 0; long n = 0;
+        for (int b = 0; b < (int) (secs * 44100 / 512); ++b) {
+            juce::MidiBuffer m;
+            m.swapWith(pend);
+            buf.clear();
+            p->processBlock(buf, m);
+            for (const auto meta : m) {
+                auto msg = meta.getMessage();
+                if (msg.isNoteOn()) s << "on ch" << msg.getChannel() << " " << msg.getNoteNumber() << ", ";
+                else if (msg.isNoteOff()) s << "off ch" << msg.getChannel() << " " << msg.getNoteNumber() << ", ";
+            }
+            for (int i = 0; i < 512; ++i) { float v = buf.getSample(0, i); sum += v * v; ++n; }
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(5);
+        }
+        std::cout << juce::String(label).paddedRight(' ', 18) << " rms " << juce::String(std::sqrt(sum / (double) std::max(1L, n)), 4) << "  " << s << "\n";
+    };
+    auto key = [&](bool on, int k) { pend.addEvent(on ? juce::MidiMessage::noteOn(1, k, (juce::uint8) 100) : juce::MidiMessage::noteOff(1, k), 0); };
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(6000);       // the sounds render
+    key(true, 62); run(0.5, "Chord page: D");
+    key(false, 62); run(0.5, "released");
+    for (auto* q : p->getParameters()) if (q->getName(64) == "Octave") q->setValueNotifyingHost(3.0f / 4.0f);   // +1
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(3000);
+    key(true, 62); run(0.5, "octave +1: D");
+    key(false, 62); run(0.5, "released");
+    for (auto* q : p->getParameters()) if (q->getName(64) == "Octave") q->setValueNotifyingHost(0.5f);
+    setPage(1); run(0.1, "Lead page");
+    key(true, 69); run(0.3, "A4");
+    key(false, 69); run(0.3, "released");
+    setPage(2); run(0.1, "Drone page");
+    key(true, 62); key(false, 62); run(0.5, "D: drone");
+    key(true, 62); key(false, 62); run(0.5, "D again: stops");
+    p->releaseResources();
+    return 0;
+}

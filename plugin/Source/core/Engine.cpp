@@ -157,6 +157,7 @@ Chord Player::playExact(const std::vector<int>& keys) {
 void Player::start(const std::vector<int>& notes) {   // the voicing only: Patterns plays it
     std::lock_guard<std::mutex> l(vmx_);
     last_ = notes;
+    for (int& m : last_) m = std::clamp(m + 12 * octave_, 0, 127);
 }
 
 void Player::release() {}
@@ -216,6 +217,7 @@ std::vector<int> Player::wanted() const {              // live.py wanted(): the 
     for (int d = 0; d < 7; ++d) {
         Chord c = buildChord(key_, scale_, d, Mods{});
         auto notes = voice(c.root, c.iv, prev);
+        for (int& m : notes) m = std::clamp(m + 12 * octave_, 0, 127);
         int root = notes[0] - 12;
         while (root < 28) root += 12;
         first.insert(first.begin(), 1000 + root);         // the bass under it, first of all
@@ -225,8 +227,8 @@ std::vector<int> Player::wanted() const {              // live.py wanted(): the 
             if (std::find(first.begin(), first.end(), notes[i]) == first.end()) first.push_back(notes[i]);
         if (std::find(first.begin(), first.end(), notes[1] + 12) == first.end()) first.push_back(notes[1] + 12);
     }
-    for (int m = 48; m < 92; ++m)
-        if (std::find(first.begin(), first.end(), m) == first.end()) first.push_back(m);
+    for (int m = 48 + 12 * octave_; m < 92 + 12 * octave_; ++m)
+        if (m >= 0 && m < 128 && std::find(first.begin(), first.end(), m) == first.end()) first.push_back(m);
     return first;
 }
 

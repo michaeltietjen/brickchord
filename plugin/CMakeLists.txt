@@ -51,7 +51,25 @@ juce_add_plugin(BricklabStudioMIDI
     AU_MAIN_TYPE kAudioUnitType_MIDIProcessor
     COPY_PLUGIN_AFTER_BUILD TRUE)
 
-foreach(t BricklabStudio BricklabStudioMIDI)
+# and for the VST3 hosts: the MIDI build as an instrument with a silent output, whose MIDI
+# other tracks take (VST3 has no MIDI FX slot in most of them)
+juce_add_plugin(BricklabStudioMIDIVST
+    COMPANY_NAME "Bricklab Studios"
+    BUNDLE_ID "io.github.michaeltietjen.bricklabstudiomidivst"
+    PLUGIN_MANUFACTURER_CODE Mtie
+    PLUGIN_CODE BrkV
+    FORMATS VST3
+    PRODUCT_NAME "Bricklab Studio MIDI"
+    DESCRIPTION "Bricklab Studio's chords, leads and drones, sent to any instrument"
+    IS_SYNTH TRUE
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT TRUE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    VST3_CATEGORIES Instrument Generator
+    COPY_PLUGIN_AFTER_BUILD TRUE)
+
+foreach(t BricklabStudio BricklabStudioMIDI BricklabStudioMIDIVST)
     target_sources(${t} PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
@@ -67,3 +85,4 @@ foreach(t BricklabStudio BricklabStudioMIDI)
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
 endforeach()
 target_compile_definitions(BricklabStudioMIDI PRIVATE BRICK_MIDI_FX=1)
+target_compile_definitions(BricklabStudioMIDIVST PRIVATE BRICK_MIDI_FX=1 BRICK_SILENT_BUS=1)

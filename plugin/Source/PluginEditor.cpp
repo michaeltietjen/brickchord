@@ -163,7 +163,7 @@ void BricklabStudioEditor::showTab(int t) {
     show({&key, &scale}, playing);
     show({&space, &volume, &spaceL, &volumeL}, playing && sounds);
     show({&mode, &arpOct, &bassMode, &modeL, &arpL, &bassL}, chord);
-    show({&octave, &octL}, lead || drone);
+    show({&octave, &octL}, playing);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
@@ -256,7 +256,8 @@ void BricklabStudioEditor::resized() {
 
 void BricklabStudioEditor::layoutRows() {           // the bottom row: what this page sets
     auto outRow = juce::Rectangle<int>(22, 260 + 110 + 14 + 34 + 16 + 30 + 14, getWidth() - 44, 30);
-    if (tab == 0) {
+    if (tab == 0) {                                   // the chord's octave sits by latch
+        octL.setBounds(520, 260 + 110 + 14, 56, 34); octave.setBounds(576, 260 + 110 + 16, 96, 30);
         modeL.setBounds(outRow.removeFromLeft(38)); mode.setBounds(outRow.removeFromLeft(180)); outRow.removeFromLeft(14);
         arpL.setBounds(outRow.removeFromLeft(34)); arpOct.setBounds(outRow.removeFromLeft(84)); outRow.removeFromLeft(14);
         bassL.setBounds(outRow.removeFromLeft(40)); bassMode.setBounds(outRow.removeFromLeft(130)); outRow.removeFromLeft(8);

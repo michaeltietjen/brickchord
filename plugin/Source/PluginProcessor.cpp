@@ -52,7 +52,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
 }
 
 BricklabStudioProcessor::BricklabStudioProcessor()
-    : AudioProcessor(kMidiFx ? BusesProperties() : BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor(kMidiFx && !kSilentBus ? BusesProperties() : BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       params(*this, nullptr, "BricklabStudio", layout()) {
     applySoundAndKey();
     startTimerHz(20);
@@ -61,7 +61,7 @@ BricklabStudioProcessor::BricklabStudioProcessor()
 BricklabStudioProcessor::~BricklabStudioProcessor() { stopTimer(); }
 
 bool BricklabStudioProcessor::isBusesLayoutSupported(const BusesLayout& l) const {
-    return kMidiFx || l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
+    return (kMidiFx && !kSilentBus) || l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
 void BricklabStudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
@@ -85,8 +85,11 @@ void BricklabStudioProcessor::applySoundAndKey() {
     int key = (int) params.getRawParameterValue("key")->load();
     int sc = (int) params.getRawParameterValue("scale")->load();
     player.setBassLevel(0.75f * params.getRawParameterValue("basslevel")->load());   // engine.py _bass: 0.75 x level
+    const int oct = (int) params.getRawParameterValue("octave")->load();
+    player.setOctave(pg == ChordPage ? oct : 0);
     const bool fresh = rateChanged.exchange(false);
-    if (!fresh && snd == lastSound && key == lastKey && sc == lastScale) return;
+    if (!fresh && snd == lastSound && key == lastKey && sc == lastScale && oct == lastOct) return;
+    lastOct = oct;
     if (snd != lastSound) {
         cache.setSound(snd);
         player.setRelease(kPatches[snd].r);

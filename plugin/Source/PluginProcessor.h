@@ -22,11 +22,16 @@ public:
     const juce::String getName() const override { return "Bricklab Studio"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return kMidiFx; }   // the MIDI FX: plays the instrument after it
-    bool isMidiEffect() const override { return kMidiFx; }
+    bool isMidiEffect() const override { return kMidiFx && !kSilentBus; }
 #if BRICK_MIDI_FX
-    static constexpr bool kMidiFx = true;      // the Logic MIDI FX build: no sound of its own, only MIDI out
+    static constexpr bool kMidiFx = true;      // the MIDI builds: no sound of their own, only the notes
 #else
     static constexpr bool kMidiFx = false;
+#endif
+#if BRICK_SILENT_BUS
+    static constexpr bool kSilentBus = true;   // the VST3 MIDI build: an instrument to the host (a silent output), so
+#else                                          // Ableton, Bitwig, Reaper and FL can route its MIDI to other tracks
+    static constexpr bool kSilentBus = false;
 #endif
     double getTailLengthSeconds() const override { return 3.0; }
     int getNumPrograms() override { return 1; }
@@ -98,7 +103,7 @@ private:   // the free-running 16th clock (when the host isn't playing)
     juce::dsp::Reverb reverb;
     std::set<int> held;                       // MIDI keys down
     int pending = -1;                         // samples until held keys are read (a chord's notes arrive one by one)
-    int lastSound = -1, lastKey = -1, lastScale = -1;
+    int lastSound = -1, lastKey = -1, lastScale = -1, lastOct = 0;
     std::atomic<int> wantedCount{0};
     std::atomic<bool> rateChanged{false};
     mutable juce::SpinLock nameLock;

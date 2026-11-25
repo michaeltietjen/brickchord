@@ -39,15 +39,18 @@ That choice is made before the first release.
 ## Two plugins: the sound, or the notes
 
 - **Bricklab Studio** (AU, VST3, Standalone) is the instrument: its own sounds.
-- **Bricklab Studio MIDI** (AU MIDI FX, for Logic) has no sound of its own: put it in the MIDI FX
-  slot above any instrument and that instrument plays its chords (channel 1, the bass on
-  channel 2), leads and drones (the drone's pulse goes out as expression, CC 11).
+- **Bricklab Studio MIDI** has no sound of its own: it plays whatever instrument you give it its
+  chords (channel 1, the bass on channel 2), leads and drones (the drone's pulse goes out as
+  expression, CC 11).
+  - Logic: the AU, in the MIDI FX slot above any instrument.
+  - Ableton Live, Bitwig, Reaper, FL Studio: the VST3, on a track of its own; set your synth
+    track's MIDI input to it.
 
 ## Pages: one layer per instance
 
 Each instance plays one page, saved with your project. Layer them on separate tracks.
 
-- **Chord**: the chord pads, play modes, bass modes, latch.
+- **Chord**: the chord pads, play modes, bass modes, latch, octave (-2 to +2).
 - **Lead**: one note at a time with glide. Pads are the notes of the scale; a keyboard plays
   as is. Mod wheel adds vibrato, pitch bend bends 2 semitones.
 - **Drone**: tap a pad or key to drone on it (root, fifth, octaves; 3rd adds the third), the

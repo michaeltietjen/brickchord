@@ -77,6 +77,7 @@ public:
     Scale scale() const { return scale_; }
     void setRelease(float secs) { relSecs_ = secs; }
     void setBassLevel(float g) { bassGain_ = g; }
+    void setOctave(int o) { octave_ = o; }           // the chords up or down whole octaves
     // the notes themselves come from Patterns (play mode and bass mode): ch 1 the sound, ch 2 the synth bass
     void noteOn(int ch, int midi, float gain, float pan);
     void noteOff(int ch, int midi, float relSecs);       // relSecs < 0: the sound's own release
@@ -108,6 +109,7 @@ private:
     double sr_ = 44100;
     float relSecs_ = 0.4f;
     float bassGain_ = 0.3f;
+    int octave_ = 0;
     mutable std::mutex vmx_;                                      // the UI thread starts chords too
 };
 
