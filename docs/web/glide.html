@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brickglide in your browser: chords that glide</title>
+<meta name="description" content="Brickglide in your browser, on the handheld's own engine: every voice glides from chord to chord, blooms, Moves, a melody over the progression, strums and arps. Keyboard, mouse, touch or MIDI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--chassis:#e4e2dc;--plate:#efede8;--ink:#18161c;--dim:#6d6874;--seam:#cfccc4;--orange:#ff5a1f;--teal:#3f9e95;--screen:#121016;--sink:#ece4d6;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--chassis);color:var(--ink);font-family:Archivo,Helvetica,sans-serif}
+button,select,input{font:inherit;color:inherit}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:14px 22px;border-bottom:1px solid var(--seam)}
+.logo{font-weight:800;font-size:21px;letter-spacing:-.4px;text-decoration:none;color:var(--ink)}
+.logo span{font-weight:500;color:var(--dim)}
+main{max-width:1060px;margin:0 auto;padding:20px 22px 60px;display:flex;flex-direction:column;gap:18px}
+.screen{position:relative;background:var(--screen);color:var(--sink);border-radius:16px;border:8px solid #26242b;overflow:hidden}
+.screen canvas{display:block;width:100%;height:300px}
+.top{position:absolute;left:18px;right:18px;top:12px;display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:12px;letter-spacing:1px;color:#a39fae;pointer-events:none}
+.chord{position:absolute;left:0;right:0;bottom:34px;text-align:center;font-weight:900;font-size:clamp(34px,7vw,64px);letter-spacing:-1.5px;color:var(--orange);pointer-events:none;text-shadow:0 2px 12px #121016}
+.msg{position:absolute;left:0;right:0;bottom:12px;text-align:center;font-family:var(--mono);font-size:12px;color:#d9d3c7;pointer-events:none}
+.deck{display:grid;grid-template-columns:150px minmax(0,1fr) 150px;gap:16px;align-items:center}
+.pads{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.pad{height:96px;border-radius:14px;border:0;background:var(--plate);box-shadow:0 4px 0 var(--seam);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;touch-action:none;user-select:none}
+.pad b{font-size:20px;font-weight:800}
+.pad span{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.pad.on{background:var(--orange);box-shadow:0 1px 0 #c33f0e;transform:translateY(3px)}
+.pad.cur{outline:3px solid var(--teal);outline-offset:-3px}
+.pad.on span{color:var(--ink)}
+.stick{display:flex;flex-direction:column;align-items:center;gap:6px}
+.xy{width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,#26242b 0 28%,var(--screen) 29%);border:6px solid var(--seam);position:relative;touch-action:none;cursor:grab}
+.xy i{position:absolute;width:44px;height:44px;border-radius:50%;background:var(--plate);box-shadow:0 3px 0 var(--seam);left:42px;top:42px;pointer-events:none}
+.stick span{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;min-height:28px}
+.mods{display:flex;flex-wrap:wrap;gap:8px}
+.mod{padding:10px 14px;border-radius:999px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600;touch-action:none;user-select:none}
+.mod.on{background:var(--ink);color:var(--plate);border-color:var(--ink)}
+.mod.go{background:var(--orange);border-color:var(--orange)}
+.row{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end}
+label.f{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--dim)}
+select{background:var(--plate);border:1px solid var(--seam);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:13px}
+.panel{background:var(--plate);border:1px solid var(--seam);border-radius:14px;padding:14px 16px}
+.cap{font-family:var(--mono);font-size:12px;letter-spacing:1px;color:var(--dim);margin:0 0 10px}
+.pages{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.page{padding:7px 14px;border-radius:9px;border:1px solid var(--seam);background:var(--chassis);cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:600}
+.page[aria-pressed=true]{background:var(--ink);color:var(--plate);border-color:var(--ink)}
+.rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px}
+.set{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:6px;padding:6px 8px;border-radius:9px;background:var(--chassis);font-size:14px}
+.set .v{font-family:var(--mono);font-size:12px;min-width:120px;text-align:center;cursor:pointer;padding:4px 6px;border-radius:6px}
+.set .v:hover{background:#ffe2d6}
+.set button.s{width:28px;height:28px;border-radius:7px;border:1px solid var(--seam);background:var(--plate);cursor:pointer}
+.btn{padding:10px 16px;border-radius:10px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600}
+.btn.primary{background:var(--orange);border-color:var(--orange)}
+.stat{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.hint{font-size:14px;line-height:1.55;color:#4a4650;margin:0}
+kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px solid var(--seam);border-radius:5px;padding:1px 6px}
+.start{position:fixed;inset:0;background:rgba(228,226,220,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:9;text-align:center;padding:20px}
+.start b{font-size:30px;font-weight:900}
+[hidden]{display:none!important}
+.embed header .logo,.embed header .solo{display:none}
+@media (max-width:760px){.deck{grid-template-columns:1fr 1fr}.pads{grid-column:1/-1;order:-1;grid-template-columns:repeat(4,minmax(0,1fr))}.pad{height:78px}.screen canvas{height:220px}}
+</style>
+</head>
+<body>
+<div class="start" id="start"><b>Brickglide</b><p class="hint" id="startmsg">Chords that glide, on the Brick's own engine. Loads about 10 MB the first time.</p><button class="btn primary" id="go">Start</button></div>
+
+<header>
+  <a class="logo" href="./#lab">bricklab <span>web</span></a>
+  <span class="stat solo">BRICKGLIDE</span>
+  <span class="stat" id="stat" style="margin-left:auto" role="status"></span>
+</header>
+
+<main>
+  <div class="screen" aria-live="polite">
+    <canvas id="cv" width="1000" height="300" aria-label="Every voice's pitch over the last 24 seconds"></canvas>
+    <div class="top"><span id="keyname">A MINOR</span><span id="modename">CHORDS</span></div>
+    <div class="chord" id="chord"></div>
+    <div class="msg" id="msg">press a chord</div>
+  </div>
+
+  <div class="deck">
+    <div class="stick"><div class="xy" id="lstick" aria-label="Left stick"><i></i></div><span>&#8596; strum<br>&#8597; arpeggio</span></div>
+    <div class="pads" id="pads"></div>
+    <div class="stick"><div class="xy" id="rstick" aria-label="Right stick"><i></i></div><span>&#8592; filter · resonance &#8594;<br>&#8593; space · dry &#8595;</span></div>
+  </div>
+
+  <div class="mods" id="mods">
+    <button class="mod" data-b="L1">7th <kbd>Q</kbd></button>
+    <button class="mod" data-b="R1">sus4 <kbd>W</kbd></button>
+    <button class="mod" data-b="Y">flip <kbd>E</kbd></button>
+    <button class="mod" data-b="R2" title="Tap: bloom. Hold with a chord: that chord with a Move">bloom · move <kbd>Shift</kbd></button>
+    <button class="mod go" data-b="START" id="bStart">&#9654; progression <kbd>Space</kbd></button>
+  </div>
+
+  <div class="row">
+    <label class="f">KEY<select id="sKey"></select></label>
+    <label class="f">SCALE<select id="sScale"><option>Major</option><option selected>Minor</option><option>Dorian</option><option>Mixolydian</option></select></label>
+    <label class="f">DELAY<select id="sAhead"><option value="2">Low (riskier)</option><option value="3" selected>Normal</option><option value="5">Safe</option></select></label>
+  </div>
+
+  <section class="panel" aria-label="Settings">
+    <p class="cap">SETTINGS · THE HANDHELD'S OWN PAGES · CLICK A VALUE TO STEP IT, OR USE &#8249; &#8250;</p>
+    <div class="pages" id="pages"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+
+  <p class="hint" id="help"><kbd>1</kbd>–<kbd>7</kbd> or <kbd>A</kbd>–<kbd>J</kbd> play the seven chords of the key, and every voice glides there. The same chord again lets it fade. Hold <kbd>Q</kbd> for a 7th, <kbd>W</kbd> sus4, both for a 9th, <kbd>E</kbd> flips major and minor. Tap <kbd>Shift</kbd> to bloom (every voice from one note); hold it with a chord for a Move. <kbd>Space</kbd> plays the progression; while it plays the keys are melody notes over it, and the left stick strums (sideways) or arpeggiates (up and down). A MIDI keyboard or chord controller plays chords too.</p>
+</main>
+
+<script>
+"use strict";
+const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const SCALES = {Major:[0,2,4,5,7,9,11], Minor:[0,2,3,5,7,8,10], Dorian:[0,2,3,5,7,9,10], Mixolydian:[0,2,4,5,7,9,10]};
+const BTNS = ["LEFT", "UP", "RIGHT", "DOWN", "X", "A", "B"];               // the handheld's chord buttons, I to VII
+const KEYS = {Digit1:0,Digit2:1,Digit3:2,Digit4:3,Digit5:4,Digit6:5,Digit7:6,KeyA:0,KeyS:1,KeyD:2,KeyF:3,KeyG:4,KeyH:5,KeyJ:6};
+const MODKEYS = {KeyQ:"L1", KeyW:"R1", KeyE:"Y", ShiftLeft:"R2", ShiftRight:"R2"};
+const VCOL = ["#6ec8be","#be8cff","#ffaa6e","#78c88c","#ff78a0","#8caaff","#ffd778","#ebebe1"];   // ambient.py VCOL
+const HIST = 24;
+const $ = (id) => document.getElementById(id);
+const el = (t, a, ...k) => { const e = document.createElement(t); for (const [x, v] of Object.entries(a || {})) { if (x === "class") e.className = v; else if (x.startsWith("on")) e.addEventListener(x.slice(2), v); else e.setAttribute(x, v); } e.append(...k); return e; };
+
+let AW, RW, AC, NODE, ST = null, PAGE = "Chords", READY = false, SONG = null, songSig = "";
+const hist = [[], [], [], [], [], [], [], []], held = new Set();
+let rid = 0; const wait = {};
+function rpc(w, op, arg, ports) { const id = ++rid; return new Promise((res, rej) => { wait[id] = {res, rej}; w.postMessage({id, op, arg}, ports || []); }); }
+function onmsg(e) { if (e.data.progress) return; const w = wait[e.data.id]; delete wait[e.data.id]; if (w) e.data.ok ? w.res(e.data.r) : w.rej(new Error(e.data.err)); }
+
+async function start() {
+  $("go").disabled = true; $("startmsg").textContent = "Loading the engine...";
+  AC = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050, latencyHint: "interactive" });
+  await AC.audioWorklet.addModule("live-worklet.js?t=" + Date.now());
+  NODE = new AudioWorkletNode(AC, "brick-out", { outputChannelCount: [2] });
+  NODE.connect(AC.destination);
+  const man = await (await fetch("manifest.json", { cache: "no-cache" })).json();
+  AW = new Worker("live-audio.js?t=" + Date.now()); AW.onmessage = onmsg;
+  RW = new Worker("live-render.js?t=" + Date.now()); RW.onmessage = onmsg;
+  const toAudio = new MessageChannel(), toOut = new MessageChannel();
+  await rpc(AW, "init", { files: man.files });
+  await rpc(RW, "init", { files: man.files.filter(f => f.startsWith("py/")) }, [toAudio.port1]);
+  await rpc(AW, "notes", null, [toAudio.port2]);
+  for (let k = 0; k < 12; k++) $("sKey").append(el("option", {value: k}, NOTE_NAMES[k]));
+  $("sKey").value = SONG ? SONG.key : 9;
+  if (SONG && SCALES[SONG.scale]) $("sScale").value = SONG.scale;
+  const g = await rpc(AW, "glide", { key: +$("sKey").value, scale: $("sScale").value });
+  NODE.port.postMessage({ port: toOut.port1 }, [toOut.port1]);
+  await rpc(AW, "out", null, [toOut.port2]);
+  for (const p of g.pages) $("pages").append(el("button", {class: "page", "aria-pressed": p === PAGE, onclick: () => showPage(p)}, p));
+  drawPads(); showPage(PAGE); setKeyName();
+  $("start").remove();
+  READY = true;
+  poll(); draw(); statLoop(); midi();
+}
+
+// ---------------------------------------------------------------- buttons
+function btn(name, down) {
+  if (down) { if (held.has(name)) return; held.add(name); } else { if (!held.has(name)) return; held.delete(name); }
+  for (const m of document.querySelectorAll(".mod[data-b]")) m.classList.toggle("on", held.has(m.dataset.b) && m.dataset.b !== "START");
+  const i = BTNS.indexOf(name); if (i >= 0) $("pads").children[i].classList.toggle("on", down);
+  rpc(AW, "g_btn", { name, down });
+}
+function drawPads() {
+  const box = $("pads"); box.replaceChildren();
+  for (let d = 0; d < 7; d++) box.append(el("button", {class: "pad", "data-d": d,
+    onpointerdown: (e) => { e.preventDefault(); btn(BTNS[d], true); }, onpointerup: () => btn(BTNS[d], false), onpointerleave: () => btn(BTNS[d], false)},
+    el("b", {}, "-"), el("span", {}, (d + 1) + "")));
+}
+function padLabels() {
+  if (!ST) return;
+  const pads = $("pads").children, sc = SCALES[$("sScale").value], key = +$("sKey").value;
+  for (let d = 0; d < 7; d++) {
+    let top, sub;
+    if (ST.melody) {                         // the keys are melody notes over the chord (ambient.py amb_mel_note)
+      const deg = ST.deg == null ? 0 : ST.deg;
+      top = NOTE_NAMES[(key + sc[(deg + d) % 7]) % 12]; sub = (d + 1) + " · note";
+    } else { top = ST.names[d]; sub = ST.romans[d]; }
+    pads[d].querySelector("b").textContent = top; pads[d].querySelector("span").textContent = sub;
+    pads[d].classList.toggle("cur", !ST.melody && ST.deg === d && !!ST.chord);
+  }
+}
+for (const m of document.querySelectorAll(".mod[data-b]")) {
+  const b = m.dataset.b;
+  if (b === "START") { m.onclick = () => { btn("START", true); btn("START", false); }; continue; }
+  m.addEventListener("pointerdown", (e) => { e.preventDefault(); btn(b, true); });
+  m.addEventListener("pointerup", () => btn(b, false));
+  m.addEventListener("pointerleave", () => btn(b, false));
+}
+document.addEventListener("keydown", (e) => {
+  if (!READY || e.repeat || e.metaKey || e.ctrlKey || ["INPUT", "SELECT"].includes(document.activeElement.tagName)) return;
+  if (e.code in KEYS) { e.preventDefault(); btn(BTNS[KEYS[e.code]], true); }
+  else if (e.code in MODKEYS) btn(MODKEYS[e.code], true);
+  else if (e.code === "Space") { e.preventDefault(); btn("START", true); btn("START", false); }
+});
+document.addEventListener("keyup", (e) => {
+  if (!READY) return;
+  if (e.code in KEYS) btn(BTNS[KEYS[e.code]], false);
+  else if (e.code in MODKEYS) btn(MODKEYS[e.code], false);
+});
+addEventListener("blur", () => { for (const b of [...held]) btn(b, false); });
+
+// ---------------------------------------------------------------- sticks
+function stick(pad, cb) {
+  const knob = pad.querySelector("i"); let id = null;
+  const move = (e) => {
+    const r = pad.getBoundingClientRect(), R = r.width / 2 - 22;
+    let x = (e.clientX - r.left - r.width / 2) / R, y = -(e.clientY - r.top - r.height / 2) / R;
+    const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+    knob.style.left = (42 + x * R) + "px"; knob.style.top = (42 - y * R) + "px";
+    cb(x, y);
+  };
+  pad.addEventListener("pointerdown", (e) => { id = e.pointerId; pad.setPointerCapture(id); move(e); });
+  pad.addEventListener("pointermove", (e) => { if (e.pointerId === id) move(e); });
+  const up = (e) => { if (e.pointerId !== id) return; id = null; knob.style.left = "42px"; knob.style.top = "42px"; cb(0, 0); };
+  pad.addEventListener("pointerup", up); pad.addEventListener("pointercancel", up);
+}
+// The handheld reads its sticks every frame; a resting stick keeps reporting, so the
+// strum lets go and an arp keeps time. The page does the same while a stick is held.
+let LS = [0, 0], RS = [0, 0];
+stick($("lstick"), (x, y) => { LS = [x, y]; });
+stick($("rstick"), (x, y) => { RS = [x, y]; if (READY) rpc(AW, "g_right", { x, y }); });
+function sticks() { rpc(AW, "g_stick", { x: LS[0], y: LS[1] }); }      // every frame, as the handheld reads it
+
+// ---------------------------------------------------------------- the screen
+async function poll() {
+  if (READY && AC.state === "running") {
+    sticks();
+    try {
+      ST = await rpc(AW, "g_state");
+      const t = performance.now() / 1000;
+      ST.v.forEach(([c, l], i) => { const h = hist[i]; h.push([t, c, l]); while (h.length && t - h[0][0] > HIST) h.shift(); });
+      $("chord").textContent = ST.chord.replace(/\s+/g, " ").trim();
+      $("msg").textContent = ST.msg || (ST.loading ? "making the sounds (" + ST.loading + ")..." : ST.melody ? "keys play the melody · space stops" : ST.chord ? "" : "press a chord");
+      $("modename").textContent = ST.melody ? "PROGRESSION · MELODY" : ST.prog ? "PROGRESSION" : "CHORDS";
+      $("bStart").firstChild.textContent = ST.prog ? "■ stop " : "▶ progression ";
+      padLabels();
+    } catch (e) {}
+  }
+  setTimeout(poll, 50);
+}
+function draw() {
+  const cv = $("cv"), r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  const g = cv.getContext("2d"), W = cv.width, H = cv.height, t = performance.now() / 1000;
+  g.fillStyle = "#121016"; g.fillRect(0, 0, W, H);
+  const lo = 2900, hi = 8900;                                // C#2..F7 in cents
+  const y = (c) => H - 10 * dpr - (c - lo) / (hi - lo) * (H - 50 * dpr);
+  const sc = SCALES[$("sScale").value] || SCALES.Minor, key = +$("sKey").value || 0;
+  g.lineWidth = 1;
+  for (let m = 29; m <= 89; m++) {                           // the scale's notes as guide lines, the key's root brighter
+    const pc = ((m - key) % 12 + 12) % 12; if (!sc.includes(pc)) continue;
+    g.strokeStyle = pc === 0 ? "rgba(236,228,214,.22)" : "rgba(236,228,214,.07)";
+    const yy = Math.round(y(m * 100)) + .5; g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke();
+  }
+  hist.forEach((h, i) => {
+    g.strokeStyle = VCOL[i]; g.lineWidth = 3 * dpr; g.lineCap = "round";
+    for (let k = 1; k < h.length; k++) {
+      const [t0, c0, l0] = h[k - 1], [t1, c1, l1] = h[k];
+      if (l1 < 0.01 && l0 < 0.01) continue;
+      g.globalAlpha = Math.min(1, 0.15 + l1 * 1.4);
+      g.beginPath(); g.moveTo(W - (t - t0) / HIST * W, y(c0)); g.lineTo(W - (t - t1) / HIST * W, y(c1)); g.stroke();
+    }
+    const last = h[h.length - 1];
+    if (last && last[2] > 0.01) { g.globalAlpha = 1; g.fillStyle = VCOL[i]; g.beginPath(); g.arc(W - 6 * dpr, y(last[1]), 5 * dpr, 0, 7); g.fill(); }
+  });
+  g.globalAlpha = 1;
+  requestAnimationFrame(draw);
+}
+
+// ---------------------------------------------------------------- settings: the handheld's own pages
+async function showPage(p) {
+  PAGE = p;
+  for (const b of document.querySelectorAll(".page")) b.setAttribute("aria-pressed", b.textContent === p);
+  drawRows(await rpc(AW, "g_rows", { page: p }));
+}
+const ACTIVE = { Chords: ["Progression"], Voice: ["On"], Melody: ["Melody"], Scenes: ["Guided demo", "Starter", "Starter 2"] };
+function drawRows(rows) {
+  const box = $("rows"); box.replaceChildren();
+  for (const [name, val] of rows) {
+    if (PAGE === "Scenes" && (name === "Guided demo" || name.startsWith("Scene "))) continue;   // they need the handheld's buttons
+    const act = (ACTIVE[PAGE] || []).includes(name);
+    const step = (d) => rpc(AW, "g_change", { page: PAGE, name, d }).then(drawRows);
+    const v = el("span", {class: "v", title: act ? "click to start or stop" : "click for the next value",
+      onclick: () => act ? rpc(AW, "g_activate", { page: PAGE, name }).then(drawRows) : step(1)},
+      act && PAGE === "Scenes" ? "play " + val : val);
+    box.append(el("div", {class: "set"}, el("span", {}, name),
+      el("button", {class: "s", "aria-label": name + " down", onclick: () => step(-1)}, "‹"), v,
+      el("button", {class: "s", "aria-label": name + " up", onclick: () => step(1)}, "›")));
+  }
+}
+
+// ---------------------------------------------------------------- key, status, MIDI
+function setKeyName() { $("keyname").textContent = (NOTE_NAMES[+$("sKey").value] + " " + $("sScale").value).toUpperCase(); }
+async function setKey() { setKeyName(); await rpc(AW, "g_key", { key: +$("sKey").value, scale: $("sScale").value }); showPage(PAGE); }
+$("sKey").onchange = setKey; $("sScale").onchange = setKey;
+$("sAhead").onchange = (e) => READY && rpc(AW, "ahead", { frames: +e.target.value * 512 });
+let MIDI = "";
+async function statLoop() {
+  const s = await rpc(AW, "stats");
+  const ms = Math.round(1000 * (s.buffered / 22050 + (AC.baseLatency || 0) + (AC.outputLatency || 0)));
+  $("stat").textContent = "delay ≈ " + ms + " ms · dropouts " + s.under + (MIDI ? " · " + MIDI : "") + (AC.sampleRate !== 22050 ? " · resampling from " + AC.sampleRate : "");
+  setTimeout(statLoop, 400);
+}
+// MIDI: chords from a keyboard or a chord controller glide in (ambient.py amb_follow);
+// let go and the chord holds until the next one.
+async function midi() {
+  if (!navigator.requestMIDIAccess) { MIDI = "MIDI: not in this browser (use Chrome or Edge)"; return; }
+  try {
+    const acc = await navigator.requestMIDIAccess();
+    const hook = (inp) => inp.onmidimessage = (m) => {
+      const [st, a, b] = m.data, cmd = st & 0xf0;
+      if (cmd !== 0x90 && cmd !== 0x80) return;
+      MIDI = "MIDI in: " + inp.name;
+      rpc(AW, "g_midi", { kind: cmd === 0x90 && b > 0 ? "on" : "off", note: a });
+    };
+    const scan = () => { const ins = [...acc.inputs.values()]; ins.forEach(hook);
+      MIDI = ins.length ? "MIDI: " + ins.map(i => i.name).join(", ") : ""; };
+    scan(); acc.onstatechange = scan;
+  } catch (e) { MIDI = ""; }
+}
+$("go").onclick = () => start().catch(e => { $("startmsg").textContent = "Couldn't start: " + e.message; $("go").disabled = false; });
+
+// ---------------------------------------------------------------- inside the app (index.html holds the tabs)
+const EMBED = window.parent !== window;
+if (EMBED) document.documentElement.classList.add("embed");
+async function followSong(song) {
+  const sig = song.key + " " + song.scale;
+  if (sig === songSig) return;
+  songSig = sig; SONG = song;
+  if (!READY) return;
+  $("sKey").value = song.key; if (SCALES[song.scale]) $("sScale").value = song.scale;
+  setKey();
+}
+addEventListener("message", (e) => {
+  if (e.origin !== location.origin || !e.data) return;
+  const m = e.data;
+  if (m.bl === "hide" && AC) { for (const b of [...held]) btn(b, false); LS = [0, 0]; AC.suspend(); }
+  if (m.bl === "show") { if (AC) AC.resume(); if (m.song) followSong(m.song); }
+});
+</script>
+</body>
+</html>

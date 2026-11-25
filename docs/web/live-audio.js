@@ -2,7 +2,7 @@
 // keeps a few blocks ready for the worklet. Notes arrive from the render worker.
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
 importScripts(PYODIDE + "pyodide.js");
-let py, L, out = null, produced = 0, used = 0, under = 0, ahead = 3 * 512, busy = false;
+let py, L, G = null, rport = null, out = null, produced = 0, used = 0, under = 0, ahead = 3 * 512, busy = false;
 
 async function boot(files) {
   py = await loadPyodide({ indexURL: PYODIDE });
@@ -22,12 +22,18 @@ function fill() {                     // keep `ahead` frames queued in the workl
   busy = true;
   try {
     while (produced - used < ahead) {
+      if (G) G.tick();
       const pb = L.block(), blk = pb.toJs(); pb.destroy();
       produced += blk.length >> 1;
       out.postMessage(blk, [blk.buffer]);
     }
   } finally { busy = false; }
+  if (G && rport) {                   // Brickglide: sounds and strum notes to render
+    const w = JSON.parse(G.want());
+    if (w.notes.length || w.plucks.length) rport.postMessage({ glide: w });
+  }
 }
+function J(x) { const s = typeof x === "string" ? x : String(x); return JSON.parse(s); }
 
 self.onmessage = async (ev) => {
   const { id, op, arg } = ev.data;
@@ -35,8 +41,21 @@ self.onmessage = async (ev) => {
     let r = null;
     if (op === "init") { await boot(arg.files); r = JSON.parse(L.names()); }
     else if (op === "out") { out = ev.ports[0]; out.onmessage = (m) => { used = m.data.used; under = m.data.under; fill(); }; fill(); }
-    else if (op === "notes") { const p = ev.ports[0]; p.onmessage = (m) => { const d = m.data;
-        L.add_note(d.sound, d.midi, py.toPy(d.a), d.la, py.toPy(d.l), d.ll); }; }
+    else if (op === "notes") { const p = rport = ev.ports[0]; p.onmessage = (m) => { const d = m.data;
+        if (d.kind === "amb") { if (G) G.note_ready(d.kid, py.toPy(d.a), d.la, py.toPy(d.l), d.ll); }
+        else if (d.kind === "pluck") { if (G) G.pluck_ready(d.inst, d.midi, py.toPy(d.mono)); }
+        else L.add_note(d.sound, d.midi, py.toPy(d.a), d.la, py.toPy(d.l), d.ll); }; }
+    else if (op === "glide") { py.runPython("import glideweb\nG = glideweb.Glide(L)"); G = py.globals.get("G");
+        G.set_key(arg.key, arg.scale); r = { pages: ["Chords", "Voice", "Melody", "Scenes", "FX"] }; fill(); }
+    else if (op === "g_btn") { G.btn(arg.name, !!arg.down); fill(); }
+    else if (op === "g_stick") { G.stick(arg.x, arg.y); }
+    else if (op === "g_right") { G.right(arg.x, arg.y); }
+    else if (op === "g_key") { G.set_key(arg.key, arg.scale); }
+    else if (op === "g_midi") { G.midi(arg.kind, arg.note); }
+    else if (op === "g_state") { r = J(G.state()); }
+    else if (op === "g_rows") { r = J(G.menu_rows(arg.page)); }
+    else if (op === "g_change") { r = J(G.menu_change(arg.page, arg.name, arg.d)); }
+    else if (op === "g_activate") { r = J(G.menu_activate(arg.page, arg.name)); fill(); }
     else if (op === "sound") { const w = L.wanted(); r = { pj: L.set_sound(arg.i), wanted: w.toJs() }; w.destroy(); }
     else if (op === "key") { L.set_key(arg.key, arg.scale); const w = L.wanted(); r = { names: JSON.parse(L.names()).chords[0], wanted: w.toJs() }; w.destroy(); }
     else if (op === "exact") { r = JSON.parse(L.chord_exact(JSON.stringify(arg.notes))); fill(); }

@@ -15,7 +15,7 @@ files = []
 for sub in ("py", "kits", "samples", "demos"):
     shutil.rmtree(os.path.join(WEB, sub), ignore_errors=True)
 os.makedirs(os.path.join(WEB, "py"))
-for f in ("engine.py", "synth.py", "songrender.py", "theory.py", "live.py"):
+for f in ("engine.py", "synth.py", "songrender.py", "theory.py", "live.py", "edition.py", "ambient.py", "glideweb.py"):
     shutil.copy(os.path.join(APP, f), os.path.join(WEB, "py", f))
     files.append("py/" + f)
 for kit in sorted(os.listdir(os.path.join(APP, "kits"))):

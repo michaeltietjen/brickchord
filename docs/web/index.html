@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bricklab web: make songs and play live in your browser</title>
-<meta name="description" content="The Brickchord suite in your browser, on the handheld's own engine: build Bricklab songs and copy them to your TrimUI Brick, R36 or PortMaster device, or play Brickchord live with keyboard, mouse, touch or MIDI.">
+<meta name="description" content="The Brickchord suite in your browser, on the handheld's own engine: build Bricklab songs and copy them to your TrimUI Brick, R36 or PortMaster device, play Brickchord live, or glide through chords with Brickglide. Keyboard, mouse, touch or MIDI.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -21,7 +21,7 @@ nav button small{font:500 11px var(--mono);color:var(--dim);letter-spacing:.4px}
 nav button:hover:not(:disabled){border-color:var(--teal)}
 nav button[aria-selected=true]{background:var(--teal);border-color:var(--teal);color:var(--deep)}
 nav button[aria-selected=true] small{color:var(--deep)}
-nav button[data-tab=chord][aria-selected=true]{background:var(--orange);border-color:var(--orange)}
+nav button[data-tab=chord][aria-selected=true],nav button[data-tab=glide][aria-selected=true]{background:var(--orange);border-color:var(--orange)}
 nav button:disabled{opacity:.45;cursor:default}
 .site{margin-left:auto;font:500 12px var(--mono);color:var(--dim);text-decoration:none}
 .site:hover{color:var(--teal)}
@@ -36,7 +36,7 @@ nav button:disabled{opacity:.45;cursor:default}
   <nav role="tablist" aria-label="Apps">
     <button role="tab" data-tab="lab" aria-selected="false">Lab <small>make songs</small></button>
     <button role="tab" data-tab="chord" aria-selected="false">Chord <small>play live</small></button>
-    <button role="tab" disabled title="Brickglide in the browser is on the way">Glide <small>soon</small></button>
+    <button role="tab" data-tab="glide" aria-selected="false">Glide <small>chords that glide</small></button>
   </nav>
   <a class="site" href="../">brickchord on the handheld &#8599;</a>
 </div>
@@ -44,11 +44,11 @@ nav button:disabled{opacity:.45;cursor:default}
 
 <script>
 "use strict";
-// One app, two pages: Lab (lab.html, the song editor) and Chord (live.html, play live).
+// One app, three pages: Lab (lab.html, the song editor), Chord (live.html, play live) and Glide (glide.html).
 // Each loads the first time you open its tab and keeps running in the background, so
-// switching back is instant and nothing is lost. The tab you leave goes quiet. Chord
-// follows the key, scale and tempo of the song open in Lab.
-const PAGES = { lab: "lab.html", chord: "live.html" };
+// switching back is instant and nothing is lost. The tab you leave goes quiet. Chord and
+// Glide follow the key and scale (Chord also the tempo) of the song open in Lab.
+const PAGES = { lab: "lab.html", chord: "live.html", glide: "glide.html" };
 const frames = {}, box = document.getElementById("frames");
 let cur = null, song = null;
 try { const s = JSON.parse(localStorage.getItem("bricklab-web-song")); if (s) song = { key: s.key % 12, scale: s.scale, bpm: Math.round(s.bpm) }; } catch (e) {}
@@ -63,7 +63,7 @@ function show(tab) {
   let f = frames[tab];
   if (!f) {
     f = frames[tab] = document.createElement("iframe");
-    f.title = tab === "lab" ? "Lab: make songs" : "Chord: play live";
+    f.title = { lab: "Lab: make songs", chord: "Chord: play live", glide: "Glide: chords that glide" }[tab];
     f.allow = "midi; autoplay";
     f.src = PAGES[tab];
     f.onload = () => { if (cur === tab) { send(tab, { bl: "show", song }); f.contentWindow.focus(); } };
