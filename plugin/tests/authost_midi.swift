@@ -35,6 +35,7 @@ engine.connect(inst, to: engine.mainMixerNode, format: fmt)
 try! engine.enableManualRenderingMode(.offline, format: fmt, maximumFrameCount: 512)
 try! engine.start()
 let buf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512)!
+func settle(_ secs: Double) { RunLoop.main.run(until: Date().addingTimeInterval(secs)) }   // the plugin renders its notes meanwhile
 func run(_ secs: Double, _ label: String) {
     var sum = 0.0, n = 0
     for _ in 0..<Int(secs * 48000 / 512) {
@@ -45,7 +46,8 @@ func run(_ secs: Double, _ label: String) {
     lock.lock(); let s = sent; sent = []; lock.unlock()
     print(String(format: "%-26@ rms %.4f  ", label as NSString, sqrt(sum / Double(max(n, 1)))) + s.joined(separator: ", "))
 }
-run(1.5, "silence")
+settle(6)
+run(0.5, "silence")
 inst.startNote(62, withVelocity: 100, onChannel: 0)
 run(1.0, "one key (D): Dm")
 inst.stopNote(62, onChannel: 0)

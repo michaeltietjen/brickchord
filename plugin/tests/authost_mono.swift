@@ -38,6 +38,7 @@ engine.connect(inst, to: engine.mainMixerNode, format: fmt)
 try! engine.enableManualRenderingMode(.offline, format: fmt, maximumFrameCount: 512)
 try! engine.start()
 let buf = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512)!
+func settle(_ secs: Double) { RunLoop.main.run(until: Date().addingTimeInterval(secs)) }   // the plugin renders its notes meanwhile
 func run(_ secs: Double, _ label: String) {
     var sum = 0.0, n = 0
     for _ in 0..<Int(secs * 48000 / 512) {
@@ -50,7 +51,8 @@ func run(_ secs: Double, _ label: String) {
           + (e > 0 ? "  (\(e) expression)" : ""))
 }
 param("Page")?.value = 1
-run(2.5, "Lead page, sounds rendering")
+settle(6)
+run(0.5, "Lead page")
 inst.startNote(69, withVelocity: 100, onChannel: 0)
 run(0.5, "A4")
 inst.startNote(72, withVelocity: 100, onChannel: 0)
@@ -63,7 +65,8 @@ inst.stopNote(69, onChannel: 0)
 inst.sendController(1, withValue: 0, onChannel: 0)
 run(1.0, "released")
 param("Page")?.value = 2
-run(2.5, "Drone page, sounds rendering")
+settle(6)
+run(0.5, "Drone page")
 inst.startNote(62, withVelocity: 100, onChannel: 0); inst.stopNote(62, onChannel: 0)
 run(2.0, "D: drone")
 inst.startNote(57, withVelocity: 100, onChannel: 0); inst.stopNote(57, onChannel: 0)
@@ -74,6 +77,7 @@ inst.sendController(1, withValue: 0, onChannel: 0)
 inst.startNote(57, withVelocity: 100, onChannel: 0); inst.stopNote(57, onChannel: 0)
 run(2.0, "A again: stops")
 param("Page")?.value = 0
+settle(6)
 run(0.5, "back to Chord")
 inst.startNote(62, withVelocity: 100, onChannel: 0)
 run(1.0, "Chord page: D")
