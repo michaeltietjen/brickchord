@@ -90,6 +90,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
     <button class="mod" data-b="R1">sus4 <kbd>W</kbd></button>
     <button class="mod" data-b="Y">flip <kbd>E</kbd></button>
     <button class="mod" data-b="R2" title="Tap: bloom. Hold with a chord: that chord with a Move">bloom · move <kbd>Shift</kbd></button>
+    <button class="mod" id="bView" title="Glide guides or the spectrogram (L3 on the handheld)">view: guides <kbd>V</kbd></button>
     <button class="mod go" data-b="START" id="bStart">&#9654; progression <kbd>Space</kbd></button>
   </div>
 
@@ -105,7 +106,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
     <div class="rows" id="rows"></div>
   </section>
 
-  <p class="hint" id="help"><kbd>1</kbd>–<kbd>7</kbd> or <kbd>A</kbd>–<kbd>J</kbd> play the seven chords of the key, and every voice glides there. The same chord again lets it fade. Hold <kbd>Q</kbd> for a 7th, <kbd>W</kbd> sus4, both for a 9th, <kbd>E</kbd> flips major and minor. Tap <kbd>Shift</kbd> to bloom (every voice from one note); hold it with a chord for a Move. <kbd>Space</kbd> plays the progression; while it plays the keys are melody notes over it, and the left stick strums (sideways) or arpeggiates (up and down). A MIDI keyboard or chord controller plays chords too.</p>
+  <p class="hint" id="help"><kbd>1</kbd>–<kbd>7</kbd> or <kbd>A</kbd>–<kbd>J</kbd> play the seven chords of the key, and every voice glides there. The same chord again lets it fade. Hold <kbd>Q</kbd> for a 7th, <kbd>W</kbd> sus4, both for a 9th, <kbd>E</kbd> flips major and minor. Tap <kbd>Shift</kbd> to bloom (every voice from one note); hold it with a chord for a Move. <kbd>Space</kbd> plays the progression; <kbd>V</kbd> switches the screen between the glide guides and a spectrogram; while it plays the keys are melody notes over it, and the left stick strums (sideways) or arpeggiates (up and down). A MIDI keyboard or chord controller plays chords too.</p>
 </main>
 
 <script>
@@ -120,7 +121,7 @@ const HIST = 24;
 const $ = (id) => document.getElementById(id);
 const el = (t, a, ...k) => { const e = document.createElement(t); for (const [x, v] of Object.entries(a || {})) { if (x === "class") e.className = v; else if (x.startsWith("on")) e.addEventListener(x.slice(2), v); else e.setAttribute(x, v); } e.append(...k); return e; };
 
-let AW, RW, AC, NODE, ST = null, PAGE = "Chords", READY = false, SONG = null, songSig = "";
+let AW, RW, AC, NODE, AN = null, VIEW = "guides", ST = null, PAGE = "Chords", READY = false, SONG = null, songSig = "";
 const hist = [[], [], [], [], [], [], [], []], held = new Set();
 let rid = 0; const wait = {};
 function rpc(w, op, arg, ports) { const id = ++rid; return new Promise((res, rej) => { wait[id] = {res, rej}; w.postMessage({id, op, arg}, ports || []); }); }
@@ -132,6 +133,8 @@ async function start() {
   await AC.audioWorklet.addModule("live-worklet.js?t=" + Date.now());
   NODE = new AudioWorkletNode(AC, "brick-out", { outputChannelCount: [2] });
   NODE.connect(AC.destination);
+  AN = AC.createAnalyser(); AN.fftSize = 4096; AN.smoothingTimeConstant = 0; AN.minDecibels = -100; AN.maxDecibels = -25;
+  NODE.connect(AN);                                          // the spectrogram listens to what you hear
   const man = await (await fetch("manifest.json", { cache: "no-cache" })).json();
   AW = new Worker("live-audio.js?t=" + Date.now()); AW.onmessage = onmsg;
   RW = new Worker("live-render.js?t=" + Date.now()); RW.onmessage = onmsg;
@@ -190,6 +193,7 @@ document.addEventListener("keydown", (e) => {
   if (e.code in KEYS) { e.preventDefault(); btn(BTNS[KEYS[e.code]], true); }
   else if (e.code in MODKEYS) btn(MODKEYS[e.code], true);
   else if (e.code === "Space") { e.preventDefault(); btn("START", true); btn("START", false); }
+  else if (e.code === "KeyV") toggleView();
 });
 document.addEventListener("keyup", (e) => {
   if (!READY) return;
@@ -237,11 +241,60 @@ async function poll() {
   }
   setTimeout(poll, 50);
 }
+// The other view (L3 on the handheld): a spectrogram of the output, low notes at the
+// bottom on a log scale from 45 Hz to 4 kHz (ambient.py SPEC_LO / SPEC_HI), the last 24
+// seconds scrolling left. Sustained voices draw as lines, their harmonics above them.
+function toggleView() {
+  VIEW = VIEW === "guides" ? "spectrum" : "guides";
+  $("bView").firstChild.textContent = "view: " + (VIEW === "guides" ? "guides " : "spectrogram ");
+}
+$("bView").onclick = toggleView;
+const SPEC_LO = 45, SPEC_HI = 4000;
+let spec = null, specT = 0, specCarry = 0, specBins = null;
+function specColor(v) {                                    // 0..1 to dark, violet, orange, cream
+  const st = [[18,16,22],[70,40,110],[190,70,60],[255,140,66],[255,230,190]];
+  const x = Math.max(0, Math.min(0.999, v)) * (st.length - 1), i = Math.floor(x), f = x - i;
+  return st[i].map((c, k) => Math.round(c + (st[i + 1][k] - c) * f));
+}
+function drawSpectrum(g, W, H) {
+  if (!spec || spec.width !== W || spec.height !== H) {
+    spec = document.createElement("canvas"); spec.width = W; spec.height = H;
+    const sg = spec.getContext("2d"); sg.fillStyle = "#121016"; sg.fillRect(0, 0, W, H); specT = performance.now();
+  }
+  const sg = spec.getContext("2d"), now = performance.now();
+  specCarry += (now - specT) / 1000 * W / HIST; specT = now;
+  const n = Math.floor(specCarry);
+  if (n > 0 && AN && AC.state === "running") {
+    specCarry -= n;
+    if (!specBins || specBins.length !== AN.frequencyBinCount) specBins = new Float32Array(AN.frequencyBinCount);
+    AN.getFloatFrequencyData(specBins);
+    sg.drawImage(spec, -n, 0);
+    const col = sg.createImageData(n, H), nyq = AC.sampleRate / 2, nb = specBins.length;
+    for (let y = 0; y < H; y++) {
+      const fq = SPEC_LO * Math.pow(SPEC_HI / SPEC_LO, 1 - y / (H - 1));
+      const b = Math.min(nb - 1, Math.round(fq / nyq * nb));
+      const v = Math.pow(Math.max(0, (specBins[b] - AN.minDecibels) / (AN.maxDecibels - AN.minDecibels)), 1.6);
+      const [r, gg, bb] = specColor(v);
+      for (let x = 0; x < n; x++) { const o = (y * n + x) * 4; col.data[o] = r; col.data[o + 1] = gg; col.data[o + 2] = bb; col.data[o + 3] = 255; }
+    }
+    sg.putImageData(col, W - n, 0);
+  } else if (n > 0) specCarry -= n;
+  g.drawImage(spec, 0, 0);
+  const sc = SCALES[$("sScale").value] || SCALES.Minor, key = +$("sKey").value || 0;
+  g.fillStyle = "rgba(236,228,214,.35)"; g.font = (11 * (window.devicePixelRatio || 1)) + "px IBM Plex Mono, monospace";
+  for (let m = 24; m <= 96; m++) {                          // the key's root in every octave, marked on the left
+    if (((m - key) % 12 + 12) % 12 !== 0) continue;
+    const fq = 440 * Math.pow(2, (m - 69) / 12); if (fq < SPEC_LO || fq > SPEC_HI) continue;
+    const y = (1 - Math.log(fq / SPEC_LO) / Math.log(SPEC_HI / SPEC_LO)) * (H - 1);
+    g.fillRect(0, Math.round(y), 10, 1); g.fillText(NOTE_NAMES[key] + (Math.floor(m / 12) - 1), 14, y + 4);
+  }
+}
 function draw() {
   const cv = $("cv"), r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
   const g = cv.getContext("2d"), W = cv.width, H = cv.height, t = performance.now() / 1000;
   g.fillStyle = "#121016"; g.fillRect(0, 0, W, H);
+  if (VIEW === "spectrum") { drawSpectrum(g, W, H); requestAnimationFrame(draw); return; }
   const lo = 2900, hi = 8900;                                // C#2..F7 in cents
   const y = (c) => H - 10 * dpr - (c - lo) / (hi - lo) * (H - 50 * dpr);
   const sc = SCALES[$("sScale").value] || SCALES.Minor, key = +$("sKey").value || 0;
