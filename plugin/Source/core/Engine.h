@@ -24,6 +24,7 @@ public:
     NoteCache();
     ~NoteCache();
     void setSound(int index);                       // which sound renders; clears the queue
+    void setRate(int sampleRate);                   // render at this rate (the host's, up to 48 kHz); clears everything
     int sound() const { return sound_.load(); }
     void want(const std::vector<int>& midis);       // render these next (most wanted first)
     std::shared_ptr<Note> get(int midi, double& ratio) const;   // nearest ready note and the pitch ratio to it
@@ -38,7 +39,7 @@ private:
     std::deque<int> todo_;
     std::array<std::shared_ptr<Note>, 128> notes_{};
     std::array<std::shared_ptr<Note>, 128> bass_{};
-    std::atomic<int> sound_{0}, ready_{0}, gen_{0};
+    std::atomic<int> sound_{0}, ready_{0}, gen_{0}, rate_{44100};
     std::atomic<bool> quit_{false};
     std::thread th_;
 };

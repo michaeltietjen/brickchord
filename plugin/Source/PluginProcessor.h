@@ -100,6 +100,7 @@ private:   // the free-running 16th clock (when the host isn't playing)
     int pending = -1;                         // samples until held keys are read (a chord's notes arrive one by one)
     int lastSound = -1, lastKey = -1, lastScale = -1;
     std::atomic<int> wantedCount{0};
+    std::atomic<bool> rateChanged{false};
     mutable juce::SpinLock nameLock;
     juce::String lastName, lastRoman;
     double sr = 44100;

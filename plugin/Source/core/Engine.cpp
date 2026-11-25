@@ -42,6 +42,19 @@ void NoteCache::setSound(int index) {
     todo_.clear();
 }
 
+void NoteCache::setRate(int sampleRate) {
+    std::lock_guard<std::mutex> l(mx_);
+    sampleRate = std::clamp(sampleRate, 22050, 48000);
+    if (sampleRate == rate_.load()) return;
+    rate_ = sampleRate;                                    // the thread switches before its next render
+    ++gen_;
+    for (auto& n : notes_) n.reset();
+    for (auto& n : bass_) n.reset();
+    ready_ = 0;
+    todo_.clear();
+    cv_.notify_all();
+}
+
 void NoteCache::want(const std::vector<int>& midis) {
     {
         std::lock_guard<std::mutex> l(mx_);
@@ -76,6 +89,8 @@ void NoteCache::run() {
             std::unique_lock<std::mutex> l(mx_);
             cv_.wait_for(l, std::chrono::milliseconds(50), [this, nextBass] { return quit_ || !todo_.empty() || nextBass <= 63; });
             if (quit_) return;
+            if (kSR != rate_.load()) { kSR = rate_.load(); nextBass = 28; }   // a new rate: between renders only
+            gen = gen_.load();
             if (todo_.empty() || (todo_.front() >= 1000)) {
                 int b = !todo_.empty() ? todo_.front() - 1000 : nextBass;
                 if (!todo_.empty()) todo_.pop_front();
@@ -83,14 +98,13 @@ void NoteCache::run() {
                 l.unlock();
                 auto bn = renderBass(b);
                 std::lock_guard<std::mutex> l2(mx_);
-                bass_[(size_t) b] = bn;
+                if (gen == gen_.load()) bass_[(size_t) b] = bn;
                 if (b == nextBass) ++nextBass;
                 continue;
             }
             m = todo_.front();
             todo_.pop_front();
             snd = sound_.load();
-            gen = gen_.load();
         }
         auto note = renderNote(m, kPatches[snd], (unsigned) snd + 1);
         std::lock_guard<std::mutex> l(mx_);

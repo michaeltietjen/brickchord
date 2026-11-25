@@ -69,6 +69,7 @@ bool BricklabStudioProcessor::isBusesLayoutSupported(const BusesLayout& l) const
 void BricklabStudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
     sr = sampleRate;
     player.prepare(sampleRate);
+    if (!kMidiFx) { cache.setRate((int) std::lround(sampleRate)); rateChanged = true; }   // notes render at the host's rate
     reverb.prepare({sampleRate, (juce::uint32) samplesPerBlock, 2});
 }
 
@@ -86,7 +87,8 @@ void BricklabStudioProcessor::applySoundAndKey() {
     int key = (int) params.getRawParameterValue("key")->load();
     int sc = (int) params.getRawParameterValue("scale")->load();
     player.setBassLevel(0.75f * params.getRawParameterValue("basslevel")->load());   // engine.py _bass: 0.75 x level
-    if (snd == lastSound && key == lastKey && sc == lastScale) return;
+    const bool fresh = rateChanged.exchange(false);
+    if (!fresh && snd == lastSound && key == lastKey && sc == lastScale) return;
     if (snd != lastSound) {
         cache.setSound(snd);
         player.setRelease(kPatches[snd].r);

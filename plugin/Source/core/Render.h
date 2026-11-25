@@ -9,7 +9,10 @@
 
 namespace brick {
 
-constexpr int kSR = 22050;                    // the handheld's engine rate; the plugin resamples
+// the rate notes render at: the host's (44.1 or 48 kHz), so they play back untouched. The handheld
+// runs at 22050; rendering at the host rate keeps the top octave clean instead of resampled.
+// Changed only by the NoteCache thread between renders (NoteCache::setRate).
+inline int kSR = 44100;
 
 struct Note {                                 // interleaved stereo float, L R L R
     std::vector<float> attack, loop;          // loop empty: the sound doesn't sustain
