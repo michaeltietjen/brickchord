@@ -9,7 +9,6 @@ convolution) and a tempo-synced ping-pong delay run on the whole mix.
 The UI thread only posts commands; the audio thread owns all state.
 """
 import collections
-import ctypes
 import glob
 import heapq
 import math
@@ -2871,6 +2870,12 @@ class Engine:
             cands = sorted(glob.glob(os.path.join(base, "..", "pygame.libs", "libSDL2-2*"))) + cands
         except Exception:
             pass
+        try:
+            # Loaded here, not at the top: on some firmwares Python's ctypes cannot load (PortMaster's Python wants
+            # libffi.so.7 and KNULLI Scarab ships libffi.so.8). Then this output is skipped and the mixer one is used.
+            import ctypes
+        except (ImportError, OSError) as e:
+            raise RuntimeError("ctypes is not available (%s)" % e)
         for c in [None] + cands:
             try:
                 lib = ctypes.CDLL(c)
