@@ -23,6 +23,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"mode", 1}, "Play mode", modes, 0));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"bassmode", 1}, "Bass", basses, 0));
     l.add(std::make_unique<AudioParameterInt>(ParameterID{"arpoct", 1}, "Arp octaves", 1, 4, 1));
+    l.add(std::make_unique<AudioParameterBool>(ParameterID{"latch", 1}, "Latch", false));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"internal", 1}, "Built-in sound", true));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"midiout", 1}, "MIDI out", BricklabStudioProcessor::kMidiFx));
@@ -78,7 +79,10 @@ void BricklabStudioProcessor::padDown(int degree, int pos) {
     lastRoman = romanFor(degree, c.iv);
 }
 
-void BricklabStudioProcessor::padUp(int pos) { player.release(); queueOut(false, pos); }
+void BricklabStudioProcessor::padUp(int pos) {
+    player.release();
+    if (params.getRawParameterValue("latch")->load() < 0.5f) queueOut(false, pos);   // latched: keeps playing
+}
 
 void BricklabStudioProcessor::queueOut(bool on, int pos) {
     ChordEvent e{pos, on ? player.lastNotes() : std::vector<int>{}};
@@ -141,6 +145,9 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
         advance(n);
     }
     midi.clear();                                            // what goes out is the chords they make
+    const bool latch = params.getRawParameterValue("latch")->load() > 0.5f;
+    if (wasLatched && !latch && held.empty() && padsDown.load() == 0) queueOut(false, 0);   // latch off: let go
+    wasLatched = latch;
 
     // 2. play mode and bass mode turn those chords into notes, on the host's 16ths when it plays
     double bpm = 120, ppq = -1;

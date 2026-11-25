@@ -62,7 +62,11 @@ private:
     brick::Patterns patterns;                 // play mode and bass mode: chords into note events
     std::vector<brick::NoteEvent> events;
     std::set<std::pair<int, int>> sounding;   // MIDI notes sent on and not off yet
-    int64_t clock = 0, nextStep = 0, stepIndex = 0;   // the free-running 16th clock (when the host isn't playing)
+    int64_t clock = 0, nextStep = 0, stepIndex = 0;
+    bool wasLatched = false;
+public:
+    std::atomic<int> padsDown{0};             // pads held on the page (latch needs to know)
+private:   // the free-running 16th clock (when the host isn't playing)
 
     brick::NoteCache cache;
     brick::Player player{cache};

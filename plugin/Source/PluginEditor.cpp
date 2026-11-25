@@ -34,8 +34,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     }
     for (int d = 0; d < 7; ++d) {
         auto* pad = pads.add(new Pad());
-        pad->onDown = [this, d] { proc.padDown(d); };
-        pad->onUp = [this] { proc.padUp(); };
+        pad->onDown = [this, d] { ++proc.padsDown; proc.padDown(d); };
+        pad->onUp = [this] { proc.padsDown = std::max(0, proc.padsDown - 1); proc.padUp(); };
         addAndMakeVisible(pad);
     }
     const char* modNames[] = {"7th", "sus4", "9th", "flip"};
@@ -49,6 +49,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
         };
         addAndMakeVisible(b);
     }
+    latch.setClickingTogglesState(true);
+    addAndMakeVisible(latch);
     // the sound list, grouped as on the handheld: chord sounds, lead sounds, drone sounds
     const char* groups[] = {"Chord sounds", "Lead sounds", "Drone sounds"};
     int lastGroup = -1;
@@ -88,6 +90,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aSound = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "sound", sound);
     aKey = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "key", key);
     aScale = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "scale", scale);
+    aLatch = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "latch", latch);
     aMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "mode", mode);
     aArpOct = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "arpoct", arpOct);
     aBassMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "bassmode", bassMode);
@@ -128,6 +131,7 @@ void BricklabStudioEditor::showTab(int t) {
     const bool chord = t == 0;
     for (auto* p : pads) p->setVisible(chord);
     for (auto* b : modButtons) b->setVisible(chord);
+    latch.setVisible(chord);
     for (juce::Component* c : {(juce::Component*) &sound, (juce::Component*) &key, (juce::Component*) &scale,
                                (juce::Component*) &bassLvl, (juce::Component*) &space, (juce::Component*) &volume,
                                (juce::Component*) &spaceL, (juce::Component*) &volumeL,
@@ -191,6 +195,8 @@ void BricklabStudioEditor::resized() {
     r.removeFromTop(14);
     auto modRow = r.removeFromTop(34);
     for (auto* b : modButtons) { b->setBounds(modRow.removeFromLeft(86)); modRow.removeFromLeft(8); }
+    modRow.removeFromLeft(16);
+    latch.setBounds(modRow.removeFromLeft(86));
     midiOut.setBounds(modRow.removeFromRight(96)); modRow.removeFromRight(8);
     internal.setBounds(modRow.removeFromRight(136));
     r.removeFromTop(16);
@@ -233,7 +239,7 @@ static int padForKey(int code) {
 bool BricklabStudioEditor::keyPressed(const juce::KeyPress& k) {
     int d = padForKey(k.getKeyCode());
     if (d < 0 || tab != 0) return false;
-    if (d != keyDown) { keyDown = d; pads[d]->lit = true; pads[d]->repaint(); proc.padDown(d); }
+    if (d != keyDown) { if (keyDown < 0) ++proc.padsDown; keyDown = d; pads[d]->lit = true; pads[d]->repaint(); proc.padDown(d); }
     return true;
 }
 
@@ -244,6 +250,7 @@ bool BricklabStudioEditor::keyStateChanged(bool isKeyDown) {
             && !juce::KeyPress::isKeyCurrentlyDown(juce::CharacterFunctions::toLowerCase(keys2[keyDown]))) {
             pads[keyDown]->lit = false; pads[keyDown]->repaint();
             keyDown = -1;
+            proc.padsDown = std::max(0, proc.padsDown - 1);
             proc.padUp();
             return true;
         }

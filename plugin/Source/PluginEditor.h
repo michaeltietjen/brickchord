@@ -30,12 +30,13 @@ private:
     juce::OwnedArray<juce::TextButton> tabs;
     juce::OwnedArray<Pad> pads;
     juce::OwnedArray<juce::TextButton> modButtons;
+    juce::TextButton latch{"latch"};
     juce::ComboBox sound, key, scale, mode, arpOct, bassMode;
     juce::ToggleButton internal{"Built-in sound"}, midiOut{"MIDI out"};
     juce::Slider space, volume, bassLvl;
     juce::Label spaceL, volumeL, soon, outNote, modeL, arpL, bassL;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aSound, aKey, aScale, aMode, aArpOct, aBassMode;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aInternal, aMidiOut;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aInternal, aMidiOut, aLatch;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aSpace, aVolume, aBassLvl;
     int keyDown = -1;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BricklabStudioEditor)

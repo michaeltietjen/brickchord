@@ -69,3 +69,12 @@ for (mode, bass, label) in [(7, 0, "Arp 1/8 Up, Synth bass"), (1, 3, "Strum Folk
     inst.stopNote(62, onChannel: 0)
     run(1.6, "released")
 }
+param("Play mode")?.value = 7
+param("Bass")?.value = 0
+param("Latch")?.value = 1
+inst.startNote(57, withVelocity: 100, onChannel: 0)
+run(0.3, "latch on, A pressed")
+inst.stopNote(57, onChannel: 0)
+run(1.2, "A let go: still playing")
+param("Latch")?.value = 0
+run(0.5, "latch off: stops")
