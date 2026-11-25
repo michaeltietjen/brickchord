@@ -1,0 +1,6 @@
+{
+  "label": "Brick Probe",
+  "icon": "",
+  "launch": "launch.sh",
+  "description": "Checks this device for Brickchord. Writes brickprobe.txt to the SD card."
+}
