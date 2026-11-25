@@ -46,9 +46,10 @@ self.onmessage = async (ev) => {
       out = { catalog: JSON.parse(call("songrender.catalog()")) };
     } else if (op === "render") {
       const t0 = performance.now();
-      call("_a = songrender.render(json.loads(src), None if secs is None else float(secs), tail=float(tail))\n" +
+      // a JS null reaches Python as JsNull, not None: send -1 for "the whole song"
+      call("_a = songrender.render(json.loads(src), None if float(secs) < 0 else float(secs), tail=float(tail))\n" +
            "_L = np.ascontiguousarray(_a[:, 0], dtype=np.float32)\n_R = np.ascontiguousarray(_a[:, 1], dtype=np.float32)",
-           { src: JSON.stringify(arg.song), secs: arg.secs ?? null, tail: arg.tail ?? 2.0 });
+           { src: JSON.stringify(arg.song), secs: arg.secs ?? -1, tail: arg.tail ?? 2.0 });
       const L = py.globals.get("_L").toJs(), R = py.globals.get("_R").toJs();
       out = { left: L, right: R, sr: 22050, ms: Math.round(performance.now() - t0) };
       self.postMessage({ id, ok: true, out }, [L.buffer, R.buffer]);
