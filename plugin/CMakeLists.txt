@@ -17,7 +17,7 @@ endif()
 add_subdirectory(${JUCE_DIR} JUCE)
 
 juce_add_plugin(BricklabStudio
-    COMPANY_NAME "Michael Tietjen"
+    COMPANY_NAME "Bricklab Studios"
     BUNDLE_ID "io.github.michaeltietjen.bricklabstudio"
     PLUGIN_MANUFACTURER_CODE Mtie
     PLUGIN_CODE Brkl
@@ -36,7 +36,7 @@ juce_add_plugin(BricklabStudio
 # the same code, built twice: the instrument (AU, VST3, Standalone; MIDI out included)
 # and, for Logic, a MIDI FX that only sends its chords to the instrument after it
 juce_add_plugin(BricklabStudioMIDI
-    COMPANY_NAME "Michael Tietjen"
+    COMPANY_NAME "Bricklab Studios"
     BUNDLE_ID "io.github.michaeltietjen.bricklabstudiomidi"
     PLUGIN_MANUFACTURER_CODE Mtie
     PLUGIN_CODE BrkM
