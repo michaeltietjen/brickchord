@@ -47,6 +47,12 @@ self.onmessage = async (ev) => {
         else L.add_note(d.sound, d.midi, py.toPy(d.a), d.la, py.toPy(d.l), d.ll); }; }
     else if (op === "glide") { py.runPython("import glideweb\nG = glideweb.Glide(L)"); G = py.globals.get("G");
         G.set_key(arg.key, arg.scale); r = { pages: ["Chords", "Voice", "Melody", "Scenes", "FX"] }; fill(); }
+    else if (op === "chop") { py.runPython("import chopweb\nG = chopweb.Chop(L)"); G = py.globals.get("G");
+        G.set_key(arg.key, arg.scale); fill(); }
+    else if (op === "call") {           // Brickchop: any of chopweb.Chop's page methods, by name
+        const v = G[arg.fn](...(arg.args || [])); fill();
+        r = typeof v === "string" && /^[\[{]/.test(v) ? JSON.parse(v) : (v === undefined ? null : v); }
+    else if (op === "file") { py.FS.mkdirTree("/app/samples"); py.FS.writeFile("/app/samples/" + arg.name, new Uint8Array(arg.bytes)); }
     else if (op === "g_btn") { G.btn(arg.name, !!arg.down); fill(); }
     else if (op === "g_stick") { G.stick(arg.x, arg.y); }
     else if (op === "g_right") { G.right(arg.x, arg.y); }

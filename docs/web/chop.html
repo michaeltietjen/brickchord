@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brickchop in your browser</title>
+<meta name="robots" content="noindex">
+<meta name="description" content="Brickchop in your browser, on the handheld's own engine: 12 pads in four groups, KEYS, a looping sequencer, punch-in FX, and your own loops chopped onto the pads.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--chassis:#e4e2dc;--plate:#efede8;--ink:#18161c;--dim:#6d6874;--seam:#cfccc4;--orange:#ff5a1f;--red:#ec3e32;--teal:#3f9e95;--screen:#121016;--sink:#ece4d6;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--chassis);color:var(--ink);font-family:Archivo,Helvetica,sans-serif}
+button,select,input{font:inherit;color:inherit}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:14px 22px;border-bottom:1px solid var(--seam)}
+.logo{font-weight:800;font-size:21px;letter-spacing:-.4px;text-decoration:none;color:var(--ink)}
+.logo span{font-weight:500;color:var(--dim)}
+main{max-width:1060px;margin:0 auto;padding:20px 22px 60px;display:flex;flex-direction:column;gap:18px}
+.screen{position:relative;background:var(--screen);color:var(--sink);border-radius:16px;border:8px solid #26242b;overflow:hidden}
+.screen canvas{display:block;width:100%;height:200px}
+.top{position:absolute;left:16px;right:16px;top:10px;display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:12px;letter-spacing:1px;color:#a39fae;pointer-events:none}
+.msg{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-family:var(--mono);font-size:12px;color:#d9d3c7;pointer-events:none}
+.deck{display:grid;grid-template-columns:150px minmax(0,1fr) 150px;gap:16px;align-items:center}
+.pads{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.pad{height:82px;border-radius:12px;border:0;background:var(--plate);box-shadow:0 4px 0 var(--seam);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;touch-action:none;user-select:none;padding:4px;min-width:0}
+.pad b{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.pad span{font-family:var(--mono);font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.pad.last{outline:2px solid var(--teal);outline-offset:-2px}
+.pad.on{background:var(--orange);box-shadow:0 1px 0 #c33f0e;transform:translateY(3px)}
+.pad.on span{color:var(--ink)}
+.groups{display:flex;gap:8px;flex-wrap:wrap}
+.grp{padding:9px 16px;border-radius:10px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600;position:relative}
+.grp[aria-pressed=true]{background:var(--ink);color:var(--plate);border-color:var(--ink)}
+.grp.busy::after{content:"";position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--orange)}
+.stick{display:flex;flex-direction:column;align-items:center;gap:6px}
+.xy{width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,#26242b 0 28%,var(--screen) 29%);border:6px solid var(--seam);position:relative;touch-action:none;cursor:grab}
+.xy i{position:absolute;width:44px;height:44px;border-radius:50%;background:var(--plate);box-shadow:0 3px 0 var(--seam);left:42px;top:42px;pointer-events:none}
+.stick span{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;min-height:28px}
+.mods{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mod{padding:10px 14px;border-radius:999px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600;touch-action:none;user-select:none}
+.mod.on{background:var(--ink);color:var(--plate);border-color:var(--ink)}
+.mod.play.on{background:var(--teal);border-color:var(--teal);color:var(--ink)}
+.mod.rec.on{background:var(--red);border-color:var(--red);color:#fff}
+.row{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end}
+label.f{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--dim)}
+select{background:var(--plate);border:1px solid var(--seam);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:13px}
+.panel{background:var(--plate);border:1px solid var(--seam);border-radius:14px;padding:14px 16px}
+.cap{font-family:var(--mono);font-size:12px;letter-spacing:1px;color:var(--dim);margin:0 0 10px}
+.pages{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.page{padding:7px 14px;border-radius:9px;border:1px solid var(--seam);background:var(--chassis);cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:600}
+.page[aria-pressed=true]{background:var(--ink);color:var(--plate);border-color:var(--ink)}
+.rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px}
+.set{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:6px;padding:6px 8px;border-radius:9px;background:var(--chassis);font-size:14px}
+.set .v{font-family:var(--mono);font-size:12px;min-width:120px;max-width:220px;text-align:center;cursor:pointer;padding:4px 6px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.set .v:hover{background:#ffe2d6}
+.set button.s{width:28px;height:28px;border-radius:7px;border:1px solid var(--seam);background:var(--plate);cursor:pointer}
+.drop{border:2px dashed var(--seam);border-radius:12px;padding:14px;text-align:center;color:var(--dim);font-size:14px}
+.drop.over{border-color:var(--orange);color:var(--ink)}
+.btn{padding:10px 16px;border-radius:10px;border:1px solid var(--seam);background:var(--plate);cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600}
+.btn.primary{background:var(--orange);border-color:var(--orange)}
+.stat{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.hint{font-size:14px;line-height:1.55;color:#4a4650;margin:0}
+kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px solid var(--seam);border-radius:5px;padding:1px 6px}
+.start{position:fixed;inset:0;background:rgba(228,226,220,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:9;text-align:center;padding:20px}
+.start b{font-size:30px;font-weight:900}
+[hidden]{display:none!important}
+.embed header .logo,.embed header .solo{display:none}
+@media (max-width:760px){.deck{grid-template-columns:1fr 1fr}.pads{grid-column:1/-1;order:-1}.pad{height:70px}}
+</style>
+</head>
+<body>
+<div class="start" id="start"><b>Brickchop</b><p class="hint" id="startmsg">A pocket sampler on the Brick's own engine. Loads about 10 MB the first time.</p><button class="btn primary" id="go">Start</button></div>
+
+<header>
+  <a class="logo" href="./#lab">bricklab <span>web</span></a>
+  <span class="stat solo">BRICKCHOP · PREVIEW</span>
+  <span class="stat" id="stat" style="margin-left:auto" role="status"></span>
+</header>
+
+<main>
+  <div class="screen" aria-live="polite">
+    <canvas id="cv" width="1000" height="200" aria-label="The group's pattern and the playhead"></canvas>
+    <div class="top"><span id="head">GROUP A</span><span id="pos"></span></div>
+    <div class="msg" id="msg">hit a pad</div>
+  </div>
+
+  <div class="groups" id="groups"></div>
+
+  <div class="deck">
+    <div class="stick"><div class="xy" id="lstick" aria-label="Fader"><i></i></div><span>fader: &#8597; tune · &#8596; level<br>of the last pad</span></div>
+    <div class="pads" id="pads"></div>
+    <div class="stick"><div class="xy" id="rstick" aria-label="Punch-in FX"><i></i></div><span>punch-in FX<br>while held</span></div>
+  </div>
+
+  <div class="mods">
+    <button class="mod play" id="bPlay">&#9654; play <kbd>Space</kbd></button>
+    <button class="mod rec" id="bRec" title="Click: record on or off. Hold it and hit a pad: erase that pad from the pattern">&#9679; rec <kbd>Enter</kbd></button>
+    <button class="mod" id="bKeys" title="The last pad's sound across all 12 pads">keys <kbd>K</kbd></button>
+    <label class="f" style="margin-left:auto">DEMO<select id="sDemo"><option value="">Load a demo...</option></select></label>
+    <label class="f">KEY<select id="sKey"></select></label>
+    <label class="f">SCALE<select id="sScale"><option>Major</option><option selected>Minor</option><option>Dorian</option><option>Mixolydian</option></select></label>
+  </div>
+
+  <div class="drop" id="drop">Drop a loop or a break here (WAV, AIFF, MP3) and it's chopped onto the 12 pads of group D, at its hits. Or <label style="color:var(--orange);cursor:pointer"><u>choose a file</u><input type="file" id="fSmp" accept="audio/*,.wav,.aif,.aiff,.mp3" hidden></label>.</div>
+
+  <section class="panel" aria-label="Settings">
+    <p class="cap">SETTINGS · THE HANDHELD'S OWN PAGES · CLICK A VALUE TO STEP IT, OR USE &#8249; &#8250;</p>
+    <div class="pages" id="pages"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+
+  <p class="hint">Pads: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> / <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd><kbd>R</kbd> / <kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd> (hold <kbd>Shift</kbd> to play softer; on a touch screen, press harder). Groups: <kbd>Z</kbd> drums, <kbd>X</kbd> bass, <kbd>C</kbd> keys, <kbd>V</kbd> your samples. <kbd>Space</kbd> plays, <kbd>Enter</kbd> records what you play into the group's loop, on the 16ths; hold <kbd>Enter</kbd> and hit a pad to erase it. <kbd>K</kbd> puts the last pad's sound across all 12 pads. The left stick tunes the last pad (up and down) and sets its level (sideways); the right stick is punch-in FX while you hold it. MIDI pads from C2 play pads 1 to 12, with velocity.</p>
+</main>
+
+<script>
+"use strict";
+const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const SCALES = {Major:1, Minor:1, Dorian:1, Mixolydian:1};
+const PADS = ["L2", "L1", "R1", "R2", "LEFT", "UP", "Y", "X", "DOWN", "RIGHT", "B", "A"];   // chop.py PADS
+const PADKEYS = ["Digit1","Digit2","Digit3","Digit4","KeyQ","KeyW","KeyE","KeyR","KeyA","KeyS","KeyD","KeyF"];
+const GRPKEYS = {KeyZ: 0, KeyX: 1, KeyC: 2, KeyV: 3};
+const $ = (id) => document.getElementById(id);
+const el = (t, a, ...k) => { const e = document.createElement(t); for (const [x, v] of Object.entries(a || {})) { if (x === "class") e.className = v; else if (x.startsWith("on")) e.addEventListener(x.slice(2), v); else e.setAttribute(x, v); } e.append(...k); return e; };
+
+let AW, RW, AC, NODE, ST = null, PAGE = "Pad", READY = false, SONG = null, songSig = "", recDown = false;
+let rid = 0; const wait = {};
+function rpc(w, op, arg, ports) { const id = ++rid; return new Promise((res, rej) => { wait[id] = {res, rej}; w.postMessage({id, op, arg}, ports || []); }); }
+function onmsg(e) { if (e.data.progress) return; const w = wait[e.data.id]; delete wait[e.data.id]; if (w) e.data.ok ? w.res(e.data.r) : w.rej(new Error(e.data.err)); }
+const call = (fn, ...args) => rpc(AW, "call", { fn, args });
+
+async function start() {
+  $("go").disabled = true; $("startmsg").textContent = "Loading the engine and the 48 pad sounds...";
+  AC = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050, latencyHint: "interactive" });
+  await AC.audioWorklet.addModule("live-worklet.js?t=" + Date.now());
+  NODE = new AudioWorkletNode(AC, "brick-out", { outputChannelCount: [2] });
+  NODE.connect(AC.destination);
+  const man = await (await fetch("manifest.json", { cache: "no-cache" })).json();
+  AW = new Worker("live-audio.js?t=" + Date.now()); AW.onmessage = onmsg;
+  RW = new Worker("live-render.js?t=" + Date.now()); RW.onmessage = onmsg;
+  const toAudio = new MessageChannel(), toOut = new MessageChannel();
+  await rpc(AW, "init", { files: man.files });
+  await rpc(RW, "init", { files: man.files.filter(f => f.startsWith("py/")) }, [toAudio.port1]);
+  await rpc(AW, "notes", null, [toAudio.port2]);
+  for (let k = 0; k < 12; k++) $("sKey").append(el("option", {value: k}, NOTE_NAMES[k]));
+  $("sKey").value = SONG ? SONG.key : 9;
+  if (SONG && SCALES[SONG.scale]) $("sScale").value = SONG.scale;
+  await rpc(AW, "chop", { key: +$("sKey").value, scale: $("sScale").value });
+  NODE.port.postMessage({ port: toOut.port1 }, [toOut.port1]);
+  await rpc(AW, "out", null, [toOut.port2]);
+  ST = await call("state");
+  ST.demos.forEach((d, i) => $("sDemo").append(el("option", {value: i}, d)));
+  ["A drums", "B bass", "C keys", "D samples"].forEach((n, g) => $("groups").append(el("button", {class: "grp", "aria-pressed": g === 0, onclick: () => group(g)}, n)));
+  for (const p of ["Pad", "Group", "Seq", "Master"]) $("pages").append(el("button", {class: "page", "aria-pressed": p === PAGE, onclick: () => showPage(p)}, p));
+  drawPads(); showPage(PAGE);
+  $("start").remove();
+  READY = true;
+  poll(); draw(); statLoop(); midi();
+}
+
+// ---------------------------------------------------------------- pads and buttons
+function drawPads() {
+  const box = $("pads"); box.replaceChildren();
+  for (let i = 0; i < 12; i++) box.append(el("button", {class: "pad", "data-i": i,
+    onpointerdown: (e) => { e.preventDefault(); hit(i, e.pressure && e.pointerType !== "mouse" ? Math.min(1, 0.3 + e.pressure) : 1.0); }},
+    el("b", {}, "-"), el("span", {}, (i + 1) + "")));
+}
+function hit(i, vel) {
+  if (recDown) { recCombo = true; return call("btn", PADS[i], true); }   // rec held + a pad: erase it (chop.py R3 combo)
+  call("hit", i, vel);
+  const p = $("pads").children[i]; p.classList.add("on"); pressed.add(i);
+  setTimeout(() => { pressed.delete(i); p.classList.remove("on"); }, 110);
+}
+async function group(g) { await call("group", g); refresh(); showPage(PAGE); }
+let recCombo = false;
+const pressed = new Set();
+function recPress(down) {
+  if (down === recDown) return;
+  recDown = down;
+  if (down) recCombo = false;
+  call("btn", "R3", down);
+}
+$("bPlay").onclick = () => { call("btn", "START", true); call("btn", "START", false); };
+$("bRec").addEventListener("pointerdown", (e) => { e.preventDefault(); recPress(true); });
+$("bRec").addEventListener("pointerup", () => recPress(false));
+$("bRec").addEventListener("pointerleave", () => recPress(false));
+$("bKeys").onclick = async () => { await call("btn", "L3", true); call("btn", "L3", false); showPage(PAGE); };
+document.addEventListener("keydown", (e) => {
+  if (!READY || e.repeat || e.metaKey || e.ctrlKey || ["INPUT", "SELECT"].includes(document.activeElement.tagName)) return;
+  const i = PADKEYS.indexOf(e.code);
+  if (i >= 0) { e.preventDefault(); hit(i, e.shiftKey ? 0.5 : 1.0); }
+  else if (e.code in GRPKEYS) group(GRPKEYS[e.code]);
+  else if (e.code === "Space") { e.preventDefault(); $("bPlay").click(); }
+  else if (e.code === "Enter") { e.preventDefault(); recPress(true); }
+  else if (e.code === "KeyK") $("bKeys").click();
+});
+document.addEventListener("keyup", (e) => { if (READY && e.code === "Enter") recPress(false); });
+addEventListener("blur", () => recPress(false));
+
+// ---------------------------------------------------------------- sticks
+function stick(pad, cb) {
+  const knob = pad.querySelector("i"); let id = null;
+  const move = (e) => {
+    const r = pad.getBoundingClientRect(), R = r.width / 2 - 22;
+    let x = (e.clientX - r.left - r.width / 2) / R, y = -(e.clientY - r.top - r.height / 2) / R;
+    const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+    knob.style.left = (42 + x * R) + "px"; knob.style.top = (42 - y * R) + "px";
+    cb(x, y);
+  };
+  pad.addEventListener("pointerdown", (e) => { id = e.pointerId; pad.setPointerCapture(id); move(e); });
+  pad.addEventListener("pointermove", (e) => { if (e.pointerId === id) move(e); });
+  const up = (e) => { if (e.pointerId !== id) return; id = null; knob.style.left = "42px"; knob.style.top = "42px"; cb(0, 0); };
+  pad.addEventListener("pointerup", up); pad.addEventListener("pointercancel", up);
+}
+let LS = [0, 0], RS = [0, 0], RSsent = "";
+stick($("lstick"), (x, y) => { LS = [x, y]; });
+stick($("rstick"), (x, y) => { RS = [x, y]; });
+function sticks() {                     // read every frame, as the handheld reads its sticks
+  if (LS[0] || LS[1]) call("stick", LS[0], LS[1]);
+  const k = RS[0].toFixed(2) + "," + RS[1].toFixed(2);
+  if (k !== RSsent) { RSsent = k; call("right", RS[0], RS[1]); }
+}
+
+// ---------------------------------------------------------------- the screen
+function refresh() {
+  if (!ST) return;
+  const pads = $("pads").children;
+  for (let i = 0; i < 12; i++) {
+    pads[i].querySelector("b").textContent = ST.labels[i];
+    pads[i].querySelector("span").textContent = ST.keys ? ST.sub[i] : (i + 1) + "";
+    pads[i].classList.toggle("last", !ST.keys && ST.last === i);
+    if (!pressed.has(i)) pads[i].classList.toggle("on", ST.lit.includes(i));   // the sequencer lights pads too
+  }
+  [...$("groups").children].forEach((b, g) => { b.setAttribute("aria-pressed", g === ST.group); b.classList.toggle("busy", ST.busy.includes(g)); });
+  $("bPlay").classList.toggle("on", ST.play); $("bRec").classList.toggle("on", ST.rec); $("bKeys").classList.toggle("on", ST.keys);
+  $("head").textContent = ST.head + (ST.keys ? "   " + ST.kplay.toUpperCase() : "");
+  $("pos").textContent = ST.play ? "BAR " + (Math.floor(ST.pos / 16) + 1) + " · " + (Math.floor(ST.pos % 16) + 1) : "";
+  $("msg").textContent = ST.msg || (ST.rec ? "recording: play into the loop" : "");
+}
+async function poll() {
+  if (READY && AC.state === "running") {
+    sticks();
+    try { ST = await call("state"); refresh(); } catch (e) {}
+  }
+  setTimeout(poll, 50);
+}
+function draw() {
+  const cv = $("cv"), r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  const g = cv.getContext("2d"), W = cv.width, H = cv.height;
+  g.fillStyle = "#121016"; g.fillRect(0, 0, W, H);
+  if (ST) {
+    const L = ST.len, x0 = 16 * dpr, x1 = W - 16 * dpr, y0 = 34 * dpr, y1 = H - 30 * dpr, rh = (y1 - y0) / 12;
+    const X = (s) => x0 + (x1 - x0) * s / L;
+    for (let s = 0; s <= L; s++) {                 // the grid: bars bright, beats softer
+      g.fillStyle = s % 16 === 0 ? "rgba(236,228,214,.25)" : s % 4 === 0 ? "rgba(236,228,214,.10)" : "rgba(236,228,214,.04)";
+      g.fillRect(Math.round(X(s)), y0, dpr, y1 - y0);
+    }
+    for (const [s, i] of ST.hits) {
+      g.fillStyle = i === ST.last ? "#ff5a1f" : "#ece4d6";
+      g.fillRect(X(s) + dpr, y0 + i * rh + 1, Math.max(3 * dpr, (x1 - x0) / L - 2 * dpr), rh - 2);
+    }
+    if (ST.pos >= 0) { g.fillStyle = ST.rec ? "#ec3e32" : "#3f9e95"; g.fillRect(X(ST.pos), y0 - 4 * dpr, 2 * dpr, y1 - y0 + 8 * dpr); }
+  }
+  requestAnimationFrame(draw);
+}
+
+// ---------------------------------------------------------------- settings: the handheld's own pages
+async function showPage(p) {
+  PAGE = p;
+  for (const b of document.querySelectorAll(".page")) b.setAttribute("aria-pressed", b.textContent === p);
+  drawRows(await call("menu_rows", p));
+}
+const ACTS = /^(Copy FX to group|Reset pad FX|Clear pad|Stop drones|Reset group FX|Chop to group|Load kit|Rescan files|Mode|Quantize pattern|Clear pattern|Clear all|Commit|Audition pad|Reset master)$/;
+function drawRows(rows) {
+  const box = $("rows"); box.replaceChildren();
+  for (const [name, val] of rows) {
+    const act = ACTS.test(name);
+    const step = (d) => call("menu_change", PAGE, name, d).then(drawRows);
+    const v = el("span", {class: "v", title: val, onclick: () => act ? call("menu_activate", PAGE, name).then(drawRows) : step(1)}, act ? val.replace(/^A /, "") : val);
+    box.append(el("div", {class: "set"}, el("span", {}, name),
+      el("button", {class: "s", "aria-label": name + " down", onclick: () => step(-1)}, "‹"), v,
+      el("button", {class: "s", "aria-label": name + " up", onclick: () => step(1)}, "›")));
+  }
+}
+
+// ---------------------------------------------------------------- your loops: chopped onto group D
+function wav16(ch, sr) {
+  const n = ch[0].length, c = ch.length, b = new DataView(new ArrayBuffer(44 + n * c * 2));
+  const s = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)); };
+  s(0, "RIFF"); b.setUint32(4, 36 + n * c * 2, true); s(8, "WAVEfmt "); b.setUint32(16, 16, true); b.setUint16(20, 1, true);
+  b.setUint16(22, c, true); b.setUint32(24, sr, true); b.setUint32(28, sr * c * 2, true); b.setUint16(32, c * 2, true); b.setUint16(34, 16, true);
+  s(36, "data"); b.setUint32(40, n * c * 2, true);
+  let o = 44; for (let i = 0; i < n; i++) for (let k = 0; k < c; k++) { const v = Math.max(-1, Math.min(1, ch[k][i])); b.setInt16(o, v * 32767, true); o += 2; }
+  return b.buffer;
+}
+async function addLoop(f) {
+  if (!READY) return;
+  $("msg").textContent = "reading " + f.name + "...";
+  try {
+    const buf = await AC.decodeAudioData(await f.arrayBuffer());
+    const secs = Math.min(buf.duration, 20), n = Math.floor(secs * buf.sampleRate);
+    const ch = []; for (let k = 0; k < Math.min(2, buf.numberOfChannels); k++) ch.push(buf.getChannelData(k).slice(0, n));
+    const name = f.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9 _-]/g, "").trim().replace(/\s+/g, "_").slice(0, 40) + ".wav";
+    await rpc(AW, "file", { name, bytes: wav16(ch, buf.sampleRate) });
+    await call("add_wav", name);
+    showPage(PAGE);
+  } catch (e) { $("msg").textContent = "couldn't read that file: " + e.message; }
+}
+const drop = $("drop");
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) addLoop(e.dataTransfer.files[0]); });
+$("fSmp").onchange = (e) => { if (e.target.files[0]) addLoop(e.target.files[0]); e.target.value = ""; };
+
+// ---------------------------------------------------------------- demo, key, status, MIDI
+$("sDemo").onchange = async (e) => { const v = e.target.value; e.target.value = ""; if (v === "" || !READY) return; await call("demo", +v); showPage(PAGE); };
+async function setKey() { if (READY) await call("set_key", +$("sKey").value, $("sScale").value); }
+$("sKey").onchange = setKey; $("sScale").onchange = setKey;
+let MIDI = "";
+async function statLoop() {
+  const s = await rpc(AW, "stats");
+  const ms = Math.round(1000 * (s.buffered / 22050 + (AC.baseLatency || 0) + (AC.outputLatency || 0)));
+  $("stat").textContent = "delay ≈ " + ms + " ms · dropouts " + s.under + (MIDI ? " · " + MIDI : "");
+  setTimeout(statLoop, 400);
+}
+async function midi() {                 // chop.py chop_midi: C2 up plays pads 1 to 12, with velocity
+  if (!navigator.requestMIDIAccess) return;
+  try {
+    const acc = await navigator.requestMIDIAccess();
+    const hook = (inp) => inp.onmidimessage = (m) => {
+      const [st, a, b] = m.data;
+      if ((st & 0xf0) === 0x90 && b > 0) { MIDI = "MIDI in: " + inp.name; call("midi", "on", a, b); }
+    };
+    const scan = () => { const ins = [...acc.inputs.values()]; ins.forEach(hook); MIDI = ins.length ? "MIDI: " + ins.map(i => i.name).join(", ") : ""; };
+    scan(); acc.onstatechange = scan;
+  } catch (e) {}
+}
+$("go").onclick = () => start().catch(e => { $("startmsg").textContent = "Couldn't start: " + e.message; $("go").disabled = false; });
+
+// ---------------------------------------------------------------- inside the app (index.html)
+const EMBED = window.parent !== window;
+if (EMBED) document.documentElement.classList.add("embed");
+addEventListener("message", (e) => {
+  if (e.origin !== location.origin || !e.data) return;
+  const m = e.data;
+  if (m.bl === "hide" && AC) { recPress(false); LS = [0, 0]; RS = [0, 0]; AC.suspend(); }
+  if (m.bl === "show") {
+    if (AC) AC.resume();
+    if (m.song && m.song.key + " " + m.song.scale !== songSig) {
+      songSig = m.song.key + " " + m.song.scale; SONG = m.song;
+      if (READY) { $("sKey").value = SONG.key; if (SCALES[SONG.scale]) $("sScale").value = SONG.scale; setKey(); }
+    }
+  }
+});
+</script>
+</body>
+</html>

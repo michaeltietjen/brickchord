@@ -8,6 +8,8 @@
   "py/edition.py",
   "py/ambient.py",
   "py/glideweb.py",
+  "py/chop.py",
+  "py/chopweb.py",
   "kits/808/clap.wav",
   "kits/808/hat.wav",
   "kits/808/kick.wav",
