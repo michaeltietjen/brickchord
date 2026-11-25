@@ -37,6 +37,13 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    // which page this instance plays: each instance is one layer, as many as you like in the DAW
+    enum Page { ChordPage, LeadPage, DronePage, GlidePage };
+    int page() const { return (int) params.getRawParameterValue("page")->load(); }
+    void uiPad(int degree, bool down);        // the Lead and Drone pages' pads
+    int droneDegree() const { return droneDegLit.load(); }
+    static std::vector<int> soundsOf(int group);   // patch indexes of a group: 0 chord, 1 lead, 2 drone
+
     // the Chord page and MIDI both play through these
     void padDown(int degree, int pos = 0);
     void padUp(int pos = 0);
@@ -54,6 +61,24 @@ private:
     void timerCallback() override;            // follows sound, key and scale changes (message thread)
     void applySoundAndKey();
     void playHeld(int pos);                   // MIDI: what the held keys ask for
+    void runChord(juce::AudioBuffer<float>&, juce::MidiBuffer&, int n, bool audio, bool internal, bool out);
+    void runMono(juce::AudioBuffer<float>&, juce::MidiBuffer&, int n, bool audio, bool internal, bool out, int pg);
+    void leadPlay(int m, int pos, juce::MidiBuffer&, bool internal, bool out);
+    void leadPress(int id, int m, int pos, juce::MidiBuffer&, bool internal, bool out);
+    void leadRelease(int id, int pos, juce::MidiBuffer&, bool internal, bool out);
+    void droneToggle(int pc, int deg, int pos, juce::MidiBuffer&, bool internal, bool out);
+    void sendOff(juce::MidiBuffer&, int pos);  // every MIDI note this instance has on: off
+    void setName(const juce::String& name, const juce::String& sub);
+
+    juce::SpinLock uiLock;
+    std::vector<std::pair<int, bool>> uiQueue;        // (degree, down) from the Lead and Drone pads
+    std::vector<std::pair<int, int>> leadStack;       // (key or 100 + pad, note): the lead plays the newest
+    int leadOut = -1;                                 // the lead note MIDI out has on
+    std::vector<int> droneOut;                        // the drone notes MIDI out has on
+    int dronePc = -1, lastPage = -1;
+    std::atomic<int> droneDegLit{-1};
+    float bendSemis = 0, vibDepth = 0;
+    int lastExpr = 127;                               // the expression MIDI out last sent (the drone's pulse)
     void queueOut(bool on, int pos);          // a chord just started (or was let go): for Patterns
 
     struct ChordEvent { int pos; std::vector<int> notes; };   // notes empty = let go

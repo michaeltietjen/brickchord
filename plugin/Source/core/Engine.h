@@ -4,6 +4,8 @@
 // reads each note at its own speed, so the plugin runs at any host sample rate and
 // a note that isn't rendered yet sounds as the nearest one that is, pitched.
 #pragma once
+#include <algorithm>
+#include <cmath>
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -51,6 +53,16 @@ struct Voice {
     int midi = 0;
 };
 
+// a voice whose pitch moves: the lead (glide, bend, vibrato) and the sliding drone
+struct GVoice {
+    std::shared_ptr<Note> note;
+    double pos = 0, baseRate = 1, ratio = 1;   // ratio: the glide, 2^((target - base) / 12) when it has arrived
+    int base = 60, target = 60, midi = 60;
+    float glide = 0, env = 1, gain = 0.95f;
+    int fadeIn = 0, relN = 1;
+    bool rel = false, drone = false, done = false;
+};
+
 class Player {
 public:
     explicit Player(NoteCache& cache) : cache_(cache) {}
@@ -68,6 +80,13 @@ public:
     void noteOn(int ch, int midi, float gain, float pan);
     void noteOff(int ch, int midi, float relSecs);       // relSecs < 0: the sound's own release
     void allOff();
+    // the Lead page (engine.c_lead_on / c_lead_off / c_lead_mod) and the Drone page (engine.c_drone)
+    void leadOn(int midi, float glideSecs);
+    void leadOff();
+    void leadMod(float bendSemis, float vib) { bend_ = bendSemis; vib_ = vib; }
+    void drone(const std::vector<int>& notes, float slideSecs);   // empty: the drone fades
+    void droneMod(float x, float y) { dx_ = x; dy_ = y; }          // x: thin (-) / bloom (+), y: pulse (-) / swell (+)
+    void setTempo(double bpm) { bpm_ = bpm > 20 ? bpm : 120; }
     std::vector<int> lastNotes() const { std::lock_guard<std::mutex> l(vmx_); return last_; }   // the last chord as voiced
     std::vector<int> wanted() const;                     // every note a chord button can ask for, likely first
     void render(float* L, float* R, int n);              // adds into L and R
@@ -76,6 +95,12 @@ private:
     void start(const std::vector<int>& notes);
     NoteCache& cache_;
     std::vector<Voice> voices_;
+    std::vector<GVoice> gv_;
+    std::vector<int> droneNotes_;
+    float bend_ = 0, vib_ = 0, dx_ = 0, dy_ = 0;
+    double vibPh_ = 0, bpm_ = 120;
+    int64_t T_ = 0;
+    void renderG(float* L, float* R, int n);
     std::vector<int> prev_, last_;
     int key_ = 9;
     Scale scale_ = Scale::Minor;
@@ -85,6 +110,17 @@ private:
     mutable std::mutex vmx_;                                      // the UI thread starts chords too
 };
 
-int degreeOf(int note, int key, Scale scale);           // which degree of the key a MIDI note is nearest
+int degreeOf(int note, int key, Scale scale);
+
+// the drone's pulse (engine._drone_env, stick down): a smooth tempo-synced gate. y: -1..0 after the
+// dead zone; t in seconds. 1 = full level.
+inline double dronePulse(float y, double t, double bpm) {
+    const double beat = 60.0 / bpm;
+    const int div = y > -0.4f ? 2 : (y > -0.75f ? 4 : 8);         // 1/8, 1/16, 1/32
+    const double len = beat / div, ph = std::fmod(t, len) / len;
+    const double depth = std::min(1.0, -y * 1.1), duty = 0.6 - 0.3 * depth, edge = 0.12;
+    const double on = std::clamp(ph / edge, 0.0, 1.0) * std::clamp((duty - ph) / edge, 0.0, 1.0);
+    return (1 - depth) + depth * (0.5 - 0.5 * std::cos(3.14159265358979 * on));
+}           // which degree of the key a MIDI note is nearest
 
 }  // namespace brick

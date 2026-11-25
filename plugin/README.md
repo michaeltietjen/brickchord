@@ -46,3 +46,16 @@ turn it off to use only your own instruments.
   input to the Bricklab Studio track.
 - Logic Pro: Logic doesn't take MIDI from instruments, so use **Bricklab Studio MIDI**, a
   MIDI FX build of the same plugin. Put it in the MIDI FX slot above any instrument.
+
+## Pages: one layer per instance
+
+Each instance plays one page, saved with your project. Layer them on separate tracks.
+
+- **Chord**: the chord pads, play modes, bass modes, latch.
+- **Lead**: one note at a time with glide. Pads are the notes of the scale; a keyboard plays
+  as is. Mod wheel adds vibrato, pitch bend bends 2 semitones (both sent on with MIDI out).
+- **Drone**: tap a pad or key to drone on it (root, fifth, octaves; 3rd adds the third), the
+  same again to stop. Slide glides to the next drone. Pulse | Swell and Thin | Bloom shape it;
+  the mod wheel pulses it and pitch bend thins or blooms it. With MIDI out the pulse goes out
+  as expression (CC 11), so other synths pulse too.
+- **Glide**: coming next.
