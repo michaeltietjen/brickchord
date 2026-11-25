@@ -39,6 +39,7 @@ self.onmessage = async (ev) => {
         L.add_note(d.sound, d.midi, py.toPy(d.a), d.la, py.toPy(d.l), d.ll); }; }
     else if (op === "sound") { const w = L.wanted(); r = { pj: L.set_sound(arg.i), wanted: w.toJs() }; w.destroy(); }
     else if (op === "key") { L.set_key(arg.key, arg.scale); const w = L.wanted(); r = { names: JSON.parse(L.names()).chords[0], wanted: w.toJs() }; w.destroy(); }
+    else if (op === "exact") { r = JSON.parse(L.chord_exact(JSON.stringify(arg.notes))); fill(); }
     else if (op === "chord") { r = JSON.parse(L.chord(arg.degree, JSON.stringify(arg.mods || {}))); fill(); }
     else if (op === "release") { L.release(); }
     else if (op === "mode") { L.set_mode(arg.mode); }

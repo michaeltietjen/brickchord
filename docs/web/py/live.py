@@ -122,6 +122,23 @@ class Live:
     def chord(self, degree, mods_json="{}"):
         mods = json.loads(mods_json) if isinstance(mods_json, str) else dict(mods_json)
         pc, iv, name = theory.build_chord(self.key, self.scale, int(degree), mods)
+        return self._play(pc, iv, name, int(degree))
+
+    def chord_exact(self, notes_json):
+        """Two or more MIDI keys together (an Orchid, a Gamma, a chord on a keyboard):
+        that exact chord, named and voiced like the buttons (main.py midi_tick)."""
+        notes = sorted(int(n) for n in json.loads(notes_json))
+        pc = notes[0] % 12
+        iv = sorted({(n - pc) % 12 for n in notes})
+        name = theory.chord_name(pc, iv, False, False, self.key, self.scale)
+        return self._play(pc, iv, name, self.midi_degree(notes[0]))
+
+    def midi_degree(self, note):
+        sc = theory.SCALES[self.scale]
+        pc = (int(note) - self.key) % 12
+        return min(range(7), key=lambda i: min((pc - sc[i]) % 12, (sc[i] - pc) % 12))
+
+    def _play(self, pc, iv, name, degree):
         notes, upper = theory.voice(pc, iv, self.prev, 0)
         core = set(notes) | {notes[1] + 12}
         extra = set()                       # what the play mode reaches for (main.py _play_voicing)
@@ -150,7 +167,7 @@ class Live:
         self.prev = upper
         self.e.post("chord", notes, snd, False)
         return json.dumps({"name": name, "ready": True, "standins": missing,
-                           "roman": theory.roman_for(int(degree), iv)})
+                           "roman": theory.roman_for(degree, iv)})
 
     def release(self):
         self.e.post("clear")

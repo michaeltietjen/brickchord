@@ -296,11 +296,34 @@ async function statLoop() {
   $("stat").textContent = "delay ≈ " + ms + " ms · dropouts " + s.under + (prog ? " · " + prog : "") + (MIDI ? " · " + MIDI : "") + (AC.sampleRate !== 22050 ? " · resampling from " + AC.sampleRate : "");
   setTimeout(statLoop, 400);
 }
-let MIDI = "";
+let MIDI = "", due = null, midiDeg = null, midiChord = null;
+const on = new Set();
+// One key plays the chord on that degree (or the note in Lead, the drone in Drone).
+// Two or more keys together play that exact chord, as on the handheld.
+function degreeOf(n) { const sc = SCALES[$("sScale").value], pc = (n - +$("sKey").value + 120) % 12;
+  let d = 0, best = 99; sc.forEach((s, i) => { const dd = Math.min((pc - s + 12) % 12, (s - pc + 12) % 12); if (dd < best) { best = dd; d = i; } }); return d; }
+async function midiNow() {
+  const notes = [...on].sort((x, y) => x - y);
+  if (notes.length >= 2 && MODE === "play") {
+    if (midiDeg !== null) { held = held.filter(x => x !== midiDeg); midiDeg = null; }
+    const key = notes.join(",");
+    if (key === midiChord) return;
+    midiChord = key;
+    const r = await rpc(AW, "exact", { notes });
+    $("big").textContent = r.name; $("sub").textContent = r.ready ? (r.roman || "") + " · from MIDI" : "sound still loading...";
+  } else if (notes.length) {
+    const d = degreeOf(notes[notes.length - 1]);
+    midiChord = null;
+    if (d !== midiDeg) { if (midiDeg !== null) held = held.filter(x => x !== midiDeg); midiDeg = d; press(d); }
+  } else {
+    if (midiDeg !== null) { const d = midiDeg; midiDeg = null; lift(d); }
+    if (midiChord !== null) { midiChord = null; rpc(AW, "release"); }
+  }
+}
 async function midi() {
   if (!navigator.requestMIDIAccess) { MIDI = "MIDI: not in this browser (use Chrome or Edge)"; return; }
   try {
-    const acc = await navigator.requestMIDIAccess(), on = new Map();
+    const acc = await navigator.requestMIDIAccess();
     const hook = (inp) => inp.onmidimessage = (m) => {
       const [st, a, b] = m.data, cmd = st & 0xf0;
       if (st === 0xF8 || st === 0xFE) return;               // clock and active sensing: not notes
@@ -308,10 +331,8 @@ async function midi() {
       if (cmd === 0xE0) { if (MODE === "lead") rpc(AW, "lead_mod", { bend: ((b << 7 | a) - 8192) / 8192, vib: 0 }); return; }
       if (cmd === 0xB0 && a === 1) { if (MODE === "lead") rpc(AW, "lead_mod", { bend: 0, vib: b / 127 }); return; }
       if (cmd !== 0x90 && cmd !== 0x80) return;
-      const sc = SCALES[$("sScale").value], pc = (a - +$("sKey").value + 120) % 12;
-      let d = 0, best = 99; sc.forEach((s, i) => { const dd = Math.min(Math.abs(s - pc), 12 - Math.abs(s - pc)); if (dd < best) { best = dd; d = i; } });
-      if (cmd === 0x90 && b > 0) { on.set(a, d); press(d); }
-      else { const dd = on.get(a); on.delete(a); if (dd !== undefined && ![...on.values()].includes(dd)) lift(dd); }
+      if (cmd === 0x90 && b > 0) on.add(a); else on.delete(a);
+      clearTimeout(due); due = setTimeout(midiNow, 35);     // a chord's notes arrive one by one
     };
     const scan = () => { const ins = [...acc.inputs.values()]; ins.forEach(hook);
       MIDI = ins.length ? "MIDI: " + ins.map(i => i.name).join(", ") : "MIDI: no keyboard found (plug one in)"; };
