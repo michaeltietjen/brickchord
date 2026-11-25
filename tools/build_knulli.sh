@@ -36,6 +36,8 @@ $NAME $VER for KNULLI
    or with a card reader): the $NAME folder, $SH and the images folder.
 2. On the device: Main menu > Game settings > Update gamelists. $NAME appears under Ports.
 3. On first launch, press each button and push each stick once so it learns your controls.
+   No analog sticks (the original Brick)? F1 and F2 stand in for them: tap to click a stick,
+   hold one and use the D-pad to push it. Settings > Global > Sticks switches this on or off.
 
 Logs: roms/ports/$NAME/$NAME.log. Source and issues: https://github.com/michaeltietjen/brickchord
 EOF
@@ -49,5 +51,6 @@ EOF
 build brickchord Brickchord.sh "" brickchord
 build bricklab Bricklab.sh lab bricklab
 build brickglide Brickglide.sh glide bricklab
-build brickchop Brickchop.sh chop bricklab
+# Brickchop is not released yet: WITH_CHOP=1 tools/build_knulli.sh builds it too
+[ "$WITH_CHOP" = 1 ] && build brickchop Brickchop.sh chop bricklab
 rm -rf "$WHL"
