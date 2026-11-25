@@ -58,6 +58,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
 .start{position:fixed;inset:0;background:rgba(228,226,220,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:9;text-align:center;padding:20px}
 .start b{font-size:30px;font-weight:900}
 [hidden]{display:none!important}
+.embed header .logo,.embed header .solo{display:none}
 @media (max-width:760px){.deck{grid-template-columns:1fr 1fr}.pads{grid-column:1/-1;order:-1;grid-template-columns:repeat(4,minmax(0,1fr))}.pad{height:78px}}
 </style>
 </head>
@@ -65,8 +66,8 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--plate);border:1px so
 <div class="start" id="start"><b>Brickchord live</b><p class="hint" id="startmsg">The Brick's own engine, playing in your browser. Loads about 10 MB the first time.</p><button class="btn primary" id="go">Start</button></div>
 
 <header>
-  <a class="logo" href="./">bricklab <span>web</span></a>
-  <span class="stat">BRICKCHORD LIVE</span>
+  <a class="logo" href="./#lab">bricklab <span>web</span></a>
+  <span class="stat solo">BRICKCHORD LIVE</span>
   <span class="stat" id="stat" style="margin-left:auto" role="status"></span>
 </header>
 
@@ -162,13 +163,14 @@ async function start() {
   names.bass.forEach(n => $("sBass").append(el("option", {value: n}, n)));
   names.delay_times.forEach((n, i) => $("sDlyT").append(el("option", {value: i}, n))); $("sDlyT").value = 2;
   for (let k = 0; k < 12; k++) $("sKey").append(el("option", {value: k}, NOTE_NAMES[k]));
-  $("sKey").value = 9;
+  $("sKey").value = SONG ? SONG.key : 9;
+  if (SONG) { if (SCALES[SONG.scale]) $("sScale").value = SONG.scale; $("iBpm").value = SONG.bpm; }
   buildRack();
   stick($("lstick"), leftStick); stick($("rstick"), (x, y) => rpc(AW, "right", { x, y }));
   setMode("play");
   await setKey(); await setSound(0);
   $("start").remove();
-  statLoop(); midi();
+  statLoop(); midi(); READY = true;
 }
 
 // ---------------------------------------------------------------- modes
@@ -360,6 +362,30 @@ document.addEventListener("keydown", (e) => {
   else if (e.code === "Tab") { e.preventDefault(); const ms = ["play", "lead", "drone"]; setMode(ms[(ms.indexOf(MODE) + 1) % 3]); }
 });
 document.addEventListener("keyup", (e) => { if (e.code in KEYS) lift(KEYS[e.code]); else if (MODS[MODE] && e.code in MODS[MODE]) setMod(MODS[MODE][e.code][0], false); });
+// ---------------------------------------------------------------- inside the app (index.html holds Lab and Chord as tabs)
+// Leaving the tab silences this page; coming back picks up the song's key, scale and tempo if they changed in Lab.
+const EMBED = window.parent !== window;
+if (EMBED) document.documentElement.classList.add("embed");
+let SONG = null, songSig = "", READY = false;
+async function followSong(song) {
+  const sig = song.key + " " + song.scale + " " + song.bpm;
+  if (sig === songSig) return;
+  songSig = sig; SONG = song;
+  if (!READY) return;                       // not started yet: start() applies it
+  $("sKey").value = song.key; if (SCALES[song.scale]) $("sScale").value = song.scale; $("iBpm").value = song.bpm;
+  await setKey(); if (beatOn) beat(true);
+}
+addEventListener("message", async (e) => {
+  if (e.origin !== location.origin || !e.data) return;
+  const m = e.data;
+  if (m.bl === "hide" && AC) {
+    if (MODE === "lead") rpc(AW, "lead_off"); else rpc(AW, "release");
+    held = []; mods = {}; on.clear(); for (const p of document.querySelectorAll(".pad.on")) p.classList.remove("on");
+    if (beatOn) beat(false);
+    AC.suspend();
+  }
+  if (m.bl === "show") { if (AC) AC.resume(); if (m.song) followSong(m.song); }
+});
 </script>
 </body>
 </html>

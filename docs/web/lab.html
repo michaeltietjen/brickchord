@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bricklab web: make songs for your handheld</title>
+<meta name="description" content="Build Bricklab songs in your browser with the handheld's own engine, then copy them to your TrimUI Brick, R36 or PortMaster device.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#16213f;--panel:#1e2d5a;--seam:#2b3c70;--deep:#0e1530;--ink:#ece4d6;--dim:#a3acc9;--teal:#2bb3b1;--amber:#ffb347;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Archivo,Helvetica,sans-serif}
+a{color:var(--teal)}
+button,select,input{font:inherit;color:inherit}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:12px 22px;background:var(--panel);border-bottom:1px solid var(--seam);position:sticky;top:0;z-index:5}
+.logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:20px;letter-spacing:-.4px;text-decoration:none;color:var(--ink)}
+.logo span{font-weight:500;color:var(--dim)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.btn{padding:9px 14px;border-radius:8px;border:1px solid var(--seam);background:transparent;cursor:pointer;font-family:var(--mono);font-size:13px}
+.btn:hover{border-color:var(--teal)}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:var(--deep);font-weight:600}
+.btn.amber{background:var(--amber);border-color:var(--amber);color:var(--deep);font-weight:600}
+.btn:disabled{opacity:.45;cursor:default}
+select,input[type=number],input[type=text]{background:var(--deep);border:1px solid var(--seam);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:13px}
+input[type=text]{min-width:0}
+label.f{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.5px}
+main{max-width:1440px;margin:0 auto;padding:20px 22px 60px;display:flex;flex-direction:column;gap:20px}
+.cap{font-family:var(--mono);font-size:12px;letter-spacing:1px;color:var(--dim);text-transform:uppercase}
+.pats{display:grid;grid-template-columns:repeat(16,minmax(0,1fr));gap:6px}
+.pats button{height:40px;border-radius:8px;border:1px solid var(--seam);background:transparent;font-family:var(--mono);font-size:12px;font-weight:600;cursor:pointer;color:var(--dim)}
+.pats button.has{background:#223265;color:var(--ink)}
+.pats button.on{background:var(--teal);color:var(--deep);border-color:var(--teal)}
+.tracks{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.tracks button{padding:9px 10px;border-radius:10px;border:1px solid var(--seam);background:transparent;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tracks button b{font-size:13px}
+.tracks button span{font-family:var(--mono);font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tracks button.on{border-color:var(--teal);background:#223265}
+.tracks button.muted b{text-decoration:line-through;opacity:.6}
+.panel{background:var(--panel);border-radius:14px;padding:16px}
+.settings{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end}
+.settings input[type=range]{width:110px;accent-color:var(--teal)}
+.gridwrap{background:var(--deep);border-radius:14px;padding:14px;overflow-x:auto}
+.grid{display:grid;gap:3px;min-width:max-content}
+.grid .lab{font-family:var(--mono);font-size:11px;color:var(--dim);padding-right:8px;display:flex;align-items:center;justify-content:flex-end;white-space:nowrap;position:sticky;left:0;background:var(--deep);z-index:1}
+.grid .lab.root{color:var(--ink)}
+.cell{width:26px;height:24px;border-radius:4px;border:0;padding:0;cursor:pointer;background:#1e2d5a}
+.cell.alt{background:#223265}
+.cell.on{background:var(--teal)}
+.cell.tail{background:#1f6f73}
+.cell.ph{box-shadow:inset 0 0 0 2px var(--amber)}
+.cell:focus-visible{outline:2px solid var(--amber)}
+.chain{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chain .item{display:flex;align-items:center;gap:6px;background:#223265;border-radius:10px;padding:6px 8px}
+.chain .item select,.chain .item input{padding:5px 6px}
+.chain .item input{width:56px}
+.x{border:0;background:transparent;color:var(--dim);cursor:pointer;font-size:16px;padding:4px 6px}
+.drop{border:2px dashed var(--seam);border-radius:12px;padding:16px;text-align:center;color:var(--dim);font-size:14px}
+.drop.over{border-color:var(--teal);color:var(--ink)}
+.status{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.status.err{color:#ff8a76}
+.two{display:flex;flex-wrap:wrap;gap:20px}
+.two>*{flex:1 1 420px;min-width:0}
+.hint{font-size:13px;color:var(--dim);line-height:1.5;margin:0}
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--seam);border-radius:14px;max-width:520px;padding:22px}
+dialog::backdrop{background:rgba(5,8,20,.6)}
+.boot{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:20;text-align:center;padding:20px}
+.boot b{font-size:26px;font-weight:800}
+.bar{width:280px;height:6px;border-radius:3px;background:var(--seam);overflow:hidden}
+.bar i{display:block;height:100%;width:30%;background:var(--teal);animation:slide 1.2s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-30%}100%{margin-left:100%}}
+.embed header .logo,.embed .solo{display:none}
+@media (max-width:820px){.pats{grid-template-columns:repeat(8,minmax(0,1fr))}.tracks{grid-template-columns:repeat(3,minmax(0,1fr))}header{position:static}}
+</style>
+</head>
+<body>
+<div class="boot" id="boot"><b>bricklab web</b><div class="bar"><i></i></div><div class="status" id="bootmsg">Loading the Brick's engine (about 10 MB, once)...</div></div>
+
+<header>
+  <a class="logo" href="../bricklab/"><svg width="22" height="22" viewBox="0 0 26 26" aria-hidden="true"><rect width="7" height="7" rx="1.5" fill="#2bb3b1"/><rect x="9.5" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect x="19" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect y="9.5" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect x="9.5" y="9.5" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect x="19" y="9.5" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect y="19" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect x="9.5" y="19" width="7" height="7" rx="1.5" fill="#ece4d6"/><rect x="19" y="19" width="7" height="7" rx="1.5" fill="#ece4d6"/></svg>bricklab <span>web</span></a>
+  <div class="row">
+    <button class="btn" id="bNew">New</button>
+    <label class="btn" style="cursor:pointer">Open<input type="file" id="fOpen" accept=".json" hidden></label>
+    <select id="sDemo" aria-label="Open a demo"><option value="">Demos...</option></select>
+    <a class="btn solo" href="./#chord" style="text-decoration:none">Play live</a>
+  </div>
+  <div class="row" style="margin-left:auto">
+    <button class="btn primary" id="bPlay">&#9654; Play pattern</button>
+    <button class="btn" id="bPlaySong">&#9654; Play song</button>
+    <button class="btn" id="bSave">Save .json</button>
+    <button class="btn amber" id="bPack">Download for the Brick</button>
+  </div>
+</header>
+
+<main>
+  <section class="row" aria-label="Song" style="gap:12px 16px;align-items:flex-end">
+    <label class="f" style="flex:1 1 240px">SONG NAME<input type="text" id="iName" maxlength="40"></label>
+    <label class="f">BPM<input type="number" id="iBpm" min="40" max="240" style="width:80px"></label>
+    <label class="f">KEY<select id="sKey"></select></label>
+    <label class="f">SCALE<select id="sScale"></select></label>
+    <span class="status" id="status" role="status" style="flex-basis:100%"></span>
+  </section>
+
+  <section aria-label="Patterns" style="display:flex;flex-direction:column;gap:8px">
+    <div class="row" style="justify-content:space-between"><span class="cap">Patterns</span>
+      <label class="f" style="flex-direction:row;align-items:center;gap:8px">LENGTH<select id="sBars"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="8">8 bars</option></select></label></div>
+    <div class="pats" id="pats"></div>
+  </section>
+
+  <section aria-label="Tracks" style="display:flex;flex-direction:column;gap:10px">
+    <div class="tracks" id="tracks"></div>
+    <div class="panel settings" id="tset"></div>
+  </section>
+
+  <section aria-label="Grid" style="display:flex;flex-direction:column;gap:8px">
+    <div class="row" style="justify-content:space-between"><span class="cap" id="gridcap">Grid</span>
+      <div class="row" id="gridopts"></div></div>
+    <div class="gridwrap"><div class="grid" id="grid"></div></div>
+  </section>
+
+  <div class="two">
+    <section class="panel" aria-label="Song chain" style="display:flex;flex-direction:column;gap:12px">
+      <div class="row" style="justify-content:space-between"><span class="cap">Song chain</span>
+        <label class="f" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="cSongOn"> SONG MODE ON</label></div>
+      <div class="chain" id="chain"></div>
+      <div class="row"><button class="btn" id="bAddRow">+ Add pattern</button><span class="status" id="songlen"></span></div>
+    </section>
+    <section class="panel" aria-label="Samples" style="display:flex;flex-direction:column;gap:12px">
+      <span class="cap">Samples</span>
+      <div class="drop" id="drop">Drop WAV, AIFF or MP3 files here, or <label style="color:var(--teal);cursor:pointer"><u>choose files</u><input type="file" id="fSmp" accept="audio/*,.wav,.aif,.aiff,.mp3" multiple hidden></label>.<br><small>Up to 12 seconds each. They become sounds for Sample tracks and go into the download.</small></div>
+      <div class="status" id="smplist"></div>
+    </section>
+  </div>
+</main>
+
+<dialog id="dPack">
+  <h2 style="margin:0 0 10px;font-size:22px">Download for the Brick</h2>
+  <p class="hint">This zip holds the song and any samples you added. Unzip it, then copy the <code>bricklab</code> folder over <code>roms/ports/bricklab</code> on the SD card (KNULLI) or into <code>ports</code> (R36). On the handheld, open Settings &gt; Global &gt; Song and pick the slot.</p>
+  <label class="f" style="margin:14px 0">SONG SLOT ON THE HANDHELD<select id="sSlot"></select></label>
+  <p class="hint" style="color:var(--amber)">A song already in that slot is replaced.</p>
+  <div class="row" style="margin-top:16px;justify-content:flex-end"><button class="btn" id="bPackCancel">Cancel</button><button class="btn amber" id="bPackGo">Download zip</button></div>
+</dialog>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- constants (match the app)
+const NP = 16, NT = 6, DT = 0;
+const NOTE_NAMES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const SCALES = {Major:[0,2,4,5,7,9,11], Minor:[0,2,3,5,7,8,10], Dorian:[0,2,3,5,7,9,10], Mixolydian:[0,2,4,5,7,9,10]};
+const FX_DEFAULTS = {"Drive":[0.4,3],"Lo-fi":[0.4,3],"Chorus":[0.5,5],"Flanger":[0.5,6],"Vibrato":[0.3,0],"Tremolo":[0.5,1],"Gate":[0.7,0],"Auto-Pan":[0.6,4],"Wide":[0.6,3],"Filter LFO":[0.6,5],"Cloud":[0.5,2]};
+const LANE_NAME = {kick:"Kick",snare:"Snare",clap:"Clap",rim:"Rim",tom:"Tom",hat:"Hat",ohat:"Open hat",shk:"Shaker"};
+const MACHINE_NAME = {drums:"Drums",chord:"Chord",lead:"Lead",bass:"Bass",drone:"Drone",macro:"Macro",sample:"Sample"};
+const BASE_OCT = {bass:36, drone:48, chord:60, lead:60, macro:60, sample:60};
+const STARTERS = [["drums",0],["bass",0],["chord",0],["lead",0],["drone",0],["chord",10]];
+let CAT = null;                 // catalog from the engine
+const SAMPLES = {};             // name -> WAV bytes the user added (go into the zip)
+
+// ---------------------------------------------------------------- engine worker
+const W = new Worker("worker.js?t=" + Date.now());      // never a stale engine thread
+let reqId = 0; const waiting = {};
+W.onmessage = (e) => { const w = waiting[e.data.id]; delete waiting[e.data.id]; if (!w) return; e.data.ok ? w.res(e.data.out) : w.rej(new Error(e.data.err)); };
+function ask(op, arg, transfer) { const id = ++reqId; return new Promise((res, rej) => { waiting[id] = {res, rej}; W.postMessage({id, op, arg}, transfer || []); }); }
+
+// ---------------------------------------------------------------- song model (the app's format)
+function newDrum() { const lanes = {}; for (const n of CAT.lanes) lanes[n] = [1.0, false, 0]; return {kit:"909",swing:0,swres:16,beat:0,acc:1.35,ghost:0.4,human:0,choke:true,lanes}; }
+function newTrack(k) {
+  const rack = {}; for (const n of CAT.fx) rack[n] = [false, FX_DEFAULTS[n][0], FX_DEFAULTS[n][1]];
+  const t = {machine: k === DT ? "drums" : "chord", smp:{}, mac:{}, locks:{}, name:null, patch:null, tone:0, res:0, pj:null,
+             vol:0.85, pan:0, rs:0.25, ds:0, bus:0, mute:false, rack, flt:[0,0], ev:[]};
+  if (k === DT) Object.assign(t, {name:"Drums", rs:0, vol:0.9, drum:newDrum()});
+  return t;
+}
+function blankSong() {
+  return {v:1, demo:"New song", bpm:120, key:9, scale:"Minor", bars:Array(NP).fill(2),
+          pats:Array.from({length:NP}, () => ({tracks:Array.from({length:NT}, (_, k) => newTrack(k))})),
+          song:[[0,1]], song_on:false, cur:0, kit_all:false};
+}
+function normalize(d) {
+  const s = blankSong();
+  for (const f of ["demo","bpm","key","scale","song","song_on","cur","kit_all"]) if (d[f] !== undefined) s[f] = d[f];
+  if (Array.isArray(d.bars)) d.bars.slice(0, NP).forEach((b, p) => { if ([1,2,4,8].includes(b)) s.bars[p] = b; });
+  (d.pats || []).slice(0, NP).forEach((pd, p) => ((pd && pd.tracks) || []).slice(0, NT).forEach((sv, k) => {
+    if (!sv || typeof sv !== "object") return;
+    const t = s.pats[p].tracks[k];
+    for (const f of Object.keys(sv)) t[f] = sv[f];
+    t.ev = Array.isArray(sv.ev) ? sv.ev : [];
+    if (k === DT && !t.drum) t.drum = newDrum();
+  }));
+  if (!SCALES[s.scale]) s.scale = "Minor";
+  return s;
+}
+let S = null, P = 0, T = 1, NOTELEN = 1, OCT = {};
+
+async function setSound(p, k, machine, i) {
+  const t = S.pats[p].tracks[k];
+  t.machine = machine; t.patch = i;
+  const r = await ask("patch", {machine, i, smp: machine === "sample" ? t.smp : null});
+  t.pj = r.pj; t.name = r.name;
+}
+async function starters(p) {
+  for (let k = 1; k < NT; k++) { const t = S.pats[p].tracks[k]; if (!t.pj) await setSound(p, k, STARTERS[k][0], STARTERS[k][1]); }
+}
+
+// ---------------------------------------------------------------- UI helpers
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (v !== undefined && v !== null) e.setAttribute(k, v); } for (const c of kids) if (c != null) e.append(c); return e; }
+function status(msg, err) { const s = $("status"); s.textContent = msg || ""; s.className = "status" + (err ? " err" : ""); }
+const trk = () => S.pats[P].tracks[T];
+const steps = () => S.bars[P] * 16;
+const hasNotes = (p) => S.pats[p].tracks.some(t => t.ev && t.ev.length);
+
+function drawAll() { drawHead(); drawPats(); drawTracks(); drawSettings(); drawGrid(); drawChain(); }
+function drawHead() {
+  $("iName").value = S.demo || ""; $("iBpm").value = Math.round(S.bpm); $("sKey").value = S.key % 12; $("sScale").value = S.scale;
+  $("sBars").value = S.bars[P];
+}
+function drawPats() {
+  const box = $("pats"); box.replaceChildren();
+  for (let p = 0; p < NP; p++) box.append(el("button", {class: (p === P ? "on " : "") + (hasNotes(p) ? "has" : ""), "aria-pressed": p === P,
+    onclick: async () => { P = p; S.cur = p; await starters(p); drawAll(); edited(); }}, "A" + String(p + 1).padStart(2, "0")));
+}
+function drawTracks() {
+  const box = $("tracks"); box.replaceChildren();
+  S.pats[P].tracks.forEach((t, k) => box.append(el("button", {class: (k === T ? "on " : "") + (t.mute ? "muted" : ""), "aria-pressed": k === T, onclick: () => { T = k; drawTracks(); drawSettings(); drawGrid(); }},
+    el("b", {}, "T" + (k + 1) + " " + MACHINE_NAME[t.machine]), el("span", {}, k === DT ? (t.drum ? t.drum.kit + " kit" : "") : (t.name || "no sound")))));
+}
+function slider(label, key, min, max, step) {
+  const t = trk();
+  const out = el("span", {}, (+t[key]).toFixed(2));
+  const inp = el("input", {type:"range", min, max, step, value:t[key], "aria-label": label, oninput: (e) => { t[key] = +e.target.value; out.textContent = (+t[key]).toFixed(2); edited(); }});
+  return el("label", {class:"f"}, label.toUpperCase() + " ", out, inp);
+}
+function drawSettings() {
+  const t = trk(), box = $("tset"); box.replaceChildren();
+  if (T === DT) {
+    const kit = el("select", {"aria-label":"Kit", onchange: (e) => { t.drum.kit = e.target.value; drawTracks(); edited(); }});
+    for (const k of CAT.kits) kit.append(el("option", {value:k}, k));
+    kit.value = t.drum.kit;
+    const sw = el("input", {type:"range", min:0, max:0.5, step:0.01, value:t.drum.swing, "aria-label":"Swing", oninput:(e) => { t.drum.swing = +e.target.value; edited(); }});
+    box.append(el("label", {class:"f"}, "KIT", kit), el("label", {class:"f"}, "SWING", sw));
+  } else {
+    const mc = el("select", {"aria-label":"Machine", onchange: async (e) => { await setSound(P, T, e.target.value, 0); delete OCT[T]; drawTracks(); drawSettings(); drawGrid(); edited(); }});
+    for (const m of ["chord","lead","bass","drone","macro","sample"]) mc.append(el("option", {value:m}, MACHINE_NAME[m]));
+    mc.value = t.machine;
+    const names = t.machine === "sample" ? CAT.samples : CAT[t.machine];
+    const snd = el("select", {"aria-label":"Sound", onchange: async (e) => { await setSound(P, T, t.machine, +e.target.value); drawTracks(); edited(); }});
+    (names.length ? names : ["(add samples below)"]).forEach((n, i) => snd.append(el("option", {value:i}, n)));
+    snd.value = t.patch || 0;
+    box.append(el("label", {class:"f"}, "MACHINE", mc), el("label", {class:"f"}, "SOUND", snd));
+  }
+  box.append(slider("Level", "vol", 0, 1, 0.01), slider("Pan", "pan", -1, 1, 0.05), slider("Reverb", "rs", 0, 1, 0.01), slider("Delay", "ds", 0, 1, 0.01));
+  const mute = el("input", {type:"checkbox", onchange:(e) => { t.mute = e.target.checked; drawTracks(); edited(); }}); mute.checked = !!t.mute;
+  box.append(el("label", {class:"f", style:"flex-direction:row;align-items:center;gap:6px"}, mute, "MUTE"));
+  const copy = el("button", {class:"btn", onclick: copyTo}, "Copy pattern to next");
+  const clr = el("button", {class:"btn", onclick: () => { t.ev = []; drawGrid(); drawPats(); edited(); }}, "Clear track");
+  box.append(el("div", {class:"row", style:"margin-left:auto"}, clr, copy));
+}
+function copyTo() {
+  const q = (P + 1) % NP;
+  S.pats[q] = JSON.parse(JSON.stringify(S.pats[P])); S.bars[q] = S.bars[P];
+  P = q; S.cur = q; drawAll(); status("Copied to A" + String(q + 1).padStart(2, "0")); edited();
+}
+
+// ---------------------------------------------------------------- the grid
+let PH = -1;                     // playhead step
+function rowsFor(t) {
+  if (T === DT) return CAT.lanes.map(n => ({lane:n, label:LANE_NAME[n] || n}));
+  if (OCT[T] === undefined) {               // open where the track's notes are
+    const ms = t.ev.filter(e => e[1] === "n").map(e => e[2]);
+    OCT[T] = ms.length ? 12 * Math.floor((Math.min(...ms) - (S.key % 12)) / 12) : (BASE_OCT[t.machine] ?? 60);
+  }
+  const sc = SCALES[S.scale], base = OCT[T] + (S.key % 12);
+  const rows = [];
+  for (let i = 14; i >= 0; i--) { const deg = i % 7, oct = Math.floor(i / 7); const m = base + sc[deg] + 12 * oct;
+    rows.push({midi:m, label: NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1), root: deg === 0}); }
+  return rows;
+}
+function drawGrid() {
+  const t = trk(), n = steps(), g = $("grid"); g.replaceChildren();
+  g.style.gridTemplateColumns = "64px repeat(" + n + ", 26px)";
+  $("gridcap").textContent = "Grid: A" + String(P + 1).padStart(2, "0") + ", T" + (T + 1) + " " + MACHINE_NAME[t.machine] + ", " + S.bars[P] + (S.bars[P] > 1 ? " bars" : " bar");
+  const opts = $("gridopts"); opts.replaceChildren();
+  if (T !== DT) {
+    const len = el("select", {"aria-label":"Note length", onchange:(e) => { NOTELEN = +e.target.value; }});
+    for (const [v, l] of [[1,"1 step"],[2,"2 steps"],[4,"1 beat"],[8,"2 beats"],[16,"1 bar"],[32,"2 bars"]]) len.append(el("option", {value:v}, l));
+    len.value = NOTELEN;
+    opts.append(el("label", {class:"f", style:"flex-direction:row;align-items:center;gap:8px"}, "NEW NOTES", len),
+      el("button", {class:"btn", onclick:() => { OCT[T] += 12; drawGrid(); }}, "Octave +"),
+      el("button", {class:"btn", onclick:() => { OCT[T] -= 12; drawGrid(); }}, "Octave -"));
+  }
+  const rows = rowsFor(t);
+  // which steps each row covers (notes can last several steps)
+  for (const r of rows) {
+    g.append(el("div", {class:"lab" + (r.root ? " root" : "")}, r.label));
+    const cover = new Array(n).fill(0);      // 0 off, 1 start, 2 tail
+    for (const e of t.ev) {
+      const s = Math.round(e[0]) % n;
+      if (T === DT ? (e[1] === "d" && e[2] === r.lane) : (e[1] === "n" && e[2] === r.midi)) {
+        cover[s] = 1;
+        if (T !== DT && e[5]) for (let j = 1; j < Math.round(e[5]) && s + j < n; j++) if (!cover[s + j]) cover[s + j] = 2;
+      }
+    }
+    for (let s = 0; s < n; s++) {
+      const cls = "cell" + (Math.floor(s / 4) % 2 ? " alt" : "") + (cover[s] === 1 ? " on" : cover[s] === 2 ? " tail" : "") + (s === PH ? " ph" : "");
+      g.append(el("button", {class:cls, "data-s":s, "aria-label": r.label + " step " + (s + 1) + (cover[s] === 1 ? " on" : ""), onclick: () => toggle(r, s)}));
+    }
+  }
+}
+function toggle(r, s) {
+  const t = trk(), n = steps();
+  const hit = (e) => Math.round(e[0]) % n === s && (T === DT ? (e[1] === "d" && e[2] === r.lane) : (e[1] === "n" && e[2] === r.midi));
+  if (t.ev.some(hit)) t.ev = t.ev.filter(e => !hit(e));
+  else if (T === DT) t.ev.push([s, "d", r.lane, +(CAT.drum_gain[r.lane] || 0.75).toFixed(3), CAT.drum_pan[r.lane] || 0, null, 0.02]);
+  else t.ev.push([s, "n", r.midi, 0.8, 0.0, NOTELEN - 0.1, t.machine === "drone" ? 1.2 : 0.3]);
+  drawGrid(); drawPats(); edited();
+}
+
+// ---------------------------------------------------------------- song chain
+function drawChain() {
+  const box = $("chain"); box.replaceChildren();
+  S.song.forEach((row, i) => {
+    const ps = el("select", {"aria-label":"Pattern", onchange:(e) => { row[0] = +e.target.value; chainLen(); edited(); }});
+    for (let p = 0; p < NP; p++) ps.append(el("option", {value:p}, "A" + String(p + 1).padStart(2, "0")));
+    ps.value = row[0];
+    const rep = el("input", {type:"number", min:1, max:64, value:row[1], "aria-label":"Repeats", onchange:(e) => { row[1] = Math.max(1, +e.target.value || 1); chainLen(); edited(); }});
+    box.append(el("div", {class:"item"}, ps, "×", rep, el("button", {class:"x", "aria-label":"Remove", onclick:() => { if (S.song.length > 1) { S.song.splice(i, 1); drawChain(); edited(); } }}, "×")));
+  });
+  $("cSongOn").checked = !!S.song_on; chainLen();
+}
+function chainLen() {
+  const st = S.song.reduce((a, r) => a + S.bars[r[0]] * 16 * r[1], 0), sec = st * 15 / S.bpm;
+  $("songlen").textContent = (st / 16) + " bars · " + Math.floor(sec / 60) + ":" + String(Math.round(sec % 60)).padStart(2, "0");
+}
+
+// ---------------------------------------------------------------- playback (rendered by the Brick's engine)
+let AC = null, SRC = null, playing = null, t0 = 0, loopSec = 0, renderTok = 0;
+async function render(mode) {
+  const song = JSON.parse(JSON.stringify(S));
+  const stepSec = 15 / S.bpm;
+  if (mode === "pattern") {
+    song.song_on = false; song.cur = P;
+    loopSec = S.bars[P] * 16 * stepSec;
+    return {r: await ask("render", {song, secs: loopSec * 2, tail: 0}), loop:[loopSec, loopSec * 2]};
+  }
+  song.song_on = true;
+  return {r: await ask("render", {song, tail: 2.0}), loop:null};
+}
+async function play(mode, keepPos) {
+  AC = AC || new AudioContext();
+  if (AC.state === "suspended") await AC.resume();
+  const tok = ++renderTok;
+  status(keepPos ? "Updating..." : "Rendering with the Brick's engine...");
+  let res;
+  try { res = await render(mode); } catch (e) { status("Render failed: " + e.message, true); return; }
+  if (tok !== renderTok) return;
+  const {r, loop} = res;
+  const buf = AC.createBuffer(2, r.left.length, r.sr);
+  buf.copyToChannel(r.left, 0); buf.copyToChannel(r.right, 1);
+  // A pattern renders twice and loops the second pass, so reverb and delay tails
+  // carry over the loop point. After an edit it picks up where the old one was.
+  let offset = 0, phase = 0;
+  if (keepPos && SRC && playing === mode && loop) { phase = (AC.currentTime - t0) % loopSec; offset = loop[0] + phase; }
+  stopSrc();
+  SRC = AC.createBufferSource(); SRC.buffer = buf; SRC.connect(AC.destination);
+  if (loop) { SRC.loop = true; SRC.loopStart = loop[0]; SRC.loopEnd = loop[1]; }
+  SRC.start(0, offset);
+  t0 = AC.currentTime - phase;
+  playing = mode;
+  SRC.onended = () => { if (playing === mode && !loop) stop(); };
+  status((mode === "pattern" ? "Playing A" + String(P + 1).padStart(2, "0") : "Playing the song") + " · rendered in " + r.ms + " ms");
+  setButtons(); tickPH();
+}
+function stopSrc() { if (SRC) { SRC.onended = null; try { SRC.stop(); } catch (e) {} SRC = null; } }
+function stop() { renderTok++; stopSrc(); playing = null; PH = -1; if (S) drawGrid(); setButtons(); status(""); }
+function setButtons() { $("bPlay").textContent = playing === "pattern" ? "■ Stop" : "▶ Play pattern"; $("bPlaySong").textContent = playing === "song" ? "■ Stop" : "▶ Play song"; }
+function tickPH() {
+  if (!playing) return;
+  const stepSec = 15 / S.bpm;
+  let s;
+  if (playing === "pattern") s = Math.floor(((AC.currentTime - t0) % loopSec) / stepSec);
+  else s = -1;
+  if (s !== PH) { PH = s; for (const c of document.querySelectorAll(".cell.ph")) c.classList.remove("ph"); if (s >= 0) for (const c of document.querySelectorAll('.cell[data-s="' + s + '"]')) c.classList.add("ph"); }
+  requestAnimationFrame(tickPH);
+}
+let editTimer = null;
+function edited() { save(); if (playing === "pattern") { clearTimeout(editTimer); editTimer = setTimeout(() => play("pattern", true), 350); } }
+
+// ---------------------------------------------------------------- files
+function save() { try { localStorage.setItem("bricklab-web-song", JSON.stringify(S)); } catch (e) {} tellShell(); }
+function download(name, blob) { const a = el("a", {href: URL.createObjectURL(blob), download: name}); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+function fileName() { return (S.demo || "song").replace(/[^A-Za-z0-9 _-]/g, "").trim().replace(/\s+/g, "_") || "song"; }
+function songJSON() { const s = JSON.parse(JSON.stringify(S)); s.cur = P; return JSON.stringify(s); }
+
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zip(files) {                      // stored (no compression): small and dependency-free
+  const enc = new TextEncoder(), parts = [], cen = []; let off = 0;
+  for (const [name, data] of files) {
+    const nm = enc.encode(name), crc = crc32(data), h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(8, 0, true); h.setUint32(14, crc, true);
+    h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nm.length, true);
+    parts.push(new Uint8Array(h.buffer), nm, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true);
+    c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    cen.push(new Uint8Array(c.buffer), nm); off += 30 + nm.length + data.length;
+  }
+  const size = cen.reduce((a, b) => a + b.length, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...cen, new Uint8Array(e.buffer)], {type:"application/zip"});
+}
+function pack(slot) {
+  const enc = new TextEncoder(), files = [];
+  const path = slot === 1 ? "bricklab/brickchord_song.json" : "bricklab/songs/song_" + slot + ".json";
+  files.push([path, enc.encode(songJSON())]);
+  const used = new Set();
+  for (const p of S.pats) for (const t of p.tracks) if (t.machine === "sample" && t.pj) { try { used.add(JSON.parse(t.pj).sample); } catch (e) {} }
+  for (const [n, b] of Object.entries(SAMPLES)) if (used.has(n)) files.push(["bricklab/samples/" + n, b]);
+  files.push(["bricklab/songs/README-" + fileName() + ".txt", enc.encode("Made with Bricklab web. Song slot " + slot + ". Open it on the handheld: Settings > Global > Song.\n")]);
+  download(fileName() + "-slot" + slot + ".zip", zip(files));
+  status("Downloaded " + fileName() + " for slot " + slot + (files.length > 2 ? " with " + (files.length - 2) + " sample(s)" : ""));
+}
+
+// samples: decode anything the browser can play, store as 16-bit WAV at 44.1 kHz
+function wav16(ch, sr) {
+  const n = ch[0].length, nc = ch.length, b = new DataView(new ArrayBuffer(44 + n * nc * 2));
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) b.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); b.setUint32(4, 36 + n * nc * 2, true); w(8, "WAVEfmt "); b.setUint32(16, 16, true); b.setUint16(20, 1, true);
+  b.setUint16(22, nc, true); b.setUint32(24, sr, true); b.setUint32(28, sr * nc * 2, true); b.setUint16(32, nc * 2, true); b.setUint16(34, 16, true);
+  w(36, "data"); b.setUint32(40, n * nc * 2, true);
+  let o = 44; for (let i = 0; i < n; i++) for (let c = 0; c < nc; c++) { b.setInt16(o, Math.max(-1, Math.min(1, ch[c][i])) * 32767, true); o += 2; }
+  return new Uint8Array(b.buffer);
+}
+async function addSamples(list) {
+  AC = AC || new AudioContext();
+  for (const f of list) {
+    try {
+      const raw = await AC.decodeAudioData(await f.arrayBuffer());
+      const secs = Math.min(raw.duration, 12), oc = new OfflineAudioContext(Math.min(2, raw.numberOfChannels), Math.ceil(secs * 44100), 44100);
+      const s = oc.createBufferSource(); s.buffer = raw; s.connect(oc.destination); s.start();
+      const out = await oc.startRendering();
+      const ch = []; for (let c = 0; c < out.numberOfChannels; c++) ch.push(out.getChannelData(c));
+      const name = f.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 40) + ".wav";
+      const bytes = wav16(ch, 44100);
+      SAMPLES[name] = bytes;
+      const r = await ask("sample", {name, bytes: bytes.slice().buffer});
+      CAT = r.catalog;
+      status("Added " + name + (raw.duration > 12 ? " (cut to 12 s)" : ""));
+    } catch (e) { status("Couldn't read " + f.name + ": " + e.message, true); }
+  }
+  $("smplist").textContent = Object.keys(SAMPLES).length ? "Yours: " + Object.keys(SAMPLES).join(", ") : "";
+  drawSettings();
+}
+
+// ---------------------------------------------------------------- wiring
+async function load(data) { stop(); S = normalize(data); P = S.cur % NP; T = 1; OCT = {}; await starters(P); drawAll(); save(); }
+async function boot() {
+  for (let k = 0; k < 12; k++) $("sKey").append(el("option", {value:k}, NOTE_NAMES[k]));
+  for (const sc of Object.keys(SCALES)) $("sScale").append(el("option", {value:sc}, sc));
+  for (let i = 1; i <= 8; i++) $("sSlot").append(el("option", {value:i}, "Song " + i + (i === 1 ? " (the first song)" : "")));
+  $("sSlot").value = 2;
+  try { const r = await ask("init"); CAT = r.catalog; }
+  catch (e) { $("bootmsg").textContent = "The engine didn't load: " + e.message + ". Try reloading the page."; $("bootmsg").className = "status err"; return; }
+  try { const man = await (await fetch("manifest.json")).json(); for (const d of man.demos) $("sDemo").append(el("option", {value:d.file}, d.name)); } catch (e) {}
+  let saved = null; try { saved = JSON.parse(localStorage.getItem("bricklab-web-song")); } catch (e) {}
+  await load(saved || blankSong());
+  $("boot").remove();
+}
+$("bNew").onclick = () => { if (confirmLose()) load(blankSong()); };
+function confirmLose() { return !S.pats.some((p, i) => hasNotes(i)) || window.confirm("Start a new song? Save this one first if you want to keep it."); }
+$("fOpen").onchange = async (e) => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; try { await load(JSON.parse(await f.text())); status("Opened " + f.name); } catch (err) { status("That file isn't a Bricklab song.", true); } };
+$("sDemo").onchange = async (e) => { const f = e.target.value; e.target.value = ""; if (!f) return; try { await load(await (await fetch("demos/" + f)).json()); status("Demo loaded. Save it under a new name to keep your changes."); } catch (err) { status("Demo failed to load.", true); } };
+$("iName").oninput = (e) => { S.demo = e.target.value; save(); };
+$("iBpm").onchange = (e) => { S.bpm = Math.max(40, Math.min(240, +e.target.value || 120)); chainLen(); edited(); };
+$("sKey").onchange = (e) => { S.key = +e.target.value; drawGrid(); save(); };
+$("sScale").onchange = (e) => { S.scale = e.target.value; drawGrid(); save(); };
+$("sBars").onchange = (e) => { S.bars[P] = +e.target.value; drawGrid(); chainLen(); edited(); };
+$("cSongOn").onchange = (e) => { S.song_on = e.target.checked; save(); };
+$("bAddRow").onclick = () => { S.song.push([P, 1]); drawChain(); edited(); };
+$("bPlay").onclick = () => playing === "pattern" ? stop() : play("pattern");
+$("bPlaySong").onclick = () => playing === "song" ? stop() : play("song");
+$("bSave").onclick = () => { download(fileName() + ".json", new Blob([songJSON()], {type:"application/json"})); status("Saved " + fileName() + ".json"); };
+$("bPack").onclick = () => $("dPack").showModal();
+$("bPackCancel").onclick = () => $("dPack").close();
+$("bPackGo").onclick = () => { $("dPack").close(); pack(+$("sSlot").value); };
+$("fSmp").onchange = (e) => { addSamples([...e.target.files]); e.target.value = ""; };
+const drop = $("drop");
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); addSamples([...e.dataTransfer.files]); });
+document.addEventListener("keydown", (e) => { if (e.code === "Space" && !["INPUT","SELECT","TEXTAREA"].includes(document.activeElement.tagName)) { e.preventDefault(); playing ? stop() : play("pattern"); } });
+// ---------------------------------------------------------------- inside the app (index.html holds Lab and Chord as tabs)
+const EMBED = window.parent !== window;
+if (EMBED) document.documentElement.classList.add("embed");
+function tellShell() { if (EMBED && S) parent.postMessage({ bl: "song", song: { key: S.key % 12, scale: S.scale, bpm: Math.round(S.bpm) } }, location.origin); }
+addEventListener("message", (e) => { if (e.origin === location.origin && e.data && e.data.bl === "hide" && playing) stop(); });
+boot();
+</script>
+</body>
+</html>
