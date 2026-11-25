@@ -5,6 +5,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <set>
 #include "core/Engine.h"
+#include "core/Patterns.h"
 
 class BricklabStudioProcessor : public juce::AudioProcessor, private juce::Timer {
 public:
@@ -53,12 +54,15 @@ private:
     void timerCallback() override;            // follows sound, key and scale changes (message thread)
     void applySoundAndKey();
     void playHeld(int pos);                   // MIDI: what the held keys ask for
-    void queueOut(bool on, int pos);          // MIDI out: the chord just started (or let go)
+    void queueOut(bool on, int pos);          // a chord just started (or was let go): for Patterns
 
-    struct OutEvent { int pos; std::vector<std::pair<int, int>> on; };   // (channel, note); empty = let go
+    struct ChordEvent { int pos; std::vector<int> notes; };   // notes empty = let go
     juce::SpinLock outLock;
-    std::vector<OutEvent> outQueue;           // filled by the page and by playHeld, sent from processBlock
-    std::vector<std::pair<int, int>> sounding; // notes we sent on and have not sent off yet (audio thread)
+    std::vector<ChordEvent> outQueue;         // filled by the page and by playHeld, read in processBlock
+    brick::Patterns patterns;                 // play mode and bass mode: chords into note events
+    std::vector<brick::NoteEvent> events;
+    std::set<std::pair<int, int>> sounding;   // MIDI notes sent on and not off yet
+    int64_t clock = 0, nextStep = 0, stepIndex = 0;   // the free-running 16th clock (when the host isn't playing)
 
     brick::NoteCache cache;
     brick::Player player{cache};

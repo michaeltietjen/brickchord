@@ -59,3 +59,13 @@ inst.startNote(64, withVelocity: 100, onChannel: 0)
 run(1.0, "sound off, one key (E)")
 inst.stopNote(64, onChannel: 0)
 run(1.0, "released")
+param("Built-in sound")?.value = 1
+for (mode, bass, label) in [(7, 0, "Arp 1/8 Up, Synth bass"), (1, 3, "Strum Folk, Walk bass"), (5, 6, "Harp Up, no bass")] {
+    param("Play mode")?.value = AUValue(mode)
+    param("Bass")?.value = AUValue(bass)
+    run(0.2, "settle")
+    inst.startNote(62, withVelocity: 100, onChannel: 0)
+    run(2.0, label as String)
+    inst.stopNote(62, onChannel: 0)
+    run(1.6, "released")
+}

@@ -58,13 +58,18 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     }
     key.addItemList({"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 1);
     scale.addItemList({"Major", "Minor", "Dorian", "Mixolydian"}, 1);
-    for (auto* c : {&sound, &key, &scale}) addAndMakeVisible(c);
-    addAndMakeVisible(bass);
+    for (int i = 0; i < brick::kNumPlayModes; ++i) mode.addItem(brick::kPlayModes[i], i + 1);
+    arpOct.addItemList({"1 oct", "2 oct", "3 oct", "4 oct"}, 1);
+    for (int i = 0; i < brick::kNumBassModes; ++i) bassMode.addItem(brick::kBassModes[i], i + 1);
+    for (auto* c : {&sound, &key, &scale, &mode, &arpOct, &bassMode}) addAndMakeVisible(c);
+    modeL.setText("Play", juce::dontSendNotification);
+    arpL.setText("Arp", juce::dontSendNotification);
+    bassL.setText("Bass", juce::dontSendNotification);
+    for (auto* l : {&modeL, &arpL, &bassL}) { l->setColour(juce::Label::textColourId, dim); addAndMakeVisible(l); }
     addAndMakeVisible(internal);
     addAndMakeVisible(midiOut);
-    outNote.setText(proc.kMidiFx ? "Sends its chords to the instrument after it: chords on channel 1, bass on channel 2"
-                                 : "MIDI out plays your other instruments too: chords on channel 1, bass on channel 2",
-                    juce::dontSendNotification);
+    outNote.setText("MIDI: chords ch 1, bass ch 2", juce::dontSendNotification);
+    outNote.setJustificationType(juce::Justification::centredRight);
     outNote.setColour(juce::Label::textColourId, dim);
     addAndMakeVisible(outNote);
     for (auto* s : {&space, &volume, &bassLvl}) {
@@ -83,7 +88,9 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aSound = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "sound", sound);
     aKey = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "key", key);
     aScale = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "scale", scale);
-    aBass = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "bass", bass);
+    aMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "mode", mode);
+    aArpOct = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "arpoct", arpOct);
+    aBassMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "bassmode", bassMode);
     aSpace = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "space", space);
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
     aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
@@ -122,12 +129,13 @@ void BricklabStudioEditor::showTab(int t) {
     for (auto* p : pads) p->setVisible(chord);
     for (auto* b : modButtons) b->setVisible(chord);
     for (juce::Component* c : {(juce::Component*) &sound, (juce::Component*) &key, (juce::Component*) &scale,
-                               (juce::Component*) &bass, (juce::Component*) &bassLvl, (juce::Component*) &space, (juce::Component*) &volume,
+                               (juce::Component*) &bassLvl, (juce::Component*) &space, (juce::Component*) &volume,
                                (juce::Component*) &spaceL, (juce::Component*) &volumeL,
                                (juce::Component*) &internal, (juce::Component*) &midiOut})
         c->setVisible(chord && !proc.kMidiFx);       // the MIDI FX build has no sound of its own
-    bass.setVisible(chord);
-    outNote.setVisible(chord);
+    for (juce::Component* c : {(juce::Component*) &mode, (juce::Component*) &arpOct, (juce::Component*) &bassMode,
+                               (juce::Component*) &modeL, (juce::Component*) &arpL, (juce::Component*) &bassL, (juce::Component*) &outNote})
+        c->setVisible(chord);
     soon.setText(SOON[t], juce::dontSendNotification);
     soon.setVisible(!chord);
     repaint();
@@ -183,8 +191,8 @@ void BricklabStudioEditor::resized() {
     r.removeFromTop(14);
     auto modRow = r.removeFromTop(34);
     for (auto* b : modButtons) { b->setBounds(modRow.removeFromLeft(86)); modRow.removeFromLeft(8); }
-    bassLvl.setBounds(modRow.removeFromRight(110));
-    bass.setBounds(modRow.removeFromRight(120));
+    midiOut.setBounds(modRow.removeFromRight(96)); modRow.removeFromRight(8);
+    internal.setBounds(modRow.removeFromRight(136));
     r.removeFromTop(16);
     auto row = r.removeFromTop(30);
     sound.setBounds(row.removeFromLeft(240)); row.removeFromLeft(10);
@@ -194,8 +202,10 @@ void BricklabStudioEditor::resized() {
     volumeL.setBounds(row.removeFromLeft(62)); volume.setBounds(row.removeFromLeft(120));
     r.removeFromTop(14);
     auto outRow = r.removeFromTop(30);
-    internal.setBounds(outRow.removeFromLeft(140)); outRow.removeFromLeft(10);
-    midiOut.setBounds(outRow.removeFromLeft(110)); outRow.removeFromLeft(14);
+    modeL.setBounds(outRow.removeFromLeft(38)); mode.setBounds(outRow.removeFromLeft(180)); outRow.removeFromLeft(14);
+    arpL.setBounds(outRow.removeFromLeft(34)); arpOct.setBounds(outRow.removeFromLeft(84)); outRow.removeFromLeft(14);
+    bassL.setBounds(outRow.removeFromLeft(40)); bassMode.setBounds(outRow.removeFromLeft(130)); outRow.removeFromLeft(8);
+    bassLvl.setBounds(outRow.removeFromLeft(100));
     outNote.setBounds(outRow);
 }
 

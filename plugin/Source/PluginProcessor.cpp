@@ -17,7 +17,12 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"key", 1}, "Key",
         StringArray{"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 9));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"scale", 1}, "Scale", StringArray{"Major", "Minor", "Dorian", "Mixolydian"}, 1));
-    l.add(std::make_unique<AudioParameterBool>(ParameterID{"bass", 1}, "Synth bass", true));
+    StringArray modes, basses;
+    for (auto* m : kPlayModes) modes.add(m);
+    for (auto* b : kBassModes) basses.add(b);
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"mode", 1}, "Play mode", modes, 0));
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"bassmode", 1}, "Bass", basses, 0));
+    l.add(std::make_unique<AudioParameterInt>(ParameterID{"arpoct", 1}, "Arp octaves", 1, 4, 1));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"internal", 1}, "Built-in sound", true));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"midiout", 1}, "MIDI out", BricklabStudioProcessor::kMidiFx));
@@ -51,7 +56,6 @@ void BricklabStudioProcessor::applySoundAndKey() {
     int snd = (int) params.getRawParameterValue("sound")->load();
     int key = (int) params.getRawParameterValue("key")->load();
     int sc = (int) params.getRawParameterValue("scale")->load();
-    player.setBass(params.getRawParameterValue("bass")->load() > 0.5f);
     player.setBassLevel(0.75f * params.getRawParameterValue("basslevel")->load());   // engine.py _bass: 0.75 x level
     if (snd == lastSound && key == lastKey && sc == lastScale) return;
     if (snd != lastSound) {
@@ -77,18 +81,8 @@ void BricklabStudioProcessor::padDown(int degree, int pos) {
 void BricklabStudioProcessor::padUp(int pos) { player.release(); queueOut(false, pos); }
 
 void BricklabStudioProcessor::queueOut(bool on, int pos) {
-    OutEvent e{pos, {}};
-    if (on) {
-        auto notes = player.lastNotes();
-        if (!notes.empty()) {
-            for (size_t i = player.bassOn() ? 1 : 0; i < notes.size(); ++i) e.on.push_back({1, notes[i]});
-            if (player.bassOn()) {                            // the synth bass's note, on channel 2
-                int root = notes[0] - 12;
-                while (root < 28) root += 12;
-                e.on.push_back({2, root});
-            }
-        }
-    }
+    ChordEvent e{pos, on ? player.lastNotes() : std::vector<int>{}};
+    if (on && e.notes.size() < 2) return;
     const juce::SpinLock::ScopedLockType l(outLock);
     outQueue.push_back(std::move(e));
 }
@@ -122,54 +116,101 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
     buffer.clear();
-    int at = 0;
-    const bool audio = buffer.getNumChannels() >= 2;
-    float* L = audio ? buffer.getWritePointer(0) : nullptr;
-    float* R = audio ? buffer.getWritePointer(1) : nullptr;
-    auto renderTo = [&](int upto) {
-        while (at < upto) {
-            int step = upto - at;
-            if (pending >= 0) step = std::min(step, std::max(1, pending));
-            if (audio) player.render(L + at, R + at, step);
-            at += step;
-            if (pending >= 0) {
-                pending -= step;
-                if (pending <= 0) { pending = -1; playHeld(std::min(at, n - 1)); }
-            }
-        }
-    };
-    for (const auto meta : midi) {
-        const auto m = meta.getMessage();
-        renderTo(std::min(n, meta.samplePosition));
-        if (m.isNoteOn()) held.insert(m.getNoteNumber());
-        else if (m.isNoteOff()) held.erase(m.getNoteNumber());
-        else if (m.isAllNotesOff() || m.isAllSoundOff()) held.clear();
-        else continue;
-        pending = (int) (0.035 * sr);
-    }
-    renderTo(n);
 
-    // MIDI out: the keys played in are replaced by the chords they make
-    midi.clear();
-    const bool out = params.getRawParameterValue("midiout")->load() > 0.5f;
-    std::vector<OutEvent> evs;
+    // 1. the keys played in: which chords start (or stop) where in this block
+    {
+        int at = 0;
+        auto advance = [&](int upto) {
+            while (pending >= 0 && at + pending <= upto) {
+                at += std::max(1, pending);
+                pending = -1;
+                playHeld(std::min(at, n - 1));
+            }
+            if (pending >= 0) pending -= upto - at;
+            at = upto;
+        };
+        for (const auto meta : midi) {
+            const auto m = meta.getMessage();
+            advance(std::min(n, meta.samplePosition));
+            if (m.isNoteOn()) held.insert(m.getNoteNumber());
+            else if (m.isNoteOff()) held.erase(m.getNoteNumber());
+            else if (m.isAllNotesOff() || m.isAllSoundOff()) held.clear();
+            else continue;
+            pending = (int) (0.035 * sr);                    // a chord's notes arrive one by one
+        }
+        advance(n);
+    }
+    midi.clear();                                            // what goes out is the chords they make
+
+    // 2. play mode and bass mode turn those chords into notes, on the host's 16ths when it plays
+    double bpm = 120, ppq = -1;
+    bool playing = false;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition()) {
+            if (auto b = pos->getBpm()) bpm = *b;
+            if (auto p = pos->getPpqPosition()) ppq = *p;
+            playing = pos->getIsPlaying();
+        }
+    patterns.setTempo(bpm, sr);
+    patterns.setMode((int) params.getRawParameterValue("mode")->load());
+    patterns.setBassMode((int) params.getRawParameterValue("bassmode")->load());
+    patterns.setArpOctaves((int) params.getRawParameterValue("arpoct")->load());
+    std::vector<ChordEvent> chords;
     {
         const juce::SpinLock::ScopedLockType l(outLock);
-        evs.swap(outQueue);
+        chords.swap(outQueue);
     }
-    for (auto& e : evs) {
-        const int p = juce::jlimit(0, std::max(0, n - 1), e.pos);
-        for (auto [ch, note] : sounding) midi.addEvent(juce::MidiMessage::noteOff(ch, note), p);
-        sounding.clear();
-        if (!out) continue;
-        for (auto [ch, note] : e.on) { midi.addEvent(juce::MidiMessage::noteOn(ch, note, (juce::uint8) 100), p); sounding.push_back({ch, note}); }
+    const double stepLen = 60.0 / bpm / 4 * sr;
+    std::vector<std::pair<int64_t, int64_t>> steps;          // (sample time, 16th index)
+    if (playing && ppq >= 0) {
+        double q = ppq * 4, first = std::ceil(q - 1e-9);
+        for (double s = first; (s - q) * stepLen < n; s += 1)
+            steps.push_back({clock + (int64_t) ((s - q) * stepLen), (int64_t) s});
+        nextStep = clock + (int64_t) ((first - q) * stepLen);
+        while (nextStep < clock + n) nextStep += (int64_t) stepLen;
+    } else {
+        if (nextStep < clock || nextStep > clock + 4 * (int64_t) stepLen) nextStep = clock;
+        for (; nextStep < clock + n; nextStep += std::max<int64_t>(1, (int64_t) stepLen)) steps.push_back({nextStep, stepIndex++});
     }
+    size_t si = 0;
+    for (auto& c : chords) {
+        const int64_t t = clock + juce::jlimit(0, std::max(0, n - 1), c.pos);
+        for (; si < steps.size() && steps[si].first < t; ++si) patterns.step(steps[si].second, steps[si].first);
+        if (c.notes.empty()) patterns.clear(t); else patterns.chord(c.notes, t);
+    }
+    for (; si < steps.size(); ++si) patterns.step(steps[si].second, steps[si].first);
+    events.clear();
+    patterns.take(clock + n, events);
+
+    // 3. the notes: into the built-in sound and out as MIDI
+    const bool audio = buffer.getNumChannels() >= 2;
+    const bool internal = audio && params.getRawParameterValue("internal")->load() > 0.5f;
+    const bool out = params.getRawParameterValue("midiout")->load() > 0.5f;
+    float* L = audio ? buffer.getWritePointer(0) : nullptr;
+    float* R = audio ? buffer.getWritePointer(1) : nullptr;
+    int at = 0;
+    for (auto& e : events) {
+        const int p = (int) juce::jlimit<int64_t>(0, n - 1, e.at - clock);
+        if (audio && p > at) { player.render(L + at, R + at, p - at); at = p; }
+        if (e.on) {
+            if (internal) player.noteOn(e.ch, e.note, e.gain, e.pan);
+            if (out) {
+                midi.addEvent(juce::MidiMessage::noteOn(e.ch, e.note, (juce::uint8) juce::jlimit(1, 127, (int) std::lround(e.gain * 120))), p);
+                sounding.insert({e.ch, e.note});
+            }
+        } else {
+            player.noteOff(e.ch, e.note, e.rel);
+            if (sounding.erase({e.ch, e.note})) midi.addEvent(juce::MidiMessage::noteOff(e.ch, e.note), p);
+        }
+    }
+    if (audio && at < n) player.render(L + at, R + at, n - at);
     if (!out && !sounding.empty()) {                         // switched off with notes held: let them go
-        for (auto [ch, note] : sounding) midi.addEvent(juce::MidiMessage::noteOff(ch, note), 0);
+        for (auto [ch, note] : sounding) midi.addEvent(juce::MidiMessage::noteOff(ch, note), n - 1);
         sounding.clear();
     }
+    clock += n;
     if (!audio) return;
-    if (params.getRawParameterValue("internal")->load() < 0.5f) { buffer.clear(); return; }
+    if (!internal) { buffer.clear(); return; }
 
     juce::dsp::Reverb::Parameters rp;
     const float space = params.getRawParameterValue("space")->load();

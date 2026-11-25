@@ -140,39 +140,59 @@ Chord Player::playExact(const std::vector<int>& keys) {
     return c;
 }
 
-void Player::start(const std::vector<int>& notes) {
+void Player::start(const std::vector<int>& notes) {   // the voicing only: Patterns plays it
     std::lock_guard<std::mutex> l(vmx_);
     last_ = notes;
-    const int xf = (int) (0.025 * sr_);
-    for (auto& v : voices_)                             // the last chord lets go (engine c_chord: release "held")
-        if (v.relAt < 0) { v.relAt = 0; v.relLen = v.bass ? (int) (0.02 * sr_) : std::max(xf, (int) (relSecs_ * sr_)); }
-    for (size_t i = 1; i < notes.size(); ++i) {         // the patch's bass note gives way to the synth bass
-        Voice v;
-        double ratio = 1;
-        v.note = cache_.get(notes[i], ratio);
-        if (!v.note) continue;
-        v.rate = ratio * kSR / sr_;
-        v.gain = 0.95f;
-        v.midi = notes[i];
-        voices_.push_back(v);
-    }
-    if (bassOn_) {                                       // an octave under the patch's bass note
-        int root = notes[0] - 12;
-        while (root < 28) root += 12;
-        Voice b;
-        b.note = cache_.bass(root);
-        if (b.note) { b.rate = kSR / sr_; b.bass = true; b.gain = bassGain_; b.midi = root; voices_.push_back(b); }
-    }
-    if (voices_.size() > 48) {                           // keep the count bounded: oldest tails go first
-        for (size_t i = 0; i + 48 < voices_.size(); ++i)
-            if (voices_[i].relAt >= 0) { voices_[i].relLen = std::min(voices_[i].relLen, (int) (0.012 * sr_)); }
-    }
 }
 
-void Player::release() {
+void Player::release() {}
+
+void Player::noteOn(int ch, int midi, float gain, float pan) {
+    if (midi < 0 || midi > 127) return;
+    Voice v;
+    double ratio = 1;
+    if (ch == 2) {
+        v.note = cache_.bass(midi);
+        if (!v.note) { cache_.want({1000 + midi}); return; }
+        v.bass = true;
+        gain *= bassGain_;
+    } else {
+        v.note = cache_.get(midi, ratio);
+        if (!v.note) return;
+    }
+    v.rate = ratio * kSR / sr_;
+    v.gain = gain;
+    v.lg = 1.0f - std::max(0.0f, pan);
+    v.rg = 1.0f + std::min(0.0f, pan);
+    v.midi = midi;
+    v.ch = ch;
+    std::lock_guard<std::mutex> l(vmx_);
+    voices_.push_back(v);
+    if (voices_.size() > 64)                             // keep the count bounded: oldest go first
+        for (size_t i = 0; i + 64 < voices_.size(); ++i)
+        {
+            auto& o = voices_[i];
+            const int fast = (int) (0.012 * sr_);
+            if (o.relAt < 0) { o.relAt = 0; o.relLen = fast; }
+            else o.relLen = std::min(o.relLen, o.age + fast);
+        }
+}
+
+void Player::noteOff(int ch, int midi, float relSecs) {
     std::lock_guard<std::mutex> l(vmx_);
     for (auto& v : voices_)
-        if (v.relAt < 0) { v.relAt = 0; v.relLen = v.bass ? (int) (0.08 * sr_) : (int) (relSecs_ * sr_); }
+        if (v.ch == ch && v.midi == midi && v.relAt < 0) {
+            float r = relSecs < 0 ? relSecs_ : std::min(relSecs_, relSecs);
+            if (v.bass && relSecs < 0) r = 0.08f;
+            v.relAt = 0;
+            v.relLen = std::max(1, (int) (r * sr_));
+        }
+}
+
+void Player::allOff() {
+    std::lock_guard<std::mutex> l(vmx_);
+    for (auto& v : voices_)
+        if (v.relAt < 0) { v.relAt = 0; v.relLen = (int) (0.05 * sr_); }
 }
 
 std::vector<int> Player::wanted() const {              // live.py wanted(): the chords' notes first
@@ -183,6 +203,8 @@ std::vector<int> Player::wanted() const {              // live.py wanted(): the 
         int root = notes[0] - 12;
         while (root < 28) root += 12;
         first.insert(first.begin(), 1000 + root);         // the bass under it, first of all
+        first.push_back(1000 + root + 7);                 // and what Walk and Octaves reach for
+        first.push_back(1000 + root + 12);
         for (size_t i = 1; i < notes.size(); ++i)
             if (std::find(first.begin(), first.end(), notes[i]) == first.end()) first.push_back(notes[i]);
         if (std::find(first.begin(), first.end(), notes[1] + 12) == first.end()) first.push_back(notes[1] + 12);

@@ -47,6 +47,7 @@ struct Voice {
     float gain = 1, lg = 1, rg = 1;
     int relAt = -1, relLen = 0, age = 0;   // relAt: output samples from now until release starts (-1 held)
     bool bass = false, done = false;
+    int ch = 1;
     int midi = 0;
 };
 
@@ -62,9 +63,11 @@ public:
     int key() const { return key_; }
     Scale scale() const { return scale_; }
     void setRelease(float secs) { relSecs_ = secs; }
-    void setBass(bool on) { bassOn_ = on; }
     void setBassLevel(float g) { bassGain_ = g; }
-    bool bassOn() const { return bassOn_; }
+    // the notes themselves come from Patterns (play mode and bass mode): ch 1 the sound, ch 2 the synth bass
+    void noteOn(int ch, int midi, float gain, float pan);
+    void noteOff(int ch, int midi, float relSecs);       // relSecs < 0: the sound's own release
+    void allOff();
     std::vector<int> lastNotes() const { std::lock_guard<std::mutex> l(vmx_); return last_; }   // the last chord as voiced
     std::vector<int> wanted() const;                     // every note a chord button can ask for, likely first
     void render(float* L, float* R, int n);              // adds into L and R
@@ -78,7 +81,6 @@ private:
     Scale scale_ = Scale::Minor;
     double sr_ = 44100;
     float relSecs_ = 0.4f;
-    bool bassOn_ = true;
     float bassGain_ = 0.3f;
     mutable std::mutex vmx_;                                      // the UI thread starts chords too
 };
