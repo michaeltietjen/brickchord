@@ -62,6 +62,8 @@ struct GVoice {
     float glide = 0, env = 1, gain = 0.95f;
     int fadeIn = 0, relN = 1;
     bool rel = false, drone = false, done = false;
+    bool air = false;                          // a breathing overtone over the drone
+    float airPer = 10, airPh = 0, shown = 0;   // its cycle (seconds, phase); the level last played, for the screen
 };
 
 class Player {
@@ -88,6 +90,12 @@ public:
     void leadMod(float bendSemis, float vib) { bend_ = bendSemis; vib_ = vib; }
     void drone(const std::vector<int>& notes, float slideSecs);   // empty: the drone fades
     void droneMod(float x, float y) { dx_ = x; dy_ = y; }          // x: thin (-) / bloom (+), y: pulse (-) / swell (+)
+    void droneAir(float a) { air_ = a; }                           // 0..1: overtones that breathe in and out, high above
+    void droneDrift(float d) { drift_ = d; }                       // 0..1: how often two voices slowly trade places
+    // the drone's voices as they sound, for the screen
+    static constexpr int kShown = 10;
+    std::array<std::atomic<float>, kShown> dCents{}, dLevel{};
+    std::atomic<int> dCount{0};
     void setTempo(double bpm) { bpm_ = bpm > 20 ? bpm : 120; }
     std::vector<int> lastNotes() const { std::lock_guard<std::mutex> l(vmx_); return last_; }   // the last chord as voiced
     std::vector<int> wanted() const;                     // every note a chord button can ask for, likely first
@@ -99,7 +107,10 @@ private:
     std::vector<Voice> voices_;
     std::vector<GVoice> gv_;
     std::vector<int> droneNotes_;
-    float bend_ = 0, vib_ = 0, dx_ = 0, dy_ = 0;
+    float bend_ = 0, vib_ = 0, dx_ = 0, dy_ = 0, air_ = 0, drift_ = 0;
+    double driftLeft_ = 0;
+    uint32_t rng_ = 4242;
+    float rnd() { rng_ = rng_ * 1664525u + 1013904223u; return (float) (rng_ >> 8) / 16777216.0f; }
     double vibPh_ = 0, bpm_ = 120;
     int64_t T_ = 0;
     void renderG(float* L, float* R, int n);

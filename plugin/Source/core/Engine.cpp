@@ -262,20 +262,23 @@ void Player::drone(const std::vector<int>& in, float slide) {   // engine.c_dron
     std::vector<int> notes(in);
     std::sort(notes.begin(), notes.end());
     const int fade = (int) (0.8 * sr_);
-    auto make = [&](int m, int fadeIn) {
+    auto make = [&](int m, int fadeIn) -> GVoice* {
         double r0 = 1;
         auto note = cache_.get(m, r0);
-        if (!note) return;
+        if (!note) return nullptr;
         GVoice v;
         v.note = note; v.drone = true; v.gain = 0.7f * 0.95f;
         v.baseRate = r0 * note->rate / sr_;
         v.base = v.target = v.midi = m;
         v.fadeIn = fadeIn; v.env = fadeIn > 0 ? 0.0f : 1.0f;
         gv_.push_back(v);
+        return &gv_.back();
     };
+    for (auto& v : gv_) if (v.air && !v.rel) { v.rel = true; v.relN = (int) (1.5 * sr_); }   // the old overtones fade
     if (slide > 0 && !notes.empty()) {                      // voices that stay slide, extras fade, new ones fade in
         std::vector<GVoice*> live;
-        for (auto& v : gv_) if (v.drone && !v.rel) live.push_back(&v);
+        for (auto& v : gv_) if (v.drone && !v.rel && !v.air) live.push_back(&v);
+        std::sort(live.begin(), live.end(), [](const GVoice* x, const GVoice* y) { return x->target < y->target; });
         const size_t had = live.size();
         for (size_t i = had; i > notes.size(); --i) { live[i - 1]->rel = true; live[i - 1]->relN = fade; }
         for (size_t i = 0; i < notes.size() && i < had; ++i) {
@@ -287,7 +290,18 @@ void Player::drone(const std::vector<int>& in, float slide) {   // engine.c_dron
         for (auto& v : gv_) if (v.drone && !v.rel) { v.rel = true; v.relN = fade; }
         for (int m : notes) make(m, 0);
     }
+    if (!notes.empty()) {                                   // the overtones: the chord's notes again, two octaves up,
+        std::vector<int> pcs;                               // each on its own slow cycle, never in step
+        for (int m : notes) if (std::find(pcs.begin(), pcs.end(), m % 12) == pcs.end()) pcs.push_back(m % 12);
+        static const float per[] = {7.3f, 11.9f, 17.1f, 23.3f};
+        for (size_t k = 0; k < pcs.size() && k < 4; ++k) {
+            int m = 72 + pcs[k];
+            if (k % 2) m -= m > 79 ? 12 : 0;
+            if (auto* v = make(m, (int) (1.5 * sr_))) { v->air = true; v->airPer = per[k]; v->airPh = 1.7f * (float) k + 6.28f * rnd(); }
+        }
+    }
     droneNotes_ = notes;
+    driftLeft_ = 4.0 * sr_;
 }
 
 static inline bool frameAt(const Note& nt, double pos, float& l, float& r) {
@@ -310,7 +324,7 @@ static inline bool frameAt(const Note& nt, double pos, float& l, float& r) {
 }
 
 void Player::renderG(float* L, float* R, int n) {          // engine._lead_render and _drone_render
-    if (gv_.empty()) { T_ += n; return; }
+    if (gv_.empty()) { T_ += n; dCount = 0; return; }
     const double sr = sr_;
     const double bendF = std::pow(2.0, bend_ / 12.0);
     const int nd = std::max<int>(1, (int) droneNotes_.size());
@@ -319,14 +333,34 @@ void Player::renderG(float* L, float* R, int n) {          // engine._lead_rende
     const float dz = 0.25f;
     auto shape = [&](float a) { return std::abs(a) < dz ? 0.0f : (std::abs(a) - dz) / (1 - dz) * (a > 0 ? 1.0f : -1.0f); };
     const float x = shape(dx_), y = shape(dy_);
-    int di = 0;
+    if (drift_ > 0.02f && droneNotes_.size() >= 3) {          // drift: now and then two neighbours slowly trade places
+        driftLeft_ -= n;
+        if (driftLeft_ <= 0) {
+            const double period = (16.0 - 13.0 * drift_) * (0.7 + 0.6 * rnd());
+            driftLeft_ = period * sr;
+            std::vector<GVoice*> live;
+            for (auto& v : gv_) if (v.drone && !v.rel && !v.air && !v.done) live.push_back(&v);
+            std::sort(live.begin(), live.end(), [](const GVoice* a, const GVoice* b) { return a->target < b->target; });
+            if (live.size() >= 3) {
+                const size_t k = 1 + (size_t) std::min((int) live.size() - 3, (int) (rnd() * (float) (live.size() - 2)));   // never the bass
+                GVoice *a = live[k], *b = live[k + 1];
+                if (std::abs(b->target - a->base) <= 12 && std::abs(a->target - b->base) <= 12) {   // each sound stays near its own pitch
+                    std::swap(a->target, b->target);
+                    std::swap(a->midi, b->midi);
+                    a->glide = b->glide = (float) (period * 0.9);
+                }
+            }
+        }
+    }
+    int di = 0, ai = 0, shown = 0;
     for (auto& v : gv_) {
         if (v.done) continue;
         const double rt = std::pow(2.0, (v.target - v.base) / 12.0);
         const double c = v.glide > 0.005f ? std::exp(-1.0 / (v.glide * 0.35 * sr)) : 0.0;
         float pan = 0;
-        const int idx = v.drone ? di++ : 0;
-        if (v.drone && nd > 1) pan = ((float) idx / (float) (nd - 1) - 0.5f) * 0.8f;
+        const int idx = v.air ? ai++ : (v.drone ? di++ : 0);
+        if (v.air) pan = ((float) (idx % 3) - 1.0f) * 0.55f;
+        else if (v.drone && nd > 1) pan = (std::min(1.0f, (float) idx / (float) (nd - 1)) - 0.5f) * 0.8f;
         const int above = v.drone ? v.midi - lo : 0;          // 0 at the root, higher = an upper voice
         float lg = std::min(1.0f, 1.0f - pan), rg = std::min(1.0f, 1.0f + pan);
         for (int i = 0; i < n; ++i) {
@@ -347,7 +381,11 @@ void Player::renderG(float* L, float* R, int n) {          // engine._lead_rende
                 g *= v.env * v.env;
             }
             float gl = lg, gr = rg;
-            if (v.drone && (x != 0 || y != 0)) {
+            if (v.air) {                                     // an overtone: in and out on its own cycle
+                const double b = 0.5 - 0.5 * std::cos(2 * 3.14159265358979 * (double) (T_ + i) / sr / v.airPer + v.airPh);
+                g *= air_ * 0.6f * (float) (b * b);
+            }
+            if (v.drone && !v.air && (x != 0 || y != 0)) {
                 const double t = (double) (T_ + i) / sr;
                 if (y < 0) g *= (float) dronePulse(y, t, bpm_);   // pulse: a smooth tempo-synced gate
                 else if (y > 0) {                           // swell, with a slow rotating pan
@@ -364,8 +402,15 @@ void Player::renderG(float* L, float* R, int n) {          // engine._lead_rende
             }
             L[i] += sl * g * gl;
             R[i] += sr2 * g * gr;
+            v.shown = g;
+        }
+        if (v.drone && !v.done && shown < kShown) {
+            dCents[(size_t) shown] = (float) ((v.base + 12.0 * std::log2(std::max(1e-6, v.ratio))) * 100.0);
+            dLevel[(size_t) shown] = v.shown / 0.665f;
+            ++shown;
         }
     }
+    dCount = shown;
     vibPh_ = std::fmod(vibPh_ + 2 * 3.14159265358979 * 5.5 * n / sr, 2 * 3.14159265358979);
     T_ += n;
     gv_.erase(std::remove_if(gv_.begin(), gv_.end(), [](const GVoice& v) { return v.done; }), gv_.end());

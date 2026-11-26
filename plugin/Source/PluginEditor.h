@@ -51,6 +51,10 @@ struct BrickLook : juce::LookAndFeel_V4 {
 struct Canvas : juce::Component {
     std::function<void(juce::Graphics&)> painter;
     void paint(juce::Graphics& g) override { if (painter) painter(g); }
+    std::function<void(juce::Point<float>, bool down)> pointer;   // the field under the controls, pressed or dragged
+    void mouseDown(const juce::MouseEvent& e) override { if (pointer) pointer(e.position, true); }
+    void mouseDrag(const juce::MouseEvent& e) override { if (pointer) pointer(e.position, true); }
+    void mouseUp(const juce::MouseEvent& e) override { if (pointer) pointer(e.position, false); }
 };
 
 class BricklabStudioEditor : public juce::AudioProcessorEditor, private juce::Timer {
@@ -81,7 +85,14 @@ private:
     juce::OwnedArray<juce::AudioProcessorValueTreeState::ButtonAttachment> modAttach;
     juce::TextButton latch{"latch"};
     juce::ComboBox sound, key, scale, mode, arpOct, bassMode, leadSound, droneSound, octave, droneSlide;
-    juce::Slider leadGlide, droneY, droneX, glideTone;
+    juce::Slider leadGlide, droneY, droneX, glideTone, droneDrift, droneAir, pluckLevel, pluckEcho;
+    juce::ComboBox droneChord, pluckSound, pluckArp, pluckRate;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aDroneChord, aPluckSound, aPluckArp, aPluckRate;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aDroneDrift, aDroneAir, aPluckLevel, aPluckEcho;
+    struct Spark { int midi; float age; };
+    std::vector<Spark> sparks;                         // plucked notes, travelling away down their strings
+    std::array<float, 128> stringGlow{};
+    int pluckSeen = 0, hoverString = -1;
     juce::TextButton third{"3rd"}, bloomBtn{"bloom"}, stopBtn{"stop"}, glideSub{"sub"}, glideMore{"more"}, glideStrike{"strike each chord"};
     juce::ComboBox glideSound, glideChord, glidePath, glideTiming, glideMove, glideCross, glideTime, glideFade, glideBend, glideMpe;
     juce::Label glideChordL, glideToneL;
@@ -101,6 +112,7 @@ private:
     std::array<float, 6> trailLvl{};
     int trailAt = 0;
     float fieldLo = 3300, fieldHi = 7200;
+    static constexpr float fieldHor = 118, fieldK = 60;   // the floor's horizon and depth scale
     juce::Label octL, glideL, slideL, pulseL, bloomL;
     int litDrone = -2;
     juce::Slider space, volume, bassLvl;

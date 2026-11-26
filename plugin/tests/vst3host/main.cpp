@@ -50,6 +50,23 @@ int main(int argc, char** argv) {
         if (bends) { std::cout << "      bends now (st):"; for (int c = 2; c <= 7; ++c) std::cout << " " << juce::String((lastBend[c] - 8192) / 8191.0 * 48.0, 1); std::cout << "\n"; }
     };
     auto key = [&](bool on, int k) { pend.addEvent(on ? juce::MidiMessage::noteOn(1, k, (juce::uint8) 100) : juce::MidiMessage::noteOff(1, k), 0); };
+    if (argc > 2 && juce::String(argv[2]) == "drone") {                   // vst3host plugin.vst3 drone: the strum and arp
+        auto set = [&](const char* name, float v01) { for (auto* q : p->getParameters()) if (q->getName(64) == name) q->setValueNotifyingHost(v01); };
+        setPage(2);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(9000);
+        set("Pluck level", 0.0f);
+        key(true, 62); key(false, 62); run(1.5, "D drone, no strum");
+        set("Pluck level", 1.0f);
+        for (int v = 0; v <= 127; v += 8) { pend.addEvent(juce::MidiMessage::controllerEvent(1, 1, v), 0); run(0.06, "  mod wheel"); }
+        run(1.0, "after the strum");
+        pend.addEvent(juce::MidiMessage::pitchWheel(1, 16000), 0); run(1.0, "pitch wheel up: arp");
+        pend.addEvent(juce::MidiMessage::pitchWheel(1, 8192), 0); run(1.5, "wheel centred");
+        set("Pluck arp", 0.25f); run(1.0, "arp Up, 1/8");
+        set("Pluck arp", 0.0f); run(2.0, "arp off");
+        set("Drone chord", 7.0f / 8.0f); key(true, 57); key(false, 57); run(2.0, "A, quartal");
+        key(true, 57); key(false, 57); run(1.0, "stopped");
+        return 0;
+    }
     if (argc > 2) {                                                       // vst3host plugin.vst3 long: hold each page 20 s
         for (int pg : {3, 0, 2}) {
             setPage(pg);

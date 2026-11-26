@@ -119,7 +119,7 @@ void BrickLook::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h, 
     const float ang = a0 + pos * (a1 - a0);
     juce::Path track, value;
     track.addCentredArc(cx, cy, rad, rad, 0, a0, a1, true);
-    value.addCentredArc(cx, cy, rad, rad, 0, a0, ang, true);
+    value.addCentredArc(cx, cy, rad, rad, 0, s.getMinimum() < 0 ? (a0 + a1) * 0.5f : a0, ang, true);   // two-way ones: from the top
     const juce::PathStrokeType st(3.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
     g.setColour(seam);
     g.strokePath(track, st);
@@ -246,7 +246,13 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (int i : BricklabStudioProcessor::soundsOf(1)) leadSound.addItem(brick::kPatches[i].name, leadSound.getNumItems() + 1);
     for (int i : BricklabStudioProcessor::soundsOf(2)) droneSound.addItem(brick::kPatches[i].name, droneSound.getNumItems() + 1);
     octave.addItemList({"Oct -2", "Oct -1", "Oct 0", "Oct +1", "Oct +2"}, 1);
-    droneSlide.addItemList({"Off (restrike)", "0.5 s", "1 s", "2 s", "4 s"}, 1);
+    droneSlide.addItemList({"Slide off", "Slide 0.5 s", "Slide 1 s", "Slide 2 s", "Slide 4 s"}, 1);
+    for (int i = 0; i < brick::kNumDroneChords; ++i) droneChord.addItem(brick::kDroneChords[i], i + 1);
+    for (int i = 0; i < brick::kNumPlucks; ++i) pluckSound.addItem(juce::String("Strum: ") + brick::kPluckNames[i], i + 1);
+    pluckArp.addItemList({"Arp off", "Arp up", "Arp down", "Arp bounce", "Arp random"}, 1);
+    pluckRate.addItemList({"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1);
+    for (auto* c : {&droneChord, &pluckSound, &pluckArp, &pluckRate}) addAndMakeVisible(c);
+    for (auto* k : {&droneDrift, &droneAir, &pluckLevel, &pluckEcho}) { k->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0); addAndMakeVisible(k); }
     for (auto* c : {&leadSound, &droneSound, &octave, &droneSlide}) addAndMakeVisible(c);
     for (auto* s : {&leadGlide, &droneY, &droneX}) {
         s->setSliderStyle(juce::Slider::LinearHorizontal);
@@ -303,6 +309,14 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aThird = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "dronethird", third);
     aLeadGlide = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "leadglide", leadGlide);
     aDroneY = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "droney", droneY);
+    aDroneChord = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "dronechord", droneChord);
+    aPluckSound = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "plucksound", pluckSound);
+    aPluckArp = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "pluckarp", pluckArp);
+    aPluckRate = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "pluckrate", pluckRate);
+    aDroneDrift = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "dronedrift", droneDrift);
+    aDroneAir = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "droneair", droneAir);
+    aPluckLevel = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "plucklevel", pluckLevel);
+    aPluckEcho = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "pluckecho", pluckEcho);
     aDroneX = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "dronex", droneX);
     using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     aGlideSound = std::make_unique<CA>(ps, "glidesound", glideSound);
@@ -333,12 +347,19 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
     aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
 
-    for (auto* k : {&glideTone, &space, &volume}) {          // the knobs
+    for (auto* k : {&glideTone, &space, &volume, &droneY, &droneX, &droneDrift, &droneAir, &pluckLevel, &pluckEcho}) {          // the knobs
         k->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         k->setRotaryParameters(juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
         k->setMouseDragSensitivity(140);
     }
     glideTone.setName("Tone"); space.setName("Space"); volume.setName("Volume");
+    droneY.setName("Pulse"); droneX.setName("Bloom"); droneDrift.setName("Drift"); droneAir.setName("Air");
+    pluckLevel.setName("Strum"); pluckEcho.setName("Echo");
+    canvas.pointer = [this](juce::Point<float> p, bool down) {   // Drone: the field is the strings; drag across to strum
+        if (tab != 2 || !down || p.y < 150) { proc.uiStrum = -1.0f; return; }
+        const float sc = (p.y - fieldHor) / fieldK;             // undo the perspective: which lane is under the pointer
+        proc.uiStrum = juce::jlimit(0.0f, 1.0f, ((p.x - 440.0f) / (79.0f * std::max(0.5f, sc)) + 1.0f) * 0.5f);
+    };
     setLookAndFeel(&look);
     setWantsKeyboardFocus(true);
     canvas.painter = [this](juce::Graphics& g) { paintContent(g); };
@@ -391,7 +412,9 @@ void BricklabStudioEditor::showTab(int t) {
     show({&glidePath, &glideMove, &glideCross, &glideTime, &glideFade, &glideTiming, &glideBend}, gl && more && !curves);
     show({&glideMpe, &glideStrike}, gl && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
-    show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
+    third.setVisible(false);                                 // the Triad chord shape does this now
+    show({&droneSlide, &droneChord, &droneY, &droneX, &pluckArp, &pluckRate}, drone);
+    show({&pluckSound, &droneDrift, &droneAir, &pluckLevel, &pluckEcho}, drone && sounds);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
                     juce::dontSendNotification);
     outNote.setVisible(chord || lead);
@@ -422,7 +445,7 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
     g.fillAll();
 
     // ---- the field: a floor running to a horizon. "Now" is at the front; the past recedes.
-    const float cx = 440, hor = 118, K = 60, LK = 79;
+    const float cx = 440, hor = fieldHor, K = fieldK, LK = 79;
     auto proj = [&](float x, float z) { const float s = 1.0f / (0.22f + z * 1.9f); return Point<float>(cx + x * LK * s, hor + K * s); };
     for (int k = 0; k <= 12; ++k) {                         // bars of time
         const float z = (float) k / 12.0f;
@@ -500,7 +523,71 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
                 orb(nx, VCOL[v], jlimit(0.3f, 1.0f, proc.glide.level[(size_t) v] / 0.6f));
             }
         }
-    } else {                                                // Chord and Drone: every note a bar of light laid on the floor
+    } else if (tab == 2) {                                  // Drone: strings across the floor, the voices standing in it
+        const Colour hue = CCOL[(size_t) jlimit(0, 6, (int) chordHist[(size_t) ((trailAt - 1 + kHist) % kHist)])];
+        const double now = Time::getMillisecondCounterHiRes() * 0.001;
+        std::vector<int> strs;
+        const uint64_t sLo = proc.stringBitsLo.load(), sHi = proc.stringBitsHi.load();
+        for (int m = 0; m < 128; ++m) if ((m < 64 ? sLo >> m : sHi >> (m - 64)) & 1) strs.push_back(m);
+        auto laneOf = [&](int m) {
+            for (size_t i = 0; i < strs.size(); ++i) if (strs[i] == m) return strs.size() > 1 ? -1.0f + 2.0f * (float) i / (float) (strs.size() - 1) : 0.0f;
+            return 0.0f;
+        };
+        for (size_t i = 0; i < strs.size(); ++i) {           // the strings: brighter while they ring
+            const float x = laneOf(strs[i]), gl2 = stringGlow[(size_t) strs[i]];
+            auto a = proj(x, 0), b = proj(x, 1);
+            const bool hov = (int) i == hoverString;
+            g.setGradientFill(ColourGradient(hue.interpolatedWith(Colours::white, gl2 * 0.6f).withAlpha(0.28f + 0.6f * gl2 + (hov ? 0.25f : 0.0f)), a.x, a.y,
+                                             hue.withAlpha(0.0f), b.x, b.y, false));
+            g.drawLine(a.x, a.y, b.x, b.y, 1.2f + 2.6f * gl2);
+            g.setColour(hue.withAlpha(0.35f + 0.65f * gl2));
+            g.fillEllipse(a.x - 2.5f - 3 * gl2, a.y - 2.5f - 3 * gl2, 5 + 6 * gl2, 5 + 6 * gl2);
+        }
+        // the drone's voices: columns of light that sway; the overtones stand further back, paler
+        struct Col { float cents, lvl; };
+        std::vector<Col> cols;
+        const auto& pl = proc.dronePlayer();
+        for (int i = 0; i < std::min((int) brick::Player::kShown, pl.dCount.load()); ++i) cols.push_back({pl.dCents[(size_t) i].load(), pl.dLevel[(size_t) i].load()});
+        if (cols.empty()) {                                  // the MIDI builds: the notes it's sending
+            const uint64_t nLo = proc.noteBitsLo.load(), nHi = proc.noteBitsHi.load();
+            for (int m = 0; m < 128; ++m) if ((m < 64 ? nLo >> m : nHi >> (m - 64)) & 1) cols.push_back({m * 100.0f, 1.0f});
+        }
+        std::sort(cols.begin(), cols.end(), [](const Col& p, const Col& q) { return p.cents > q.cents; });   // far ones first
+        int ci = 0;
+        for (auto& c : cols) {
+            const bool air = c.cents >= 7150;
+            const float lvl = jlimit(0.0f, 1.3f, c.lvl);
+            if (lvl < 0.01f) { ++ci; continue; }
+            const float x = jlimit(-1.1f, 1.1f, (c.cents * 0.01f - (air ? 78.0f : 58.0f)) / (air ? 9.0f : 16.0f));
+            const float z = air ? 0.35f : 0.06f, sc = 1.0f / (0.22f + z * 1.9f);
+            const auto b = proj(x, z);
+            const float hgt = (air ? 95.0f : 30.0f + 34.0f * lvl) * sc, wd = (air ? 2.4f : 4.0f) * sc;
+            const float sway = (float) std::sin(now * (air ? 0.9 : 0.45) + ci * 1.9) * (air ? 7.0f : 4.0f) * sc;
+            const Colour cc = air ? hue.interpolatedWith(Colours::white, 0.7f) : hue;
+            Path p;
+            p.startNewSubPath(b.x - wd, b.y); p.lineTo(b.x + wd, b.y);
+            p.lineTo(b.x + sway + wd * 0.35f, b.y - hgt); p.lineTo(b.x + sway - wd * 0.35f, b.y - hgt);
+            p.closeSubPath();
+            g.setGradientFill(ColourGradient(cc.withAlpha(jmin(0.9f, (air ? 0.75f : 0.8f) * lvl)), b.x, b.y, cc.withAlpha(0.0f), b.x + sway, b.y - hgt, false));
+            g.fillPath(p);
+            g.setColour(cc.withAlpha(jmin(0.5f, 0.3f * lvl)));
+            g.fillEllipse(b.x - wd * 4, b.y - wd * 1.1f, wd * 8, wd * 2.2f);
+            g.setColour(Colours::white.withAlpha(jmin(0.9f, 0.7f * lvl)));
+            g.fillEllipse(b.x - wd * 0.6f, b.y - wd * 0.3f, wd * 1.2f, wd * 0.6f);
+            ++ci;
+        }
+        for (auto& sp : sparks) {                            // plucked notes run away down their strings
+            const float x = laneOf(sp.midi), z = sp.age * sp.age * 0.9f, fade = 1.0f - sp.age;
+            const auto c = proj(x, z), t = proj(x, std::max(0.0f, z - 0.05f));
+            const float sc = 1.0f / (0.22f + z * 1.9f) / 4.5f;
+            g.setColour(hue.interpolatedWith(Colours::white, 0.5f).withAlpha(0.7f * fade));
+            g.drawLine(t.x, t.y, c.x, c.y, 3.0f * sc + 0.6f);
+            g.setColour(hue.withAlpha(0.3f * fade));
+            g.fillEllipse(c.x - 14 * sc, c.y - 14 * sc, 28 * sc, 28 * sc);
+            g.setColour(Colours::white.withAlpha(fade));
+            g.fillEllipse(c.x - 4.5f * sc, c.y - 4.5f * sc, 9 * sc, 9 * sc);
+        }
+    } else {                                                // Chord: every note a bar of light laid on the floor
         const uint64_t nowLo = noteHist[(size_t) ((trailAt - 1 + kHist) % kHist)][0], nowHi = noteHist[(size_t) ((trailAt - 1 + kHist) % kHist)][1];
         uint64_t anyLo = 0, anyHi = 0;
         for (auto& h : noteHist) { anyLo |= h[0]; anyHi |= h[1]; }
@@ -538,6 +625,7 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
     if (ready < want) sub = "making the sound: " + String(ready) + " / " + String(want) + " notes";
     else if (name.isEmpty()) sub = gl ? "play a pad or a chord: the voices glide from one to the next"
                                   : (tab == 2 ? "tap a pad or a key to drone on it, again to stop" : "play a pad, or chords from your keyboard");
+    else if (tab == 2) sub = String::fromUTF8("drag across the strings to strum   \xc2\xb7   mod wheel strums   \xc2\xb7   pitch wheel arps");
     g.setColour(dim);
     g.setFont(FontOptions(12.5f));
     g.drawText(sub, 24, name.isEmpty() ? 84 : 142, 600, 16, Justification::centredLeft);
@@ -551,7 +639,8 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
     };
     const float dockTop = rowA ? 412.0f : 454.0f;
     glass({12, dockTop, kW - 24.0f, 582.0f - dockTop}, 18);
-    if (sounds) glass({810, 68, 76, gl ? 204.0f : 140.0f}, 16);
+    if (tab == 2) glass({740, 68, 146, sounds ? 268.0f : 76.0f}, 16);
+    else if (sounds) glass({810, 68, 76, gl ? 204.0f : 140.0f}, 16);
 }
 
 void BricklabStudioEditor::resized() {                     // any size: the whole page scales, keeping its shape
@@ -565,7 +654,7 @@ void BricklabStudioEditor::layout() {
     const bool curves = gl && curvesBtn.getToggleState();
     const juce::Rectangle<int> none;
     for (juce::Component* c : std::initializer_list<juce::Component*>{&modeL, &arpL, &bassL, &octL, &glideChordL, &slideL, &glideL, &spaceL,
-                                                                      &volumeL, &glideToneL, &outNote, &soon})
+                                                                      &volumeL, &glideToneL, &outNote, &soon, &pulseL, &bloomL})
         c->setBounds(none);                                // the glass layout needs no captions
     auto put = [](juce::Rectangle<int>& r, juce::Component& c, int w) { c.setBounds(r.removeFromLeft(w)); r.removeFromLeft(8); };
 
@@ -580,8 +669,18 @@ void BricklabStudioEditor::layout() {
     // the knobs, on the right
     int ky = 74;
     if (gl) { glideTone.setBounds(818, ky, 60, 62); ky += 64; } else glideTone.setBounds(none);
-    space.setBounds(818, ky, 60, 62);
-    volume.setBounds(818, ky + 64, 60, 62);
+    if (drone) {                                             // two columns: the drone's motion, the strum, the room
+        juce::Slider* ks[] = {&droneY, &droneX, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &space, &volume};
+        int k = 0;
+        for (auto* sl : ks) {
+            if (!sl->isVisible()) continue;
+            sl->setBounds(748 + (k % 2) * 66, 74 + (k / 2) * 64, 60, 62);
+            ++k;
+        }
+    } else {
+        space.setBounds(818, ky, 60, 62);
+        volume.setBounds(818, ky + 64, 60, 62);
+    }
 
     // the dock: the pads, the page's main row above them, its second row above that
     const int w = (856 - 6 * 8) / 7;
@@ -604,8 +703,10 @@ void BricklabStudioEditor::layout() {
         a.removeFromLeft(8);
         put(a, mode, 150); put(a, arpOct, 78); put(a, bassMode, 120); put(a, bassLvl, 90);
     } else if (drone) {
-        put(a, third, 60); put(a, droneSlide, 130);
-        put(a, pulseL, 90); put(a, droneY, 120); put(a, bloomL, 88); put(a, droneX, 120);
+        put(a, droneChord, 150); put(a, droneSlide, 120);
+        a.removeFromLeft(12);
+        if (!proc.kMidiFx) put(a, pluckSound, 180);
+        put(a, pluckArp, 120); put(a, pluckRate, 80);
     } else if (lead)
         put(a, leadGlide, 140);
     else if (curves) {                                      // the routing, under the editor
@@ -640,10 +741,28 @@ void BricklabStudioEditor::timerCallback() {
         }
     }
     trailAt = (trailAt + 1) % kHist;
+    {                                                      // the plucks since last time: sparks, and their strings glow
+        const int serial = proc.pluckSerial.load();
+        for (int k = std::max(pluckSeen, serial - 16); k < serial; ++k) {
+            const int m = juce::jlimit(0, 127, proc.pluckRing[(size_t) (k & 31)].load());
+            sparks.push_back({m, 0.0f});
+            stringGlow[(size_t) m] = 1.0f;
+        }
+        pluckSeen = serial;
+        for (auto& sp : sparks) sp.age += 1.0f / 42.0f;
+        sparks.erase(std::remove_if(sparks.begin(), sparks.end(), [](const Spark& sp) { return sp.age >= 1.0f; }), sparks.end());
+        for (auto& gl : stringGlow) gl *= 0.9f;
+        const float ux = proc.uiStrum.load();
+        int ns = 0;
+        const uint64_t sLo = proc.stringBitsLo.load(), sHi = proc.stringBitsHi.load();
+        for (int m = 0; m < 128; ++m) if ((m < 64 ? sLo >> m : sHi >> (m - 64)) & 1) ++ns;
+        hoverString = ux < 0 || ns == 0 ? -1 : (int) std::lround(ux * (float) (ns - 1));
+    }
     if (proc.page() != tab) showTab(proc.page());       // the host changed it (automation, a preset)
-    if (tab == 2 && proc.droneDegree() != litDrone) {   // the pad that's droning stays lit
+    if (tab == 2) {                                     // the pad that's droning stays lit
         litDrone = proc.droneDegree();
-        for (int d = 0; d < pads.size(); ++d) { pads[d]->lit = d == litDrone; pads[d]->repaint(); }
+        for (int d = 0; d < pads.size(); ++d)
+            if (pads[d]->lit != (d == litDrone)) { pads[d]->lit = d == litDrone; pads[d]->repaint(); }
     }
     auto names = proc.padNames();
     for (int d = 0; d < pads.size(); ++d) {

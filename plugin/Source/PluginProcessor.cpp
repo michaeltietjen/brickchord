@@ -45,6 +45,19 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"dronethird", 1}, "Drone 3rd", false));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"droney", 1}, "Pulse / Swell", -1.f, 1.f, 0.f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"dronex", 1}, "Thin / Bloom", -1.f, 1.f, 0.f));
+    {
+        StringArray dc, ps;
+        for (auto* c : kDroneChords) dc.add(c);
+        for (auto* c : kPluckNames) ps.add(c);
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dronechord", 1}, "Drone chord", dc, 0));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"dronedrift", 1}, "Drone drift", 0.f, 1.f, 0.f));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"droneair", 1}, "Drone overtones", 0.f, 1.f, 0.35f));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"plucksound", 1}, "Pluck sound", ps, 0));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"plucklevel", 1}, "Pluck level", 0.f, 1.f, 0.7f));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"pluckecho", 1}, "Pluck echo", 0.f, 1.f, 0.35f));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"pluckarp", 1}, "Pluck arp", StringArray{"Off", "Up", "Down", "Bounce", "Random"}, 0));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"pluckrate", 1}, "Pluck arp rate", StringArray{"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1));
+    }
     {                                                        // the Glide page
         StringArray gs, ch, pa, ti, mo, tm, fa, be;
         for (int i : BricklabStudioProcessor::glideSounds()) gs.add(kPatches[i].name);
@@ -129,6 +142,10 @@ void BricklabStudioProcessor::prepareToPlay(double sampleRate, int) {
         }
     }
     if (!kMidiFx) { cache.setRate((int) std::lround(sampleRate)); rateChanged = true; }   // notes render at the host's rate
+    plucker.prepare(sampleRate);
+    pbL.assign(8192, 0.0f); pbR.assign(8192, 0.0f);
+    echoL.assign((size_t) (sampleRate * 2.0) + 16, 0.0f); echoR.assign(echoL.size(), 0.0f);
+    echoAt = 0;
     hall.prepare(sampleRate);
 }
 
@@ -153,6 +170,8 @@ void BricklabStudioProcessor::applySoundAndKey() {
     const int oct = (int) params.getRawParameterValue("octave")->load();
     player.setOctave(pg == ChordPage ? oct : 0);
     const bool fresh = rateChanged.exchange(false);
+    if (!kMidiFx && pg == DronePage)                        // the strum's instrument, at the host's rate (up to 48 kHz)
+        pluckBank.set((int) params.getRawParameterValue("plucksound")->load(), std::min(48000, (int) std::lround(sr)));
     if (!fresh && snd == lastSound && key == lastKey && sc == lastScale && oct == lastOct) return;
     lastOct = oct;
     if (snd != lastSound) {
@@ -165,7 +184,7 @@ void BricklabStudioProcessor::applySoundAndKey() {
     std::vector<int> w;
     if (pg == LeadPage || pg == DronePage || pg == GlidePage) {   // the lead's range from the middle out; the drone's and glide's low
         const int mid = pg == LeadPage ? 64 : (pg == DronePage ? 50 : 52);
-        for (int d = 0; d <= (pg == GlidePage ? 32 : 28); ++d) { if (mid + d < 128) w.push_back(mid + d); if (d && mid - d >= 0) w.push_back(mid - d); }
+        for (int d = 0; d <= (pg == LeadPage ? 28 : 34); ++d) { if (mid + d < 128) w.push_back(mid + d); if (d && mid - d >= 0) w.push_back(mid - d); }
     } else
         w = player.wanted();
     wantedCount = (int) std::count_if(w.begin(), w.end(), [](int m) { return m < 1000; });
@@ -356,6 +375,127 @@ void BricklabStudioProcessor::sendOff(juce::MidiBuffer& midi, int pos) {
     if (leadOut >= 0) { midi.addEvent(juce::MidiMessage::noteOff(1, leadOut), pos); leadOut = -1; }
     for (int m : droneOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), pos);
     droneOut.clear();
+    for (auto& o : pluckOffs) midi.addEvent(juce::MidiMessage::noteOff(3, o.second), pos);
+    pluckOffs.clear();
+    pluckLater.clear();
+}
+
+// ---------------------------------------------------------------- the strum and arp over the drone
+void BricklabStudioProcessor::setStrings(const std::vector<int>& chordNotes) {   // ambient.amb_strum_tones
+    std::set<int> pcs;
+    for (int m : chordNotes) pcs.insert(m % 12);
+    strings.clear();
+    for (int m = 52; m <= 88; ++m) if (pcs.count(m % 12)) strings.push_back(m);
+    uint64_t lo = 0, hi = 0;
+    for (int m : strings) { if (m < 64) lo |= 1ull << m; else hi |= 1ull << (m - 64); }
+    stringBitsLo = lo; stringBitsHi = hi;
+    strumUi = strumWheel = -1;
+    arpOn = false;
+}
+
+void BricklabStudioProcessor::pluckNow(int index, float vel, int pos, juce::MidiBuffer& midi, bool internal, bool out) {
+    if (strings.empty()) return;
+    index = juce::jlimit(0, (int) strings.size() - 1, index);
+    const int m = strings[(size_t) index];
+    const float level = params.getRawParameterValue("plucklevel")->load();
+    const float pan = strings.size() > 1 ? -0.6f + 1.2f * (float) index / (float) (strings.size() - 1) : 0.0f;
+    if (internal) plucker.pluck(m, vel * level * 1.6f, pan, pos);
+    if (out) {
+        for (auto it = pluckOffs.begin(); it != pluckOffs.end();)      // the same string again: its old note ends first
+            if (it->second == m) { midi.addEvent(juce::MidiMessage::noteOff(3, m), pos); it = pluckOffs.erase(it); } else ++it;
+        midi.addEvent(juce::MidiMessage::noteOn(3, m, (juce::uint8) juce::jlimit(1, 127, (int) std::lround(127 * vel * (0.4f + 0.6f * level)))), pos);
+        pluckOffs.push_back({pos + (int) (0.22 * sr), m});
+    }
+    pluckRing[(size_t) (pluckSerial.load() & 31)] = m;
+    ++pluckSerial;
+}
+
+void BricklabStudioProcessor::runPlucks(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, int n, bool internal, bool out, double bpm) {
+    const int ns = (int) strings.size();
+    // the pointer on the field: where it is across is the string it's on; a sweep plays each one it crosses
+    const float ux = uiStrum.load();
+    if (ux < 0 || ns == 0) strumUi = -1;
+    else {
+        const int idx = (int) std::lround(juce::jlimit(0.0f, 1.0f, ux) * (float) (ns - 1));
+        if (idx != strumUi) {
+            const int step = idx > strumUi ? 1 : -1;
+            int from = strumUi < 0 ? idx : strumUi + step, k = 0;
+            if (std::abs(idx - from) > 5) from = idx - 5 * step;
+            for (int j = from; j != idx + step; j += step) pluckLater.push_back({(k++) * (int) (0.014 * sr), j, 0.8f, 0});
+            strumUi = idx;
+        }
+    }
+    // the arp: the pitch wheel (up climbs, down falls, further is faster), or by itself in time with the host
+    const int style = (int) params.getRawParameterValue("pluckarp")->load();   // 0 off, up, down, bounce, random
+    const bool wheel = std::abs(arpY) > 0.18f;
+    if ((wheel || style > 0) && ns > 0) {
+        const int dir = wheel ? (arpY > 0 ? 1 : -1) : (style == 2 ? -1 : 1);
+        if (!arpOn) { arpOn = true; arpDir = dir; arpI = dir > 0 ? 0 : ns - 1; arpLeft = 0; }
+        if ((wheel || style < 3) && dir != arpDir) { arpI = ((arpI - arpDir + dir) % ns + ns) % ns; arpDir = dir; }   // turn round from the note just played
+        auto step = [&](int pos) {
+            const int i = ((arpI % ns) + ns) % ns;
+            pluckNow(i, 0.62f, pos, midi, internal, out);
+            if (!wheel && style == 3) {                      // bounce: up then down, the ends once each
+                int nx = i + arpDir;
+                if (nx < 0 || nx >= ns) { arpDir = -arpDir; nx = i + arpDir; }
+                arpI = juce::jlimit(0, ns - 1, nx);
+            } else if (!wheel && style == 4) {               // random: never the same string twice running
+                int nx = (int) (juce::Random::getSystemRandom().nextFloat() * (float) ns) % ns;
+                arpI = nx == i ? (nx + 1) % ns : nx;
+            } else
+                arpI = ((i + arpDir) % ns + ns) % ns;
+        };
+        static const double perBeat[] = {1, 2, 3, 4, 8};
+        const double npb = perBeat[juce::jlimit(0, 4, (int) params.getRawParameterValue("pluckrate")->load())];
+        double ppq = -1;
+        if (!wheel && hostPlaying)
+            if (auto* ph = getPlayHead())
+                if (auto p = ph->getPosition())
+                    if (auto q = p->getPpqPosition()) ppq = *q;
+        if (ppq >= 0) {                                      // on the host's grid
+            const double perSample = bpm / 60.0 / sr;
+            for (double k = std::ceil(ppq * npb - 1e-9);; k += 1) {
+                const double at = (k / npb - ppq) / perSample;
+                if (at >= n) break;
+                step(juce::jlimit(0, n - 1, (int) at));
+            }
+            arpLeft = 0;
+        } else {
+            const double k = juce::jlimit(0.0, 1.0, (std::abs((double) arpY) - 0.18) / 0.82);
+            const double every = wheel ? sr / (3.0 + 13.0 * std::pow(k, 1.3)) : sr * 60.0 / bpm / npb;
+            while (arpLeft < n) { step((int) arpLeft); arpLeft += every; }
+            arpLeft -= n;
+        }
+    } else
+        arpOn = false;
+    for (auto it = pluckLater.begin(); it != pluckLater.end();) {      // the strum's notes, each in its moment
+        if (it->wait < n) { pluckNow(it->midi, it->vel, std::max(0, it->wait), midi, internal, out); it = pluckLater.erase(it); }
+        else { it->wait -= n; ++it; }
+    }
+    for (auto it = pluckOffs.begin(); it != pluckOffs.end();) {
+        if (!out || it->first < n) { midi.addEvent(juce::MidiMessage::noteOff(3, it->second), juce::jlimit(0, n - 1, it->first)); it = pluckOffs.erase(it); }
+        else { it->first -= n; ++it; }
+    }
+    if (!internal || buffer.getNumChannels() < 2) return;
+    // the plucks' own bus: an echo that answers from side to side, a dotted eighth behind
+    if ((int) pbL.size() < n) { pbL.resize((size_t) n); pbR.resize((size_t) n); }
+    std::fill(pbL.begin(), pbL.begin() + n, 0.0f);
+    std::fill(pbR.begin(), pbR.begin() + n, 0.0f);
+    plucker.render(pbL.data(), pbR.data(), n);
+    const float wet = 0.85f * params.getRawParameterValue("pluckecho")->load(), fb = 0.42f;
+    const int len = (int) echoL.size();
+    const int back = juce::jlimit(64, len - 8, (int) (0.75 * 60.0 / bpm * sr));
+    float* L = buffer.getWritePointer(0);
+    float* R = buffer.getWritePointer(1);
+    for (int i = 0; i < n; ++i) {
+        const int rd = (echoAt - back + len) % len;
+        const float dl = echoL[(size_t) rd], dr = echoR[(size_t) rd];
+        echoL[(size_t) echoAt] = (pbL[(size_t) i] + pbR[(size_t) i]) * 0.5f + dr * fb;
+        echoR[(size_t) echoAt] = dl * fb;
+        echoAt = (echoAt + 1) % len;
+        L[i] += pbL[(size_t) i] + dl * wet;
+        R[i] += pbR[(size_t) i] + dr * wet;
+    }
 }
 
 void BricklabStudioProcessor::leadPlay(int m, int pos, juce::MidiBuffer& midi, bool internal, bool out) {
@@ -393,16 +533,27 @@ void BricklabStudioProcessor::droneToggle(int pc, int deg, int pos, juce::MidiBu
     if (pc == dronePc) {                                     // the same one again: off
         player.drone({}, 0);
         dronePc = -1; droneDegLit = -1;
+        setStrings({});
         setName({}, {});
         return;
     }
     const int oct = (int) params.getRawParameterValue("octave")->load();
     const int root = 36 + pc + 12 * std::max(0, oct);
+    const auto& sc = scaleSteps(player.scale());
+    auto up = [&](int steps) {                               // semitones up to the note that many scale steps above
+        return 12 * (steps / 7) + ((sc[(size_t) ((deg + steps) % 7)] - sc[(size_t) deg]) % 12 + 12) % 12;
+    };
     std::vector<int> notes{root, root + 7, root + 12, root + 19};
-    if (params.getRawParameterValue("dronethird")->load() > 0.5f) {
-        const auto& sc = scaleSteps(player.scale());
-        notes.push_back(root + 12 + ((sc[(size_t) ((deg + 2) % 7)] - sc[(size_t) deg]) % 12 + 12) % 12);
+    const int shape = juce::jlimit(0, kNumDroneChords - 1, (int) params.getRawParameterValue("dronechord")->load());
+    if (shape == 0) {
+        if (params.getRawParameterValue("dronethird")->load() > 0.5f) notes.push_back(root + 12 + up(2));
+    } else {                                                 // a chord over the root, in scale steps
+        static const std::vector<std::vector<int>> shapes = {{}, {0, 4, 9}, {0, 2, 4}, {0, 2, 4, 6}, {0, 2, 4, 8},
+                                                             {0, 1, 4}, {0, 3, 4}, {0, 3, 6, 9}, {0, 4, 8, 12}};
+        notes = {root};
+        for (int st : shapes[(size_t) shape]) notes.push_back(root + 12 + up(st));
     }
+    setStrings(notes);
     static const float slides[] = {0.f, 0.5f, 1.f, 2.f, 4.f};
     const float slide = slides[juce::jlimit(0, 4, (int) params.getRawParameterValue("droneslide")->load())];
     droneNotesNow = notes;
@@ -445,12 +596,9 @@ void BricklabStudioProcessor::runMono(juce::AudioBuffer<float>& buffer, juce::Mi
             if (auto b = pos->getBpm()) bpm = *b;
     player.setTempo(bpm);
     // the drone's motion: the knobs, or the wheels while they're moved (mod wheel pulses, pitch bend thins or blooms)
-    auto droneMotion = [&] {
-        const float x = std::abs(bendSemis) > 0.04f ? bendSemis / 2.0f : params.getRawParameterValue("dronex")->load();
-        const float y = vibDepth > 0.02f ? -vibDepth : params.getRawParameterValue("droney")->load();
-        player.droneMod(x, y);
-    };
-    droneMotion();
+    player.droneMod(params.getRawParameterValue("dronex")->load(), params.getRawParameterValue("droney")->load());
+    player.droneAir(params.getRawParameterValue("droneair")->load());
+    player.droneDrift(params.getRawParameterValue("dronedrift")->load());
 
     const int oct = (int) params.getRawParameterValue("octave")->load();
     const int key = player.key();
@@ -461,19 +609,33 @@ void BricklabStudioProcessor::runMono(juce::AudioBuffer<float>& buffer, juce::Mi
     for (auto& e : acts) {
         if (audio && e.pos > at) { player.render(L + at, R + at, e.pos - at); at = e.pos; }
         if (e.type == 4) {                                   // pitch bend: 2 semitones, as most synths
+            if (pg != LeadPage) { arpY = (float) (e.a - 8192) / 8192.0f; continue; }   // over the drone: the arp
             bendSemis = (float) (e.a - 8192) / 8192.0f * 2.0f;
-            if (pg == LeadPage) player.leadMod(bendSemis, vibDepth); else droneMotion();
-            if (out && pg == LeadPage) midi.addEvent(juce::MidiMessage::pitchWheel(1, e.a), e.pos);
+            player.leadMod(bendSemis, vibDepth);
+            if (out) midi.addEvent(juce::MidiMessage::pitchWheel(1, e.a), e.pos);
             continue;
         }
         if (e.type == 5) {                                   // the mod wheel: vibrato
+            if (pg != LeadPage) {                            // over the drone: sweeping it strums the strings it crosses
+                if (!strings.empty()) {
+                    const int idx = (int) std::lround((float) e.a / 127.0f * (float) (strings.size() - 1));
+                    if (idx != strumWheel) {
+                        const int step = idx > strumWheel ? 1 : -1;
+                        int from = strumWheel < 0 ? idx : strumWheel + step, k = 0;
+                        if (std::abs(idx - from) > 5) from = idx - 5 * step;
+                        for (int j = from; j != idx + step; j += step) pluckLater.push_back({e.pos + (k++) * (int) (0.014 * sr), j, 0.8f, 0});
+                        strumWheel = idx;
+                    }
+                }
+                continue;
+            }
             vibDepth = (float) e.a / 127.0f;
-            if (pg == LeadPage) player.leadMod(bendSemis, vibDepth); else droneMotion();
-            if (out && pg == LeadPage) midi.addEvent(juce::MidiMessage::controllerEvent(1, 1, e.a), e.pos);
+            player.leadMod(bendSemis, vibDepth);
+            if (out) midi.addEvent(juce::MidiMessage::controllerEvent(1, 1, e.a), e.pos);
             continue;
         }
         if (e.type == 6) {                                   // panic
-            if (dronePc >= 0) { player.drone({}, 0); for (int m : droneOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), e.pos); droneOut.clear(); dronePc = -1; droneDegLit = -1; setName({}, {}); }
+            if (dronePc >= 0) { player.drone({}, 0); for (int m : droneOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), e.pos); droneOut.clear(); dronePc = -1; droneDegLit = -1; setStrings({}); setName({}, {}); }
             continue;
         }
         if ((e.type == 2 || e.type == 3) && (e.a < 0 || e.a > 6)) continue;   // not a pad of this page
@@ -491,10 +653,11 @@ void BricklabStudioProcessor::runMono(juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
     if (audio && at < n) player.render(L + at, R + at, n - at);
+    if (pg == DronePage) runPlucks(buffer, midi, n, internal, out, bpm);
 
     // MIDI out pulses the drone too: the same gate as expression (CC 11), so any synth breathes with it
     if (out && pg == DronePage && !droneOut.empty()) {
-        float y = vibDepth > 0.02f ? -vibDepth : params.getRawParameterValue("droney")->load();
+        float y = params.getRawParameterValue("droney")->load();
         y = std::abs(y) < 0.25f ? 0.0f : (std::abs(y) - 0.25f) / 0.75f * (y > 0 ? 1.0f : -1.0f);
         for (int i = 0; i < n; i += 128) {
             const int v = y < 0 ? (int) std::lround(127 * dronePulse(y, (double) (clock + i) / sr, bpm)) : 127;
@@ -784,6 +947,8 @@ const std::vector<Preset>& presets() {
         {"Drone: Deep Space Pulse", {{"page", 2}, {"dronesound", 0}, {"droney", -0.75f}, {"droneslide", 2}}},
         {"Drone: Cathedral Bloom", {{"page", 2}, {"dronesound", 3}, {"dronex", 0.75f}, {"dronethird", 1}}},
         {"Glide: Crossing Voices", {{"page", 3}, {"glidesound", 1}, {"glidechord", 0}, {"glidetime", 5}, {"glidepath", 2}, {"glidecross", 1}, {"glidefade", 2}}},
+        {"Drone: Harp Over Quartal", {{"page", 2}, {"dronesound", 0}, {"dronechord", 7}, {"dronedrift", 0.5f}, {"droneair", 0.6f}, {"pluckarp", 1}, {"pluckrate", 3}, {"pluckecho", 0.5f}}},
+        {"Drone: Drifting Ninth", {{"page", 2}, {"dronesound", 1}, {"dronechord", 4}, {"dronedrift", 0.8f}, {"droneair", 0.8f}, {"plucksound", 7}, {"pluckarp", 4}, {"pluckrate", 1}}},
     };
     return p;
 }
@@ -869,6 +1034,7 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
                 uiQueue.clear();
             }
             dronePc = -1; droneDegLit = -1;
+            setStrings({}); plucker.clear();
             setName({}, {});
         }
         lastPage = pg;

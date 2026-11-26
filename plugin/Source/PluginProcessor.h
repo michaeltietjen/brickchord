@@ -8,6 +8,7 @@
 #include "core/Engine.h"
 #include "core/Patterns.h"
 #include "core/Glide.h"
+#include "core/Pluck.h"
 #include "core/Hall.h"
 
 class BricklabStudioProcessor : public juce::AudioProcessor, private juce::Timer {
@@ -68,6 +69,12 @@ public:
     juce::File writePhrase();                 // the last 8 bars as a .mid file (or an empty File if nothing was played)
     bool hasPhrase() const { return captured.load() > 0; }
     std::atomic<uint64_t> noteBitsLo{0}, noteBitsHi{0};   // which notes sound now (Chord and Drone), for the page's field
+    // the strum and arp over the drone: the strings (the chord's notes across three octaves), and what was plucked
+    std::atomic<uint64_t> stringBitsLo{0}, stringBitsHi{0};
+    std::atomic<float> uiStrum{-1.0f};        // the pointer across the field, 0..1 (below 0: lifted)
+    std::atomic<int> pluckSerial{0};
+    std::array<std::atomic<int>, 32> pluckRing{};
+    const brick::Player& dronePlayer() const { return player; }
     static juce::StringArray soundNames();
 
 private:
@@ -139,6 +146,22 @@ private:   // the free-running 16th clock (when the host isn't playing)
     brick::NoteCache cache;
     brick::Player player{cache};
     brick::Hall hall;                         // the reverb (Space)
+    brick::PluckBank pluckBank;               // the strum's own instruments (the handheld's), made apart from the drone's sound
+    brick::Plucker plucker{pluckBank};
+    std::vector<int> strings;                 // the notes a strum crosses, low to high
+    struct PluckLater { int wait, midi; float vel, pan; };
+    std::vector<PluckLater> pluckLater;       // a strum's notes, a few milliseconds apart
+    std::vector<std::pair<int, int>> pluckOffs;   // MIDI out: (samples until the note-off, note) on channel 3
+    int strumUi = -1, strumWheel = -1;        // the string each hand is on (-1: none yet)
+    float arpY = 0;                           // the pitch wheel: up climbs, down falls
+    bool arpOn = false;
+    int arpI = 0, arpDir = 1;
+    double arpLeft = 0;                       // samples until the arp's next note (free running)
+    std::vector<float> pbL, pbR, echoL, echoR;    // the plucks' own bus and its echo
+    int echoAt = 0;
+    void runPlucks(juce::AudioBuffer<float>&, juce::MidiBuffer&, int n, bool internal, bool out, double bpm);
+    void pluckNow(int index, float vel, int pos, juce::MidiBuffer&, bool internal, bool out);
+    void setStrings(const std::vector<int>& chordNotes);
     std::set<int> held;                       // MIDI keys down
     int pending = -1;                         // samples until held keys are read (a chord's notes arrive one by one)
     int lastSound = -1, lastKey = -1, lastScale = -1, lastOct = 0;
