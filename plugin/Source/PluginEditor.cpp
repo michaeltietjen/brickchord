@@ -249,6 +249,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     octave.addItemList({"Oct -2", "Oct -1", "Oct 0", "Oct +1", "Oct +2"}, 1);
     droneSlide.addItemList({"Slide off", "Slide 0.5 s", "Slide 1 s", "Slide 2 s", "Slide 4 s"}, 1);
     for (int i = 0; i < brick::kNumDroneChords; ++i) droneChord.addItem(brick::kDroneChords[i], i + 1);
+    for (int i = 0; i < brick::kNumChordColours; ++i) chordColour.addItem(brick::kChordColours[i], i + 1);
+    addAndMakeVisible(chordColour);
     for (int i = 0; i < brick::kNumPluckInsts; ++i) pluckSound.addItem(juce::String("Strum: ") + brick::kPluckInsts[i].name, i + 1);
     glideReach.addItemList({"Range: tight", "Range: normal", "Range: free"}, 1);
     addAndMakeVisible(glideReach);
@@ -315,6 +317,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aLeadGlide = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "leadglide", leadGlide);
     aDroneY = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "droney", droneY);
     aDroneChord = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "dronechord", droneChord);
+    aChordColour = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "chordcolour", chordColour);
     aPluckSound = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "plucksound", pluckSound);
     aPluckArp = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "pluckarp", pluckArp);
     aPluckRate = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "pluckrate", pluckRate);
@@ -424,6 +427,7 @@ void BricklabStudioEditor::showTab(int t) {
     third.setVisible(false);                                 // the Triad chord shape does this now
     show({&droneSlide, &droneChord, &droneY, &droneX, &pluckArp, &pluckRate}, drone);
     stopBtn.setVisible(gl || drone);
+    chordColour.setVisible(tab == 0);
     show({&pluckSound, &cloudStyle, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud}, drone && sounds);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
                     juce::dontSendNotification);
@@ -709,10 +713,10 @@ void BricklabStudioEditor::layout() {
 
     auto a = juce::Rectangle<int>(22, 424, 856, 32);
     if (chord) {
-        for (auto* m : modButtons) put(a, *m, 60);
-        put(a, latch, 60);
+        for (auto* m : modButtons) put(a, *m, 52);
+        put(a, latch, 52);
         a.removeFromLeft(8);
-        put(a, mode, 150); put(a, arpOct, 78); put(a, bassMode, 120); put(a, bassLvl, 90);
+        put(a, chordColour, 124); put(a, mode, 130); put(a, arpOct, 74); put(a, bassMode, 110); put(a, bassLvl, 70);
     } else if (drone) {
         put(a, stopBtn, 52); put(a, droneChord, 132); put(a, droneSlide, 104);
         a.removeFromLeft(12);

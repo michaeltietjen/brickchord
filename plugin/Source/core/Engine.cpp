@@ -140,6 +140,26 @@ int degreeOf(int note, int key, Scale scale) {
 
 Chord Player::playDegree(int degree, const Mods& m) {
     Chord c = buildChord(key_, scale_, ((degree % 7) + 7) % 7, m);
+    if (colour_ > 0 && !(m.seventh || m.sus || m.sus2 || m.ninth || m.flip || m.maj7 || m.dim || m.aug)) {   // a colour chord, unless a button asks for something else
+        static const std::vector<std::vector<int>> semis = {{}, {0, 7, 16, 19, 26}, {0, 2, 7, 14}, {0, 5, 10, 15, 20}, {0, 4, 6, 11, 14, 18},
+                                                            {0, 3, 7, 10, 14, 17}, {0, 4, 7, 11, 14}, {0, 7, 14, 21}, {0, 2, 3, 5, 7}};
+        static const char* const names[] = {"", "Open", "Sus2", "Quartal", "Lydian", "Minor 11", "Major 9", "Fifths", "Cluster"};
+        const int k = std::min(colour_, (int) semis.size() - 1);
+        c.iv.clear();
+        for (int x : semis[(size_t) k]) if (std::find(c.iv.begin(), c.iv.end(), x % 12) == c.iv.end()) c.iv.push_back(x % 12);
+        size_t n = c.name.empty() ? 0 : 1;                   // the root's own name, then the colour's
+        while (n < c.name.size() && (c.name[n] == '#' || c.name[n] == 'b')) ++n;
+        c.name = c.name.substr(0, n) + " " + names[k];
+        // voiced as the shape itself, spread wide from the octave below middle C: the spacing is the colour
+        int bass = 36 + c.root;
+        if (bass < 40) bass += 12;
+        const int base = 43 + ((c.root - 43) % 12 + 12) % 12;      // the root between G2 and F#3
+        std::vector<int> notes{bass}, upper;
+        for (int x : semis[(size_t) k]) if (base + x != bass && base + x <= 84) { notes.push_back(base + x); upper.push_back(base + x); }
+        { std::lock_guard<std::mutex> l(vmx_); prev_ = upper; }
+        start(notes);
+        return c;
+    }
     std::vector<int> notes;
     {
         std::lock_guard<std::mutex> l(vmx_);

@@ -75,6 +75,7 @@ public:
     void prepare(double sampleRate) { sr_ = sampleRate; }
     // the chord buttons: the chord on a degree of the key, voiced as the handheld does
     Chord playDegree(int degree, const Mods& m);
+    void setColour(int c) { colour_ = c; }               // 0: the scale's chords; else a colour shape on each pad's root
     Chord playExact(const std::vector<int>& notes);    // keys held together: that chord
     void release();
     void setKey(int key, Scale s) { key_ = key; scale_ = s; prev_.clear(); }
@@ -111,6 +112,7 @@ private:
     std::vector<GVoice> gv_;
     std::vector<int> droneNotes_;
     float bend_ = 0, vib_ = 0, dx_ = 0, dy_ = 0, air_ = 0, drift_ = 0;
+    int colour_ = 0;
     double driftLeft_ = 0;
     uint32_t rng_ = 4242;
     float rnd() { rng_ = rng_ * 1664525u + 1013904223u; return (float) (rng_ >> 8) / 16777216.0f; }

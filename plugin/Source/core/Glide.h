@@ -61,6 +61,9 @@ inline float timeSeconds(const float* secs, int n, int index, double bpm) {
 }
 inline const int kGlideBends[] = {1, 2, 3, 5, 7, 12, 24};   // semitones at full pitch bend
 constexpr int kNumGlideBends = 7;
+// the Chord page's colours: the pads play these shapes in place of the scale's own chords (the same shapes as Glide's)
+inline const char* const kChordColours[] = {"Scale chords", "Open", "Sus2", "Quartal", "Lydian", "Minor 11", "Major 9", "Fifths", "Cluster"};
+constexpr int kNumChordColours = 9;
 // the drone's chords: what sounds over the root
 inline const char* const kDroneChords[] = {"Root and fifth", "Open", "Triad", "Seventh", "Ninth", "Sus2", "Sus4", "Quartal", "Fifths",
                                            "Lydian", "Minor 11", "Major 9", "Cluster"};

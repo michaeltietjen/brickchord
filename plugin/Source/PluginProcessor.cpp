@@ -118,6 +118,9 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         for (auto* c : kDroneChords) dc.add(c);
         for (auto& c : kPluckInsts) ps.add(c.name);
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dronechord", 1}, "Drone chord", dc, 0));
+        StringArray cc;
+        for (auto* c : kChordColours) cc.add(c);
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"chordcolour", 1}, "Chord colour", cc, 0));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"dronedrift", 1}, "Drone drift", 0.f, 1.f, 0.f));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"droneair", 1}, "Drone overtones", 0.f, 1.f, 0.35f));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"plucksound", 1}, "Pluck sound", ps, 0));
@@ -306,6 +309,7 @@ Mods BricklabStudioProcessor::heldMods() const {           // 7th, sus4, 9th, fl
 }
 
 void BricklabStudioProcessor::padDown(int degree, int pos) {
+    player.setColour((int) params.getRawParameterValue("chordcolour")->load());
     auto c = player.playDegree(degree, heldMods());
     queueOut(true, pos);
     const juce::SpinLock::ScopedLockType l(nameLock);

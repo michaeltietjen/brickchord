@@ -60,6 +60,15 @@ int main(int argc, char** argv) {
         for (int k = 0; k < 8; ++k) run(0.25, "  to G");
         return 0;
     }
+    if (argc > 2 && juce::String(argv[2]) == "colour") {                  // vst3host plugin.vst3 colour: the Chord page's Open
+        setPage(0);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(1500);
+        key(true, 62); run(0.3, "D, scale chord"); key(false, 62); run(0.2, "off");
+        for (auto* q : p->getParameters()) if (q->getName(64) == "Chord colour") q->setValueNotifyingHost(1.0f / 8.0f);
+        key(true, 62); run(0.3, "D, Open"); key(false, 62); run(0.2, "off");
+        key(true, 57); run(0.3, "A, Open"); key(false, 57); run(0.2, "off");
+        return 0;
+    }
     if (argc > 2 && juce::String(argv[2]) == "drone") {                   // vst3host plugin.vst3 drone: the strum and arp
         auto set = [&](const char* name, float v01) { for (auto* q : p->getParameters()) if (q->getName(64) == name) q->setValueNotifyingHost(v01); };
         setPage(2);
