@@ -126,7 +126,8 @@ private:
     int64_t mpeRefreshAt = 0;
     bool hostPlaying = false;
     juce::String instanceId = juce::Uuid().toString();
-    std::vector<int> glideNotesOut;           // the Notes mode's chord on MIDI out
+    std::vector<int> glideNotesOut;           // the Notes and Walk modes' notes on MIDI out
+    std::array<int, brick::kGlideVoices> walkNote = {-1, -1, -1, -1, -1, -1};   // Walk: the note each voice is on (-1: none)
     bool mpeReady = false, wasPlaying = false;
     float glideSwell = 0;
     int lastExpr = 127;                               // the expression MIDI out last sent (the drone's pulse)

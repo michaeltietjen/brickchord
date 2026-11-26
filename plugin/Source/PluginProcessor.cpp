@@ -164,7 +164,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidetbdepth", 1}, "Glide timbre depth", 0.f, 1.f, 1.f));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidelfo", 1}, "Glide LFO rate", NormalisableRange<float>(0.05f, 8.f, 0.f, 0.4f), 0.5f));
         l.add(std::make_unique<AudioParameterBool>(ParameterID{"glidestrike", 1}, "Glide strike each chord", true));
-        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidempe", 1}, "Glide MIDI out", StringArray{"MPE", "Notes"}, 0));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidempe", 1}, "Glide MIDI out", StringArray{"MPE", "Notes", "Walk"}, 0));
     }
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"key", 1}, "Key",
         StringArray{"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 9));
@@ -824,7 +824,7 @@ void BricklabStudioProcessor::runMono(juce::AudioBuffer<float>& buffer, juce::Mi
 
 // ---------------------------------------------------------------- the Glide page
 void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool allOff) {
-    const int mode = std::min(1, (int) params.getRawParameterValue("glidempe")->load());   // 0 MPE, 1 notes
+    const int mode = std::min(2, (int) params.getRawParameterValue("glidempe")->load());   // 0 MPE, 1 notes, 2 walk
     const int prSrc = (int) params.getRawParameterValue("glideprsrc")->load();
     if (allOff || mode != lastOutMode) {                     // everything off (also when the mode changes mid-chord)
         for (int i = 0; i < kGlideVoices; ++i)
@@ -834,17 +834,44 @@ void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool all
         if (mpeExpr != 127 && mpeExpr >= 0) { midi.addEvent(juce::MidiMessage::controllerEvent(1, 11, 127), pos); mpeExpr = 127; }
         if (mode != lastOutMode) mpeReady = false;
         lastOutMode = mode;
+        walkNote.fill(-1);
         if (allOff) return;
     }
-    if (mode == 1) {                                         // Notes: the chord as plain notes, no glide
-        std::vector<int> want;
-        for (int i = 0; i < kGlideVoices; ++i)
-            if (glide.on[(size_t) i]) want.push_back((int) std::lround(glide.target[(size_t) i] / 100.0f));
+    if (mode >= 1) {                                         // Notes: the chord as plain notes, no glide
+        std::vector<int> want;                               // Walk: for an instrument that cannot bend, each voice
+        std::set<int> arrived;                               // steps to its note through the scale, as real notes
+        const auto& scl = scaleSteps(player.scale());
+        const int key = player.key();
+        for (int i = 0; i < kGlideVoices; ++i) {
+            if (!glide.on[(size_t) i]) { walkNote[(size_t) i] = -1; continue; }
+            const int tgt = (int) std::lround(glide.target[(size_t) i] / 100.0f);
+            if (mode == 1) { want.push_back(tgt); arrived.insert(tgt); continue; }
+            const double c = glide.cents[(size_t) i];
+            int& wn = walkNote[(size_t) i];
+            if (wn < 0 || std::abs(c - tgt * 100.0) < 45.0) wn = tgt;          // there (or just starting): the note itself
+            else {
+                int best = wn; double bd = 1e9;                                  // the scale note it is passing now
+                for (int m = (int) std::floor(c / 100.0) - 2; m <= (int) std::ceil(c / 100.0) + 2; ++m) {
+                    const int pc = ((m - key) % 12 + 12) % 12;
+                    if (std::find(scl.begin(), scl.end(), pc) == scl.end()) continue;
+                    const double d = std::abs(c - m * 100.0);
+                    if (d < bd) { bd = d; best = m; }
+                }
+                const bool between = (best - wn) * (tgt - wn) > 0 && std::abs(best - wn) <= std::abs(tgt - wn);   // only ever towards it
+                if (best != wn && between && bd < 55.0) wn = best;
+            }
+            want.push_back(juce::jlimit(0, 127, wn));
+            if (wn == tgt) arrived.insert(wn);
+        }
         std::sort(want.begin(), want.end());
         want.erase(std::unique(want.begin(), want.end()), want.end());
-        if (want != glideNotesOut) {
-            for (int m : glideNotesOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), pos);
-            for (int m : want) midi.addEvent(juce::MidiMessage::noteOn(1, m, (juce::uint8) juce::jlimit(1, 127, (int) (glide.velocity() * 127))), pos);
+        if (want != glideNotesOut) {                         // the new ones on before the old ones off, so a line stays joined
+            const float vel = glide.velocity();
+            for (int m : want)
+                if (std::find(glideNotesOut.begin(), glideNotesOut.end(), m) == glideNotesOut.end())
+                    midi.addEvent(juce::MidiMessage::noteOn(1, m, (juce::uint8) juce::jlimit(1, 127, (int) (vel * (arrived.count(m) ? 127 : 96)))), pos);   // passing notes a little softer
+            for (int m : glideNotesOut)
+                if (std::find(want.begin(), want.end(), m) == want.end()) midi.addEvent(juce::MidiMessage::noteOff(1, m), pos);
             glideNotesOut = want;
         }
         float lv = 0;                                        // the fades and swells, as expression (CC 11)

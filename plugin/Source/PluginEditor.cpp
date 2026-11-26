@@ -207,7 +207,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (auto& t : brick::timeNames(brick::kGlideTimes, brick::kNumGlideTimes, "Glide")) glideTime.addItem(t, glideTime.getNumItems() + 1);
     for (auto& t : brick::timeNames(brick::kGlideFades, brick::kNumGlideFades, "Fade")) glideFade.addItem(t, glideFade.getNumItems() + 1);
     for (int i = 0; i < brick::kNumGlideBends; ++i) glideBend.addItem("Bend " + juce::String(brick::kGlideBends[i]) + " st", i + 1);
-    glideMpe.addItemList({"Out: MPE", "Out: notes", "Out: MPE + pressure"}, 1);
+    glideMpe.addItemList({"Out: MPE", "Out: notes", "Out: walk"}, 1);   // one item per choice of the parameter, in its order
     for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideCross, &glideTime, &glideFade, &glideBend, &glideMpe})
         addAndMakeVisible(c);
     glideSub.setClickingTogglesState(true);

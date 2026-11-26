@@ -50,6 +50,16 @@ int main(int argc, char** argv) {
         if (bends) { std::cout << "      bends now (st):"; for (int c = 2; c <= 7; ++c) std::cout << " " << juce::String((lastBend[c] - 8192) / 8191.0 * 48.0, 1); std::cout << "\n"; }
     };
     auto key = [&](bool on, int k) { pend.addEvent(on ? juce::MidiMessage::noteOn(1, k, (juce::uint8) 100) : juce::MidiMessage::noteOff(1, k), 0); };
+    if (argc > 2 && juce::String(argv[2]) == "walk") {                    // vst3host plugin.vst3 walk: Glide's Walk out mode
+        for (auto* q : p->getParameters()) if (q->getName(64) == "Glide MIDI out") q->setValueNotifyingHost(1.0f);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(1500);
+        key(true, 57); run(0.05, "A"); key(false, 57); run(1.0, "Am");
+        key(true, 62); run(0.05, "D"); key(false, 62);
+        for (int k = 0; k < 8; ++k) run(0.25, "  to Dm");
+        key(true, 55); run(0.05, "G"); key(false, 55);
+        for (int k = 0; k < 8; ++k) run(0.25, "  to G");
+        return 0;
+    }
     if (argc > 2 && juce::String(argv[2]) == "drone") {                   // vst3host plugin.vst3 drone: the strum and arp
         auto set = [&](const char* name, float v01) { for (auto* q : p->getParameters()) if (q->getName(64) == name) q->setValueNotifyingHost(v01); };
         setPage(2);
