@@ -77,3 +77,22 @@ voice's fades and swells as pressure (for patches that map pressure to level). T
 synth (Pigments: Settings, MPE). Or set Out to notes for any synth: the chords
 as plain notes, the fades as expression (CC 11). Chord sends chords on channel 1 and the bass on
 channel 2; Drone sends its pulse as expression.
+
+## The MPE editor (Glide: curves)
+
+**curves** turns the Glide screen into an editor for how a glide travels. Three lanes, each nine
+points from "glide starts" to "arrives":
+
+- **Pitch**: the path from the old note to the new one (overshoot allowed). Shapes: Ease, Linear,
+  Late, Snap, Over, Bounce, Stairs.
+- **Pressure** and **Timbre**: how each voice's pressure and timbre move over the glide.
+
+Pick a shape, or drag the points. Edit **All** voices at once, or pick a voice (1 to 5) to give it
+its own curve. A dot shows each voice moving along its curve as it glides. Drawing in a lane turns
+it on: the path becomes "Custom (curves)", or that lane becomes the pressure / timbre source.
+
+Under the editor, the routing: what drives **Pressure** (Off, the fades, the glide curve, an LFO,
+the mod wheel, velocity) and **Timbre** (mod wheel, glide curve, LFO, voice height, the fades),
+each with a depth, and the LFO's rate. In the MIDI build these go out per voice as MPE pressure and
+timbre (CC 74); in the instrument they shape each voice's level and filter. The curves are saved
+with your project. The pads are hidden while you edit: play from your keyboard, or 1 to 7.

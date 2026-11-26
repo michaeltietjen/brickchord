@@ -99,8 +99,26 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     glideSub.setClickingTogglesState(true);
     bloomBtn.onClick = [this] { proc.uiPad(101, true); };
     stopBtn.onClick = [this] { proc.uiPad(100, true); };
+    // the MPE editor: the curves a glide follows, and what drives pressure and timbre
+    curveEd = std::make_unique<CurveEditor>(proc.glide, proc.params);
+    addChildComponent(*curveEd);
+    curvesBtn.setClickingTogglesState(true);
+    curvesBtn.onClick = [this] { if (curvesBtn.getToggleState()) glideMore.setToggleState(false, juce::dontSendNotification); showTab(tab); };
+    addAndMakeVisible(curvesBtn);
+    for (int i = 0; i < brick::kNumPressureSources; ++i) prSrc.addItem(brick::kPressureSources[i], i + 1);
+    for (int i = 0; i < brick::kNumTimbreSources; ++i) tbSrc.addItem(brick::kTimbreSources[i], i + 1);
+    for (auto* c : {&prSrc, &tbSrc}) addAndMakeVisible(c);
+    for (auto* s : {&prDepth, &tbDepth, &lfoRate}) {
+        s->setSliderStyle(juce::Slider::LinearHorizontal);
+        s->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        addAndMakeVisible(s);
+    }
+    prL.setText("Pressure", juce::dontSendNotification);
+    tbL.setText("Timbre", juce::dontSendNotification);
+    lfoL.setText("LFO", juce::dontSendNotification);
+    for (auto* l : {&prL, &tbL, &lfoL}) { l->setColour(juce::Label::textColourId, dim); addAndMakeVisible(l); }
     glideMore.setClickingTogglesState(true);                 // the plumbing (timing, bend range, MIDI out) behind "more"
-    glideMore.onClick = [this] { showTab(tab); };
+    glideMore.onClick = [this] { if (glideMore.getToggleState()) curvesBtn.setToggleState(false, juce::dontSendNotification); showTab(tab); };
     for (auto* b : {&bloomBtn, &stopBtn, &glideSub, &glideMore}) addAndMakeVisible(b);
     glideTone.setSliderStyle(juce::Slider::LinearHorizontal);
     glideTone.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
@@ -182,6 +200,11 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aGlideFade = std::make_unique<CA>(ps, "glidefade", glideFade);
     aGlideBend = std::make_unique<CA>(ps, "glidebend", glideBend);
     aGlideMpe = std::make_unique<CA>(ps, "glidempe", glideMpe);
+    aPrSrc = std::make_unique<CA>(ps, "glideprsrc", prSrc);
+    aTbSrc = std::make_unique<CA>(ps, "glidetbsrc", tbSrc);
+    aPrDepth = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glideprdepth", prDepth);
+    aTbDepth = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidetbdepth", tbDepth);
+    aLfoRate = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidelfo", lfoRate);
     aGlideTone = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidetone", glideTone);
     aGlideSub = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "glidesub", glideSub);
     aLatch = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "latch", latch);
@@ -238,7 +261,11 @@ void BricklabStudioEditor::showTab(int t) {
     for (int i = 0; i < tabs.size(); ++i) tabs[i]->setToggleState(TAB_PAGES[i] == t, juce::dontSendNotification);
     const bool chord = t == 0, lead = t == 1, drone = t == 2, gl = t == 3, playing = true, sounds = !proc.kMidiFx;
     auto show = [](std::initializer_list<juce::Component*> cs, bool on) { for (auto* c : cs) c->setVisible(on); };
-    for (auto* p : pads) p->setVisible(playing);
+    const bool curves = gl && curvesBtn.getToggleState();   // the MPE editor takes the screen and the pads' place
+    for (auto* p : pads) p->setVisible(playing && !curves);
+    curveEd->setVisible(curves);
+    curvesBtn.setVisible(gl);
+    show({&prSrc, &tbSrc, &prDepth, &tbDepth, &lfoRate, &prL, &tbL, &lfoL}, curves);
     for (auto* b : modButtons) b->setVisible(chord);
     latch.setVisible(chord);
     show({&sound, &bassLvl}, chord && sounds);
@@ -252,7 +279,7 @@ void BricklabStudioEditor::showTab(int t) {
     const bool more = glideMore.getToggleState();
     show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore}, gl);
     show({&glideTone, &glideToneL}, gl && sounds);
-    show({&glidePath, &glideMove, &glideTime, &glideFade}, gl && !more);
+    show({&glidePath, &glideMove, &glideTime, &glideFade}, gl && !more && !curves);
     show({&glideTiming, &glideBend}, gl && more);
     show({&glideMpe}, gl && more && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
@@ -413,7 +440,17 @@ void BricklabStudioEditor::layoutRows() {           // the bottom row: what this
         stopBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(20);
         glideChordL.setBounds(mod.removeFromLeft(48)); glideChord.setBounds(mod.removeFromLeft(140).reduced(0, 2)); mod.removeFromLeft(10);
         glideSub.setBounds(mod.removeFromLeft(70));
-        glideMore.setBounds(mod.removeFromRight(86)); mod.removeFromRight(12);
+        glideMore.setBounds(mod.removeFromRight(86)); mod.removeFromRight(8);
+        curvesBtn.setBounds(mod.removeFromRight(86)); mod.removeFromRight(12);
+        curveEd->setBounds(22, 72, kW - 44, 298);
+        {
+            auto rt = outRow;                                // the routing, under the editor
+            prL.setBounds(rt.removeFromLeft(66)); prSrc.setBounds(rt.removeFromLeft(150)); rt.removeFromLeft(6);
+            prDepth.setBounds(rt.removeFromLeft(90)); rt.removeFromLeft(16);
+            tbL.setBounds(rt.removeFromLeft(54)); tbSrc.setBounds(rt.removeFromLeft(150)); rt.removeFromLeft(6);
+            tbDepth.setBounds(rt.removeFromLeft(90)); rt.removeFromLeft(16);
+            lfoL.setBounds(rt.removeFromLeft(36)); lfoRate.setBounds(rt.removeFromLeft(110));
+        }
         glideTone.setBounds(mod.removeFromRight(120)); glideToneL.setBounds(mod.removeFromRight(42));
         auto adv = outRow;
         glideTime.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(10);
@@ -454,6 +491,7 @@ void BricklabStudioEditor::timerCallback() {
         }
     }
     canvas.repaint(0, 56, kW, 200);
+    if (curveEd->isVisible()) curveEd->repaint();
     dragMidi.repaint();
 }
 

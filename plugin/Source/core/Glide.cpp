@@ -151,7 +151,7 @@ void GlideEngine::layOut(const std::vector<int>& notes) {   // from silence: the
 
 void GlideEngine::glideAll(const std::vector<int>& notes, float glideX) {   // ambient.amb_glide_all
     const int path = st_.path % kNumGlidePaths;
-    int shape = path == 9 ? 2 : path;
+    int shape = path == 9 ? 2 : path;                        // 10: the editor's curve, per voice
     double secs = st_.time * glideX;
     std::vector<double> delays(kNCH, 0.0);
     std::vector<std::vector<double>> vias(kNCH);
@@ -180,7 +180,7 @@ void GlideEngine::glideAll(const std::vector<int>& notes, float glideX) {   // a
             } else if (name == "Converge") vias[(size_t) i] = {(lo + hi) * 50.0};
             else if (name == "Fall") vias[(size_t) i] = {c + 1200.0};
         }
-        if (path == 9 || path == 8) shape = 2;                   // through a Move's turning points, an ease reads best
+        if (path == 9 || path == 8 || path == kPathCustom) shape = 2;                   // through a Move's turning points, an ease reads best
     }
     for (int k = 0; k < kNCH; ++k) {
         const int i = rank[(size_t) k];
@@ -292,10 +292,40 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
             const double c0 = v.cur;
             if (!v.path.empty()) {
                 const double el = (double) (t_ + N - v.p0) / sr - v.delay;
-                v.cur = pathAt(v.path, el, v.dur, v.shape);
+                v.prog = (float) std::clamp(el / std::max(0.02, v.dur), 0.0, 1.0);
+                if (v.shape == kPathCustom && v.path.size() == 2 && el > 0 && el < v.dur)
+                    v.cur = v.path[0] + (v.path[1] - v.path[0]) * curves.at(LanePitch, i, v.prog);   // the drawn curve
+                else
+                    v.cur = pathAt(v.path, el, v.dur, v.shape);
                 if (el >= v.dur) v.path.clear();
-            } else
+            } else {
                 v.cur = v.tgt;
+                v.prog = 1;
+            }
+            {                                                    // expression routing: this voice's pressure and timbre
+                const float lv = std::clamp(v.lvl / std::max(0.01f, levelOf(i)), 0.0f, 1.0f);
+                const float lfo = 0.5f + 0.5f * (float) std::sin(lfoPh_ + i * 0.9);
+                float p = 1;
+                switch (st_.prSrc) {
+                    case 1: p = lv; break;
+                    case 2: p = curves.at(LanePressure, i, v.prog); break;
+                    case 3: p = lfo; break;
+                    case 4: p = sw; break;
+                    case 5: p = vel_; break;
+                    default: break;
+                }
+                v.prOut = 1 - st_.prDepth * (1 - p);
+                float t = 0.5f;
+                switch (st_.tbSrc) {
+                    case 0: t = 0.5f + 0.5f * sw; break;
+                    case 1: t = curves.at(LaneTimbre, i, v.prog); break;
+                    case 2: t = lfo; break;
+                    case 3: t = (float) std::clamp((v.cur / 100.0 - 36.0) / 48.0, 0.0, 1.0); break;
+                    case 4: t = lv; break;
+                    default: break;
+                }
+                v.tbOut = 0.5f + st_.tbDepth * (t - 0.5f);
+            }
             if (v.drift > 0) {                                    // a slow random drift
                 if (--v.drN <= 0) { v.drT = (rnd() * 2 - 1) * v.drift; v.drN = (int) ((2.0 + 4.0 * rnd()) / dt); }
                 v.dr += (v.drT - v.dr) * std::min(1.0, dt / 1.5);
@@ -308,7 +338,9 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
             const float l0 = v.lvl;
             const float step = (float) (dt / std::max(0.05f, st_.fade));
             v.lvl = v.lvlT > v.lvl ? std::min(v.lvlT, v.lvl + step) : std::max(v.lvlT, v.lvl - step);
-            const float g0 = l0 * 1.3f * (1 + 0.6f * sw), g1 = v.lvl * 1.3f * (1 + 0.6f * sw);
+            const float pg = st_.prSrc >= 2 ? v.prOut : 1.0f;      // a routed pressure shapes the built-in sound too
+            const float g0 = l0 * 1.3f * (1 + 0.6f * sw) * v.pgPrev, g1 = v.lvl * 1.3f * (1 + 0.6f * sw) * pg;
+            v.pgPrev = pg;
             const float lg = std::min(1.0f, 1.0f - kPans[i]), rg = std::min(1.0f, 1.0f + kPans[i]);
             if (!v.note) continue;                               // the voice still moves; it just makes no sound
             // settled far from where its sound was rendered: change to a nearer one, crossfading inside the loop,
@@ -323,10 +355,10 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
                 }
             }
             // the tone: a low-pass (TPT state variable), opened further by the mod wheel's swell
-            const bool filt = st_.tone < 0.995f || sw > 0.001f;
+            const bool filt = st_.tone < 0.995f || std::abs(v.tbOut - 0.5f) > 0.002f;
             float a1 = 0, a2 = 0, a3 = 0, kq = 1.2f;
             if (filt) {
-                const double fc = std::min(sr * 0.45, 180.0 * std::pow(2.0, st_.tone * 7.0 + sw * 2.0));
+                const double fc = std::min(sr * 0.45, 180.0 * std::pow(2.0, st_.tone * 7.0 + (v.tbOut - 0.5) * 4.0));
                 const double gg = std::tan(3.14159265358979 * fc / sr);
                 a1 = (float) (1.0 / (1.0 + gg * (gg + kq))); a2 = (float) gg * a1; a3 = (float) gg * a2;
             }
@@ -388,13 +420,16 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
             }
         }
         t_ += N;
+        lfoPh_ = std::fmod(lfoPh_ + 2 * 3.14159265358979 * st_.lfoRate * dt, 2 * 3.14159265358979);
     }
     for (int i = 0; i < kGlideVoices; ++i) {
         cents[(size_t) i] = (float) (v_[i].cur + bend_);
         level[(size_t) i] = v_[i].lvl;
         on[(size_t) i] = v_[i].on;
         target[(size_t) i] = (float) v_[i].tgt;
-        pressure[(size_t) i] = std::clamp(v_[i].lvl / std::max(0.01f, levelOf(i)), 0.0f, 1.0f);   // 1 at full level
+        pressure[(size_t) i] = v_[i].prOut;
+        timbre[(size_t) i] = v_[i].tbOut;
+        progress[(size_t) i] = v_[i].prog;
     }
 }
 

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "Curves.h"
 #include "Engine.h"
 #include "Theory.h"
 
@@ -18,8 +19,14 @@ inline const char* const kGlideChords[] = {"Triad", "Seventh", "Ninth", "Elevent
                                            "Lydian", "Minor 11", "Major 9", "Fifths", "Cluster", "Open"};
 constexpr int kNumGlideChords = 13;
 inline const char* const kGlidePaths[] = {"Smooth", "Linear", "Ease", "Swell", "Bounce", "Late", "Snap",
-                                          "Wobble", "Semitones", "Scale steps"};
-constexpr int kNumGlidePaths = 10;
+                                          "Wobble", "Semitones", "Scale steps", "Custom (curves)"};
+constexpr int kNumGlidePaths = 11;
+constexpr int kPathCustom = 10;
+// expression routing: what drives each voice's pressure and timbre
+inline const char* const kPressureSources[] = {"Off", "Level (fades)", "Glide curve", "LFO", "Mod wheel", "Velocity"};
+constexpr int kNumPressureSources = 6;
+inline const char* const kTimbreSources[] = {"Mod wheel", "Glide curve", "LFO", "Voice height", "Level (fades)", "Off"};
+constexpr int kNumTimbreSources = 6;
 inline const char* const kGlideTimings[] = {"Together", "By distance", "Bass lags", "Bass leads", "Loose"};
 constexpr int kNumGlideTimings = 5;
 inline const char* const kGlideMoves[] = {"No move", "Bloom", "Cascade up", "Cascade down", "Spiral", "Swoop",
@@ -57,6 +64,8 @@ struct GlideSettings {
     float time = 1.5f, fade = 1.0f;
     bool sub = true;
     float tone = 1.0f;                           // 0..1: the low-pass on the voices (1: open)
+    int prSrc = 0, tbSrc = 0;                    // kPressureSources, kTimbreSources
+    float prDepth = 1, tbDepth = 1, lfoRate = 0.5f;
 };
 
 class GlideEngine {
@@ -82,7 +91,10 @@ public:
     std::array<std::atomic<float>, kGlideVoices> cents{}, level{};
     std::array<std::atomic<bool>, kGlideVoices> on{};
     std::array<std::atomic<float>, kGlideVoices> target{};   // where each voice is headed (cents)
-    std::array<std::atomic<float>, kGlideVoices> pressure{}; // 0..1: the voice's level now (fades, swell, bloom), for MPE
+    std::array<std::atomic<float>, kGlideVoices> pressure{}; // 0..1: each voice's pressure, as routed
+    std::array<std::atomic<float>, kGlideVoices> timbre{};   // 0..1: each voice's timbre (0.5 centre), as routed
+    std::array<std::atomic<float>, kGlideVoices> progress{}; // 0..1: how far through its glide (1: arrived)
+    GlideCurves curves;                                      // the MPE editor's curves
     bool anyOn() const;
 
 private:
@@ -95,6 +107,7 @@ private:
         double delay = 0, dur = 0;
         int shape = 0;
         float lvl = 0, lvlT = 0;
+        float prog = 1, prOut = 1, tbOut = 0.5f, pgPrev = 1;
         double ph = 0, dr = 0, drT = 0;
         int drN = 0;
         std::shared_ptr<Note> note;                      // the sound, rendered at sampleMidi
@@ -124,6 +137,7 @@ private:
     int key_ = 9;
     Scale scale_ = Scale::Minor;
     float bend_ = 0, swell_ = 0, vel_ = 0.85f;
+    double lfoPh_ = 0;
     float levelOf(int i) const { return v_[i].level * (0.45f + 0.55f * vel_ / 0.85f); }
     int curDeg_ = -1;
     bool silent_ = false;

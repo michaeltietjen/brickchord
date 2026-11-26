@@ -65,7 +65,15 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidebend", 1}, "Glide bend range", be, 4));
         l.add(std::make_unique<AudioParameterBool>(ParameterID{"glidesub", 1}, "Glide sub", true));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidetone", 1}, "Glide tone", 0.f, 1.f, 1.f));
-        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidempe", 1}, "Glide MIDI out", StringArray{"MPE", "Notes", "MPE + pressure"}, 0));
+        StringArray ps, ts;
+        for (auto* c : kPressureSources) ps.add(c);
+        for (auto* c : kTimbreSources) ts.add(c);
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glideprsrc", 1}, "Glide pressure source", ps, 0));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glideprdepth", 1}, "Glide pressure depth", 0.f, 1.f, 1.f));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidetbsrc", 1}, "Glide timbre source", ts, 0));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidetbdepth", 1}, "Glide timbre depth", 0.f, 1.f, 1.f));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidelfo", 1}, "Glide LFO rate", NormalisableRange<float>(0.05f, 8.f, 0.f, 0.4f), 0.5f));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidempe", 1}, "Glide MIDI out", StringArray{"MPE", "Notes"}, 0));
     }
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"key", 1}, "Key",
         StringArray{"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 9));
@@ -483,7 +491,8 @@ void BricklabStudioProcessor::runMono(juce::AudioBuffer<float>& buffer, juce::Mi
 
 // ---------------------------------------------------------------- the Glide page
 void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool allOff) {
-    const int mode = (int) params.getRawParameterValue("glidempe")->load();   // 0 MPE, 1 notes, 2 MPE + pressure
+    const int mode = std::min(1, (int) params.getRawParameterValue("glidempe")->load());   // 0 MPE, 1 notes
+    const int prSrc = (int) params.getRawParameterValue("glideprsrc")->load();
     if (allOff || mode != lastOutMode) {                     // everything off (also when the mode changes mid-chord)
         for (int i = 0; i < kGlideVoices; ++i)
             if (mpeNote[(size_t) i] > 0) { midi.addEvent(juce::MidiMessage::noteOff(i + 2, mpeNote[(size_t) i] - 1), pos); mpeNote[(size_t) i] = 0; }
@@ -525,7 +534,7 @@ void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool all
         for (int ch = 2; ch < 2 + kGlideVoices; ++ch) rpn(ch, 0, 0, 48);
         mpeReady = true;
     }
-    const bool pressure = mode == 2;
+    const bool pressure = prSrc != 0;                        // pressure goes out only when it's routed (the editor)
     const bool refresh = clock - mpeRefreshAt > (int64_t) sr;    // once a second: everything again, in case the synth was reset
     if (refresh) mpeRefreshAt = clock;
     for (int i = 0; i < kGlideVoices; ++i) {                 // each voice its own channel; its glide is its pitch bend
@@ -534,15 +543,15 @@ void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool all
         const bool on = glide.on[(size_t) i];
         const double c = glide.cents[(size_t) i];
         if (!on) {                                           // let go once it has faded (so the fade is heard)
-            if (note > 0 && (!pressure || glide.level[(size_t) i] < 0.02f)) { midi.addEvent(juce::MidiMessage::noteOff(ch, note - 1), pos); note = 0; }
+            if (note > 0 && (prSrc != 1 || glide.level[(size_t) i] < 0.02f)) { midi.addEvent(juce::MidiMessage::noteOff(ch, note - 1), pos); note = 0; }
             continue;
         }
         if (note > 0 && std::abs(c - (note - 1) * 100.0) > 4700) { midi.addEvent(juce::MidiMessage::noteOff(ch, note - 1), pos); note = 0; }
         const int bendFor = note > 0 ? note - 1 : juce::jlimit(0, 127, (int) std::lround(c / 100.0));
         const int pb = juce::jlimit(0, 16383, 8192 + (int) std::lround((c - bendFor * 100.0) / 4800.0 * 8191.0));
         // pressure: full level is 127, with a floor so a voice is never silenced by it; off unless chosen
-        const int pr = pressure ? juce::jlimit(20, 127, (int) std::lround(glide.pressure[(size_t) i] * 127)) : 127;
-        const int tb = juce::jlimit(0, 127, 64 + (int) std::lround(glide.swell() * 63));   // the swell: timbre (CC 74)
+        const int pr = pressure ? juce::jlimit(0, 127, (int) std::lround(glide.pressure[(size_t) i] * 127)) : 127;
+        const int tb = juce::jlimit(0, 127, (int) std::lround(glide.timbre[(size_t) i] * 127));   // timbre (CC 74), as routed
         if (note == 0) {
             midi.addEvent(juce::MidiMessage::pitchWheel(ch, pb), pos);
             if (pressure) midi.addEvent(juce::MidiMessage::channelPressureChange(ch, pr), pos);
@@ -572,6 +581,11 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
     st.fade = timeSeconds(kGlideFades, kNumGlideFades, (int) params.getRawParameterValue("glidefade")->load(), bpm);
     st.sub = params.getRawParameterValue("glidesub")->load() > 0.5f;
     st.tone = params.getRawParameterValue("glidetone")->load();
+    st.prSrc = (int) params.getRawParameterValue("glideprsrc")->load();
+    st.prDepth = params.getRawParameterValue("glideprdepth")->load();
+    st.tbSrc = (int) params.getRawParameterValue("glidetbsrc")->load();
+    st.tbDepth = params.getRawParameterValue("glidetbdepth")->load();
+    st.lfoRate = params.getRawParameterValue("glidelfo")->load();
     glide.set(st);
     glide.setKey(player.key(), player.scale());
     const int range = kGlideBends[juce::jlimit(0, kNumGlideBends - 1, (int) params.getRawParameterValue("glidebend")->load())];
@@ -837,12 +851,16 @@ void BricklabStudioProcessor::processBlockBypassed(juce::AudioBuffer<float>& buf
 }
 
 void BricklabStudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
+    params.state.setProperty("curves", juce::String(glide.curves.toString()), nullptr);   // the MPE editor's curves
     if (auto xml = params.copyState().createXml()) copyXmlToBinary(*xml, destData);
 }
 
 void BricklabStudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
-        if (xml->hasTagName(params.state.getType())) params.replaceState(juce::ValueTree::fromXml(*xml));
+        if (xml->hasTagName(params.state.getType())) {
+            params.replaceState(juce::ValueTree::fromXml(*xml));
+            if (params.state.hasProperty("curves")) glide.curves.fromString(params.state["curves"].toString().toStdString());
+        }
 }
 
 juce::AudioProcessorEditor* BricklabStudioProcessor::createEditor() { return new BricklabStudioEditor(*this); }

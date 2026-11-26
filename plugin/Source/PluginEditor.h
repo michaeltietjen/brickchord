@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
+#include "CurveEditor.h"
 
 // One pad: press to play its chord, let go to release (like the handheld's buttons).
 class Pad : public juce::Component {
@@ -60,7 +61,13 @@ private:
     juce::TextButton third{"3rd"}, bloomBtn{"bloom"}, stopBtn{"stop"}, glideSub{"sub"}, glideMore{"more"};
     juce::ComboBox glideSound, glideChord, glidePath, glideTiming, glideMove, glideTime, glideFade, glideBend, glideMpe;
     juce::Label glideChordL, glideToneL;
-    juce::ComboBox presetBox;
+    juce::ComboBox presetBox, prSrc, tbSrc;
+    juce::TextButton curvesBtn{"curves"};
+    juce::Slider prDepth, tbDepth, lfoRate;
+    juce::Label prL, tbL, lfoL;
+    std::unique_ptr<CurveEditor> curveEd;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aPrSrc, aTbSrc;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aPrDepth, aTbDepth, aLfoRate;
     DragMidi dragMidi;
     std::array<std::array<float, 150>, 6> trail{};     // the Glide voices' last 10 seconds (cents; 0 = silent)
     std::array<float, 6> trailLvl{};
