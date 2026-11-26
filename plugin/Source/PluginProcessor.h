@@ -1,6 +1,7 @@
 // Bricklab Studio: the plugin. Chord is the first of the four modes to play;
 // Lab, Glide and Chop follow (see the tabs in PluginEditor).
 #pragma once
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 #include <cstdio>
@@ -148,6 +149,8 @@ private:   // the free-running 16th clock (when the host isn't playing)
     brick::Hall hall;                         // the reverb (Space)
     brick::PluckBank pluckBank;               // the strum's own instruments (the handheld's), made apart from the drone's sound
     brick::Plucker plucker{pluckBank};
+    int pluckId = -1;
+    juce::ThreadPool pluckPool{1};            // reads the recorded instruments (declared after the bank it fills)
     std::vector<int> strings;                 // the notes a strum crosses, low to high
     struct PluckLater { int wait, midi; float vel, pan; };
     std::vector<PluckLater> pluckLater;       // a strum's notes, a few milliseconds apart

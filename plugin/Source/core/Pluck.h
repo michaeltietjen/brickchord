@@ -21,6 +21,17 @@ namespace brick {
 inline const char* const kPluckNames[] = {"Harp", "Nylon", "Koto", "Kalimba", "Celesta", "Steel Pan", "Bell", "Glass Harp",
                                           "Marimba", "Music Box", "Shimmer Harp", "Tape Harp", "Sparkle", "Analog Pluck"};
 constexpr int kNumPlucks = 14;
+// what the Strum menu offers: recorded instruments first (a folder of notes in the plugin's Resources/Sounds,
+// from the CC0 libraries VSCO 2 Community Edition and VCSL), then the modelled ones. A recorded one
+// plays its modelled stand-in until its notes are read, or if they are missing.
+struct PluckInst { const char* name; const char* folder; int synth; };
+inline const PluckInst kPluckInsts[] = {
+    {"Harp", "Harp", 0}, {"Kalimba", "Kalimba", 3}, {"Marimba", "Marimba", 8}, {"Vibraphone", "Vibes", 4},
+    {"Glockenspiel", "Glock", 9}, {"Pizzicato", "Pizzicato", 1}, {"Chimes", "Chimes", 6},
+    {"Nylon (model)", nullptr, 1}, {"Koto", nullptr, 2}, {"Celesta", nullptr, 4}, {"Steel Pan", nullptr, 5}, {"Bell", nullptr, 6},
+    {"Glass Harp", nullptr, 7}, {"Music Box", nullptr, 9}, {"Shimmer Harp", nullptr, 10}, {"Tape Harp", nullptr, 11},
+    {"Sparkle", nullptr, 12}, {"Analog Pluck", nullptr, 13}};
+constexpr int kNumPluckInsts = 18;
 
 inline std::shared_ptr<Note> renderPluck(int inst, int midi, int sr) {
     struct P { double ratio, lv, dk, delay, swell, det; };
@@ -123,45 +134,58 @@ public:
     static constexpr int kLo = 48, kHi = 92;
     PluckBank() : th_([this] { run(); }) {}
     ~PluckBank() { { std::lock_guard<std::mutex> l(mx_); quit_ = true; } cv_.notify_all(); th_.join(); }
-    void set(int inst, int rate) {                           // which instrument, at which sample rate: makes them all again
+    void set(int id, int synth, int rate) {                  // a new instrument (any id): its modelled notes are made
         std::lock_guard<std::mutex> l(mx_);
-        if (inst == inst_ && rate == rate_) return;
-        inst_ = inst; rate_ = rate; ++gen_;
-        for (auto& n : notes_) n.reset();
+        if (id == id_) return;
+        id_ = id; inst_ = synth; rate_ = rate; ++gen_; sampled_ = false;
+        for (auto& n : notes_) n = {};
         cv_.notify_all();
     }
-    std::shared_ptr<Note> get(int midi) const {              // that note, or the nearest one made so far (and how far off it is)
+    // recorded notes for instrument id (midi, note): every string plays the nearest one, pitched
+    void put(int id, const std::vector<std::pair<int, std::shared_ptr<Note>>>& rec) {
+        std::lock_guard<std::mutex> l(mx_);
+        if (id != id_ || rec.empty()) return;
+        ++gen_; sampled_ = true;
+        for (int m = kLo; m <= kHi; ++m) {
+            const auto* best = &rec[0];
+            for (auto& r : rec) if (std::abs(r.first - m) < std::abs(best->first - m)) best = &r;
+            notes_[(size_t) (m - kLo)] = {best->second, std::pow(2.0, (m - best->first) / 12.0)};
+        }
+    }
+    std::shared_ptr<Note> get(int midi, double& ratio) const {
         std::unique_lock<std::mutex> l(mx_, std::try_to_lock);
         if (!l.owns_lock()) return nullptr;
-        midi = std::clamp(midi, kLo, kHi);
-        return notes_[(size_t) (midi - kLo)];
+        const auto& s = notes_[(size_t) (std::clamp(midi, kLo, kHi) - kLo)];
+        ratio = s.ratio;
+        return s.note;
     }
 
 private:
+    struct Slot { std::shared_ptr<Note> note; double ratio = 1; };
     void run() {
         std::unique_lock<std::mutex> l(mx_);
         int done = -1;
         for (;;) {
-            cv_.wait(l, [&] { return quit_ || done != gen_; });
+            cv_.wait(l, [&] { return quit_ || (done != gen_ && !sampled_); });
             if (quit_) return;
             const int gen = gen_, inst = inst_, rate = rate_;
             for (int d = 0; d <= 22 && gen == gen_ && !quit_; ++d)
                 for (int m : {70 + d, 70 - d}) {             // from the middle out
-                    if (m < kLo || m > kHi || (d == 0 && m != 70) || notes_[(size_t) (m - kLo)]) continue;
+                    if (m < kLo || m > kHi || (d == 0 && m != 70) || notes_[(size_t) (m - kLo)].note) continue;
                     l.unlock();
                     auto note = renderPluck(inst, m, rate);
                     l.lock();
                     if (gen != gen_ || quit_) break;
-                    notes_[(size_t) (m - kLo)] = note;
+                    notes_[(size_t) (m - kLo)] = {note, 1.0};
                 }
             if (gen == gen_) done = gen;
         }
     }
     mutable std::mutex mx_;
     std::condition_variable cv_;
-    std::array<std::shared_ptr<Note>, kHi - kLo + 1> notes_{};
-    int inst_ = -1, rate_ = 0, gen_ = 0;
-    bool quit_ = false;
+    std::array<Slot, kHi - kLo + 1> notes_{};
+    int id_ = -1, inst_ = 0, rate_ = 44100, gen_ = 0;
+    bool quit_ = false, sampled_ = false;
     std::thread th_;
 };
 
@@ -171,11 +195,12 @@ public:
     void prepare(double sr) { sr_ = sr; v_.clear(); v_.reserve(40); }
     void clear() { v_.clear(); }
     void pluck(int midi, float gain, float pan, int wait) {
-        auto note = bank_.get(midi);
+        double ratio = 1;
+        auto note = bank_.get(midi, ratio);
         if (!note) return;                                   // not made yet
         if (v_.size() >= 28) v_.erase(v_.begin());             // the oldest gives way
         PV v;
-        v.note = note; v.rate = note->rate / sr_; v.g = gain; v.wait = wait < 0 ? 0 : wait;
+        v.note = note; v.rate = ratio * note->rate / sr_; v.g = gain; v.wait = wait < 0 ? 0 : wait;
         v.lg = std::min(1.0f, 1.0f - pan); v.rg = std::min(1.0f, 1.0f + pan);
         v_.push_back(v);
     }
@@ -188,9 +213,10 @@ public:
                 const int p = (int) v.pos;
                 if (p + 1 >= na) { v.done = true; break; }
                 const float fr = (float) (v.pos - p);
-                const float s = a[(size_t) p * 2] + (a[(size_t) (p + 1) * 2] - a[(size_t) p * 2]) * fr;
-                L[i] += s * v.g * v.lg;
-                R[i] += s * v.g * v.rg;
+                const float sl = a[(size_t) p * 2] + (a[(size_t) (p + 1) * 2] - a[(size_t) p * 2]) * fr;
+                const float sr = a[(size_t) p * 2 + 1] + (a[(size_t) (p + 1) * 2 + 1] - a[(size_t) p * 2 + 1]) * fr;
+                L[i] += sl * v.g * v.lg;
+                R[i] += sr * v.g * v.rg;
                 v.pos += v.rate;
             }
         }

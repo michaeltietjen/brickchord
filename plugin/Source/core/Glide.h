@@ -68,6 +68,7 @@ constexpr int kGlideVoices = 6;                             // five chord voices
 
 struct GlideSettings {
     int chord = 0, path = 2, timing = 0, move = 0, cross = 0;
+    int reach = 1;                               // how far the voices may wander from home: 0 tight, 1 normal, 2 free
     float time = 1.5f, fade = 1.0f;
     bool sub = true;
     float tone = 1.0f;                           // 0..1: the low-pass on the voices (1: open)

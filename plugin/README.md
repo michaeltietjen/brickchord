@@ -96,3 +96,7 @@ the mod wheel, velocity) and **Timbre** (mod wheel, glide curve, LFO, voice heig
 each with a depth, and the LFO's rate. In the MIDI build these go out per voice as MPE pressure and
 timbre (CC 74); in the instrument they shape each voice's level and filter. The curves are saved
 with your project. The pads are hidden while you edit: play from your keyboard, or 1 to 7.
+
+## Recorded strum instruments
+
+The Drone page's recorded strum instruments (Harp, Kalimba, Marimba, Vibraphone, Glockenspiel, Pizzicato, Chimes) are in `plugin/sounds`. They are recordings from VSCO 2 Community Edition and the Versilian Community Sample Library (Versilian Studios), both CC0, public domain. The build copies them into the instrument's `Resources/Sounds`.

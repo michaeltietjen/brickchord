@@ -94,7 +94,7 @@ private:
     std::array<float, 128> stringGlow{};
     int pluckSeen = 0, hoverString = -1;
     juce::TextButton third{"3rd"}, bloomBtn{"bloom"}, stopBtn{"stop"}, glideSub{"sub"}, glideMore{"more"}, glideStrike{"strike each chord"};
-    juce::ComboBox glideSound, glideChord, glidePath, glideTiming, glideMove, glideCross, glideTime, glideFade, glideBend, glideMpe;
+    juce::ComboBox glideSound, glideChord, glidePath, glideTiming, glideMove, glideCross, glideReach, glideTime, glideFade, glideBend, glideMpe;
     juce::Label glideChordL, glideToneL;
     juce::ComboBox presetBox, prSrc, tbSrc;
     juce::TextButton curvesBtn{"curves"};
@@ -118,7 +118,7 @@ private:
     juce::Slider space, volume, bassLvl;
     juce::Label spaceL, volumeL, soon, outNote, modeL, arpL, bassL;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aSound, aKey, aScale, aMode, aArpOct, aBassMode, aLeadSound, aDroneSound, aOctave, aDroneSlide,
-        aGlideSound, aGlideChord, aGlidePath, aGlideTiming, aGlideMove, aGlideCross, aGlideTime, aGlideFade, aGlideBend, aGlideMpe;
+        aGlideSound, aGlideChord, aGlidePath, aGlideTiming, aGlideMove, aGlideCross, aGlideReach, aGlideTime, aGlideFade, aGlideBend, aGlideMpe;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aLatch, aThird, aGlideSub, aGlideStrike;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aSpace, aVolume, aBassLvl, aLeadGlide, aDroneY, aDroneX, aGlideTone;
     int keyDown = -1;

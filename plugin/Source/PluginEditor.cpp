@@ -248,7 +248,9 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     octave.addItemList({"Oct -2", "Oct -1", "Oct 0", "Oct +1", "Oct +2"}, 1);
     droneSlide.addItemList({"Slide off", "Slide 0.5 s", "Slide 1 s", "Slide 2 s", "Slide 4 s"}, 1);
     for (int i = 0; i < brick::kNumDroneChords; ++i) droneChord.addItem(brick::kDroneChords[i], i + 1);
-    for (int i = 0; i < brick::kNumPlucks; ++i) pluckSound.addItem(juce::String("Strum: ") + brick::kPluckNames[i], i + 1);
+    for (int i = 0; i < brick::kNumPluckInsts; ++i) pluckSound.addItem(juce::String("Strum: ") + brick::kPluckInsts[i].name, i + 1);
+    glideReach.addItemList({"Range: tight", "Range: normal", "Range: free"}, 1);
+    addAndMakeVisible(glideReach);
     pluckArp.addItemList({"Arp off", "Arp up", "Arp down", "Arp bounce", "Arp random"}, 1);
     pluckRate.addItemList({"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1);
     for (auto* c : {&droneChord, &pluckSound, &pluckArp, &pluckRate}) addAndMakeVisible(c);
@@ -325,6 +327,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aGlideTiming = std::make_unique<CA>(ps, "glidetiming", glideTiming);
     aGlideMove = std::make_unique<CA>(ps, "glidemove", glideMove);
     aGlideCross = std::make_unique<CA>(ps, "glidecross", glideCross);
+    aGlideReach = std::make_unique<CA>(ps, "glidereach", glideReach);
     aGlideTime = std::make_unique<CA>(ps, "glidetime", glideTime);
     aGlideFade = std::make_unique<CA>(ps, "glidefade", glideFade);
     aGlideBend = std::make_unique<CA>(ps, "glidebend", glideBend);
@@ -407,7 +410,7 @@ void BricklabStudioEditor::showTab(int t) {
     show({&octave}, !gl || (more && !curves));
     octL.setVisible(!gl);
     show({&glideSound}, gl && sounds);
-    show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore}, gl);
+    show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore, &glideReach}, gl);
     show({&glideTone, &glideToneL}, gl && sounds);
     show({&glidePath, &glideMove, &glideCross, &glideTime, &glideFade, &glideTiming, &glideBend}, gl && more && !curves);
     show({&glideMpe, &glideStrike}, gl && proc.kMidiFx);
@@ -686,14 +689,15 @@ void BricklabStudioEditor::layout() {
     const int w = (856 - 6 * 8) / 7;
     for (int i = 0; i < pads.size(); ++i) pads[i]->setBounds(22 + i * (w + 8), 512, w, 60);
     auto b = juce::Rectangle<int>(22, 466, 856, 32);
-    if (gl) { put(b, bloomBtn, 64); put(b, stopBtn, 64); put(b, glideChord, 120); put(b, glideSub, 54); }
+    if (gl) { put(b, bloomBtn, 60); put(b, stopBtn, 56); put(b, glideChord, 108); put(b, glideSub, 50); }
     if (!proc.kMidiFx) {
-        auto sb = b.removeFromLeft(190); b.removeFromLeft(8);
+        auto sb = b.removeFromLeft(gl ? 170 : 190); b.removeFromLeft(8);
         for (auto* c : {&sound, &leadSound, &droneSound, &glideSound}) c->setBounds(sb);
     }
-    if (gl && proc.kMidiFx) { put(b, glideMpe, 110); put(b, glideStrike, 130); }
-    put(b, key, 64);
-    put(b, scale, 140);
+    if (gl && proc.kMidiFx) { put(b, glideMpe, 104); put(b, glideStrike, 112); }
+    put(b, key, 60);
+    put(b, scale, gl ? 124 : 140);
+    if (gl) put(b, glideReach, 110);
     if (!gl) put(b, octave, 84);
 
     auto a = juce::Rectangle<int>(22, 424, 856, 32);

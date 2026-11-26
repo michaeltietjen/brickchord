@@ -87,3 +87,16 @@ foreach(t BricklabStudio BricklabStudioMIDI BricklabStudioMIDIVST)
 endforeach()
 target_compile_definitions(BricklabStudioMIDI PRIVATE BRICK_MIDI_FX=1)
 target_compile_definitions(BricklabStudioMIDIVST PRIVATE BRICK_MIDI_FX=1 BRICK_SILENT_BUS=1)
+
+# The recorded strum instruments (plugin/sounds: CC0 recordings from VSCO 2 Community Edition and VCSL) go into
+# the instrument's Resources/Sounds, in the build and in the copies the build installs.
+foreach(fmt AU VST3 Standalone)
+  add_custom_command(TARGET BricklabStudio_${fmt} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/sounds" "$<TARGET_BUNDLE_DIR:BricklabStudio_${fmt}>/Contents/Resources/Sounds")
+endforeach()
+if(APPLE)
+  add_custom_command(TARGET BricklabStudio_AU POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/sounds" "$ENV{HOME}/Library/Audio/Plug-Ins/Components/Bricklab Studio.component/Contents/Resources/Sounds")
+  add_custom_command(TARGET BricklabStudio_VST3 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/sounds" "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Bricklab Studio.vst3/Contents/Resources/Sounds")
+endif()

@@ -117,8 +117,14 @@ std::vector<int> GlideEngine::voicelead(const std::vector<int>& pcsIn, int rootP
         const double c = cur[k].first;
         int pick = opts[0];
         double pd = 1e9;
+        // home: where this voice sits in a fresh chord. Left alone the voices creep upward, change after change;
+        // a pull towards home and a ceiling over it keep them in their register.
+        const double home = kDefaultNotes[k] + key_;
+        const double pull = st_.reach == 0 ? 0.32 : (st_.reach == 1 ? 0.16 : 0.0);
+        const double roof = st_.reach == 0 ? home + 6 : (st_.reach == 1 ? home + 10 : 1e9);
         for (int n : opts) {
-            double d = std::abs(n - c) + ((used.count(n % 12) && used.size() < pcs.size()) ? 2.5 : 0.0);
+            double d = std::abs(n - c) + ((used.count(n % 12) && used.size() < pcs.size()) ? 2.5 : 0.0)
+                       + pull * std::abs(n - home) + (n > roof ? 4.0 * (n - roof) : 0.0);
             if (d < pd) { pd = d; pick = n; }
         }
         best[(size_t) cur[k].second] = pick;
