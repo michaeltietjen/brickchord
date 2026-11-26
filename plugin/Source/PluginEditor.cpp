@@ -261,6 +261,7 @@ void BricklabStudioEditor::showTab(int t) {
     for (int i = 0; i < tabs.size(); ++i) tabs[i]->setToggleState(TAB_PAGES[i] == t, juce::dontSendNotification);
     const bool chord = t == 0, lead = t == 1, drone = t == 2, gl = t == 3, playing = true, sounds = !proc.kMidiFx;
     auto show = [](std::initializer_list<juce::Component*> cs, bool on) { for (auto* c : cs) c->setVisible(on); };
+    const bool more = glideMore.getToggleState();
     const bool curves = gl && curvesBtn.getToggleState();   // the MPE editor takes the screen and the pads' place
     for (auto* p : pads) p->setVisible(playing && !curves);
     curveEd->setVisible(curves);
@@ -274,9 +275,9 @@ void BricklabStudioEditor::showTab(int t) {
     show({&key, &scale}, playing);
     show({&space, &volume, &spaceL, &volumeL}, playing && sounds);
     show({&mode, &arpOct, &bassMode, &modeL, &arpL, &bassL}, chord);
-    show({&octave, &octL}, !gl);
+    show({&octave}, !gl || (!more && !curves));
+    octL.setVisible(!gl);
     show({&glideSound}, gl && sounds);
-    const bool more = glideMore.getToggleState();
     show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore}, gl);
     show({&glideTone, &glideToneL}, gl && sounds);
     show({&glidePath, &glideMove, &glideTime, &glideFade}, gl && !more && !curves);
@@ -456,7 +457,8 @@ void BricklabStudioEditor::layoutRows() {           // the bottom row: what this
         glideTime.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(10);
         glidePath.setBounds(outRow.removeFromLeft(190)); outRow.removeFromLeft(10);
         glideMove.setBounds(outRow.removeFromLeft(170)); outRow.removeFromLeft(10);
-        glideFade.setBounds(outRow.removeFromLeft(150));
+        glideFade.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(10);
+        octave.setBounds(outRow.removeFromLeft(96));
         glideTiming.setBounds(adv.removeFromLeft(200)); adv.removeFromLeft(10);
         glideBend.setBounds(adv.removeFromLeft(130)); adv.removeFromLeft(10);
         glideMpe.setBounds(adv.removeFromLeft(140));

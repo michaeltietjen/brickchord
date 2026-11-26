@@ -588,6 +588,7 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
     st.lfoRate = params.getRawParameterValue("glidelfo")->load();
     glide.set(st);
     glide.setKey(player.key(), player.scale());
+    glide.setOctave((int) params.getRawParameterValue("octave")->load());
     const int range = kGlideBends[juce::jlimit(0, kNumGlideBends - 1, (int) params.getRawParameterValue("glidebend")->load())];
 
     struct Act { int pos, type, a; };                         // 0 keys read, 2 pad, 4 bend, 5 mod wheel, 6 stop, 7 bloom

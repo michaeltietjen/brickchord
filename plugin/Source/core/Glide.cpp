@@ -97,7 +97,7 @@ std::vector<int> GlideEngine::voicelead(const std::vector<int>& pcsIn, int rootP
     std::vector<int> cand;
     for (int n = 24; n < 97; ++n) if (pcs.count(n % 12)) cand.push_back(n);
     std::vector<std::pair<double, int>> cur;
-    for (int i = 0; i < kNCH; ++i) cur.push_back({(v_[i].lvl > 0.001f || v_[i].on ? v_[i].cur : (kDefaultNotes[i] + key_) * 100.0) / 100.0, i});
+    for (int i = 0; i < kNCH; ++i) cur.push_back({(v_[i].lvl > 0.001f || v_[i].on ? v_[i].cur : (kDefaultNotes[i] + key_ + 12 * oct_) * 100.0) / 100.0 - 12 * oct_, i});   // led as if at octave 0
     std::sort(cur.begin(), cur.end());
     std::vector<int> best(kNCH, 0);
     std::set<int> used;
@@ -125,6 +125,7 @@ std::vector<int> GlideEngine::voicelead(const std::vector<int>& pcsIn, int rootP
         used.insert(pick % 12);
         prev = pick;
     }
+    for (int& n : best) n = std::clamp(n + 12 * oct_, 12, 120);
     return best;
 }
 

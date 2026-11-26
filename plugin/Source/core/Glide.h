@@ -81,6 +81,7 @@ public:
     void silence();                                      // everything off at once (a page change)
     void setSilent(bool s) { silent_ = s; }              // the MIDI builds: voices move, no sound is fetched
     void bloom();
+    void setOctave(int o) { oct_ = o < -2 ? -2 : (o > 2 ? 2 : o); }   // the next chord lands this many octaves away
     void setBend(float semis) { bend_ = semis * 100.0f; }
     void setSwell(float x) { swell_ = x; }
     void setVelocity(float v) { vel_ = v < 0.05f ? 0.05f : (v > 1 ? 1 : v); }   // the next chord's: scales its level
@@ -139,7 +140,7 @@ private:
     float bend_ = 0, swell_ = 0, vel_ = 0.85f;
     double lfoPh_ = 0;
     float levelOf(int i) const { return v_[i].level * (0.45f + 0.55f * vel_ / 0.85f); }
-    int curDeg_ = -1;
+    int curDeg_ = -1, oct_ = 0;
     bool silent_ = false;
     uint32_t rng_ = 98765;
 };
