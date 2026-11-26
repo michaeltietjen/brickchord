@@ -99,7 +99,11 @@ private:
     std::array<float, 8192> fftBuf{};
     std::array<std::array<float, kBands>, kRows> terrain{};
     std::array<float, kBands> bandNow{};
-    int terrainAt = 0;
+    static constexpr int kSpec = 172;                  // the Spectrum view: half a semitone to a band
+    std::array<std::array<float, kSpec>, kRows> spec{};
+    std::array<float, kSpec> specNow{};
+    int terrainAt = 0, terrainCount = 0;
+    bool terrainPhase = false;
     juce::TextButton viewBtn{"field"};
     // the Field's depth: a camera that drifts, a bloom at each change of chord, dust in the air
     int shotTick = 0;
