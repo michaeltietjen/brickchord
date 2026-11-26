@@ -537,10 +537,16 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
             else if (m.isNoteOff()) held.erase(m.getNoteNumber());       // let go: the chord holds
             else if (m.isPitchWheel()) acts.push_back({p, 4, m.getPitchWheelValue()});
             else if (m.isController() && m.getControllerNumber() == 1) acts.push_back({p, 5, m.getControllerValue()});
-            else if (m.isAllNotesOff() || m.isAllSoundOff()) held.clear();
+            else if (m.isAllNotesOff() || m.isAllSoundOff()) { held.clear(); acts.push_back({p, 6, 0}); }   // the host's panic: let go
         }
         advance(n);
     }
+    if (auto* ph = getPlayHead())                             // the host stopping sends the instrument a panic: let go too,
+        if (auto pos = ph->getPosition()) {                   // or MIDI out would think its notes still sound
+            const bool playing = pos->getIsPlaying();
+            if (wasPlaying && !playing) acts.push_back({0, 6, 0});
+            wasPlaying = playing;
+        }
     std::stable_sort(acts.begin(), acts.end(), [](const Act& x, const Act& y) { return x.pos < y.pos; });
     midi.clear();
 
@@ -564,7 +570,7 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
             setName(name, name.empty() ? "" : "Glide");
         } else if (e.type == 4) glide.setBend((float) (e.a - 8192) / 8192.0f * (float) range);
         else if (e.type == 5) { glideSwell = (float) e.a / 127.0f; glide.setSwell(glideSwell); }
-        else if (e.type == 6) { glide.stop(); setName({}, {}); }
+        else if (e.type == 6) { glide.stop(); setName({}, {}); if (out) glideOut(midi, e.pos, true); }
         else if (e.type == 7) glide.bloom();
     }
     if (at < n) glide.render(l + at, r + at, n - at);

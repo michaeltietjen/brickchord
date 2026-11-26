@@ -92,7 +92,7 @@ public:
 private:
     std::array<int, brick::kGlideVoices> mpeNote{}, mpeBend{};
     std::vector<int> glideNotesOut;           // the Notes mode's chord on MIDI out
-    bool mpeReady = false;
+    bool mpeReady = false, wasPlaying = false;
     float glideSwell = 0;
     int lastExpr = 127;                               // the expression MIDI out last sent (the drone's pulse)
     void queueOut(bool on, int pos);          // a chord just started (or was let go): for Patterns
