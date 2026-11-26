@@ -1,4 +1,4 @@
-# Brickchord on the Miyoo Mini (Onion OS): first step
+# Brickchord on the Miyoo Mini and Mini Plus (Onion OS): first step
 
 There is no Miyoo Mini build of Brickchord yet. The apps need Python 3 with NumPy,
 and Onion OS doesn't come with them (PortMaster doesn't run on Onion either), so
