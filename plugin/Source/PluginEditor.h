@@ -9,6 +9,7 @@ public:
     std::function<void()> onDown, onUp;
     juce::String top, sub;
     bool lit = false;
+    juce::Colour tint;                                 // its chord's colour on the field (clear = the accent)
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override { lit = true; repaint(); if (onDown) onDown(); }
     void mouseUp(const juce::MouseEvent&) override { lit = false; repaint(); if (onUp) onUp(); }
@@ -96,6 +97,7 @@ private:
     std::array<std::array<float, kHist>, 6> trail{};   // the Glide voices' paths (cents; 0 = silent)
     std::array<std::array<float, kHist>, 6> trailLv{}; // and their levels
     std::array<std::array<uint64_t, 2>, kHist> noteHist{};   // Chord and Drone: which notes sounded
+    std::array<int8_t, kHist> chordHist{};             // and which chord (by pad) they belonged to
     std::array<float, 6> trailLvl{};
     int trailAt = 0;
     float fieldLo = 3300, fieldHi = 7200;

@@ -10,21 +10,34 @@ const juce::Colour chassis(0xff07060c), panel(0xff12111a), plate(0xff211f2e), in
 const char* TAB_NAMES[] = {"Chord", "Lead", "Drone", "Glide"};    // by page; Lead stays in the engine, off the tabs
 const int TAB_PAGES[] = {3, 0, 2};
 const char* SOON[] = {"", "", "", ""};
+// one colour per chord of the scale (pads 1 to 7)
+const juce::Colour CCOL[] = {juce::Colour(0xffb9a6ff), juce::Colour(0xff6ec8be), juce::Colour(0xffffc46b), juce::Colour(0xff78a0ff),
+                             juce::Colour(0xffff7896), juce::Colour(0xff8cd278), juce::Colour(0xffffaa6e)};
+static juce::String chordRoot(const juce::String& s) {    // "F#m7" gives "F#"
+    int n = s.isEmpty() ? 0 : 1;
+    while (n < s.length() && (s[n] == '#' || s[n] == 'b' || s[n] == 0x266f || s[n] == 0x266d)) ++n;
+    return s.substring(0, n);
+}
 const juce::Colour VCOL[] = {juce::Colour(110, 200, 190), juce::Colour(190, 140, 255), juce::Colour(255, 170, 110),
                              juce::Colour(120, 200, 140), juce::Colour(255, 120, 160), juce::Colour(140, 170, 255)};
 }
 
 void Pad::paint(juce::Graphics& g) {
     auto r = getLocalBounds().toFloat().reduced(2);
+    const juce::Colour hue = tint.isTransparent() ? orange : tint;
     if (lit) {
-        g.setColour(orange.withAlpha(0.25f));
+        g.setColour(hue.withAlpha(0.25f));
         g.fillRoundedRectangle(r.expanded(2), 14);
-        g.setGradientFill(juce::ColourGradient(orange.brighter(0.15f), 0, r.getY(), orange.darker(0.15f), 0, r.getBottom(), false));
+        g.setGradientFill(juce::ColourGradient(hue.brighter(0.15f), 0, r.getY(), hue.darker(0.15f), 0, r.getBottom(), false));
     } else
         g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(r, 12);
-    g.setColour(lit ? orange.brighter(0.4f) : seam);
+    g.setColour(lit ? hue.brighter(0.4f) : seam);
     g.drawRoundedRectangle(r, 12, 1.0f);
+    if (!lit && !tint.isTransparent()) {                   // a stripe in its chord's colour
+        g.setColour(tint);
+        g.fillRoundedRectangle(r.getCentreX() - 14, r.getBottom() - 7, 28, 3, 1.5f);
+    }
     g.setColour(juce::Colours::white.withAlpha(lit ? 0.25f : 0.05f));     // a light edge along the top
     g.drawLine(r.getX() + 12, r.getY() + 1, r.getRight() - 12, r.getY() + 1, 1.0f);
     g.setColour(lit ? chassis : ink);
@@ -421,25 +434,30 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
         g.drawLine(a.x, a.y, b.x, b.y, 1.0f);
     }
     // a ribbon along the floor: xs (lateral, -1..1) and widths by age; gaps where w <= 0
-    auto ribbon = [&](const std::function<bool(int, float&, float&)>& at, Colour col) {
+    auto ribbon = [&](const std::function<bool(int, float&, float&)>& at, Colour col, const std::function<Colour(int)>& colAt = nullptr) {
         const int chunk = 6;
         for (int k0 = 0; k0 < kHist - 1; k0 += chunk) {
-            Path p;
             std::vector<Point<float>> L, R;
+            auto flush = [&] {                              // fill the run gathered so far
+                if (L.size() >= 2) {
+                    Path p;
+                    p.startNewSubPath(L[0]);
+                    for (size_t i = 1; i < L.size(); ++i) p.lineTo(L[i]);
+                    for (size_t i = R.size(); i-- > 0;) p.lineTo(R[i]);
+                    p.closeSubPath();
+                    const float z = (float) k0 / (kHist - 1);
+                    g.setColour((colAt ? colAt(k0) : col).withAlpha(0.92f * std::pow(1 - z, 1.6f) + 0.02f));
+                    g.fillPath(p);
+                }
+                L.clear(); R.clear();
+            };
             for (int k = k0; k <= std::min(kHist - 1, k0 + chunk); ++k) {
                 float x, w;
-                if (!at(k, x, w)) { L.clear(); R.clear(); break; }
+                if (!at(k, x, w)) { flush(); continue; }
                 const float z = (float) k / (kHist - 1);
                 L.push_back(proj(x - w, z)); R.push_back(proj(x + w, z));
             }
-            if (L.size() < 2) continue;
-            p.startNewSubPath(L[0]);
-            for (size_t i = 1; i < L.size(); ++i) p.lineTo(L[i]);
-            for (size_t i = R.size(); i-- > 0;) p.lineTo(R[i]);
-            p.closeSubPath();
-            const float z = (float) k0 / (kHist - 1);
-            g.setColour(col.withAlpha(0.92f * std::pow(1 - z, 1.6f) + 0.02f));
-            g.fillPath(p);
+            flush();
         }
     };
     auto orb = [&](float x, Colour col, float lvl) {
@@ -487,14 +505,14 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
         for (int m = 0; m < 128; ++m) {
             if (!((m < 64 ? anyLo >> m : anyHi >> (m - 64)) & 1)) continue;
             const float x = jlimit(-1.15f, 1.15f, ((float) m - 58.0f) / 30.0f);
-            const Colour col = VCOL[(size_t) (m % 12) % 6].interpolatedWith(orange, (m % 12) >= 6 ? 0.35f : 0.0f);
+            auto colAt = [&](int k) { return CCOL[(size_t) jlimit(0, 6, (int) chordHist[(size_t) ((trailAt - 1 - k + 2 * kHist) % kHist)])]; };
             ribbon([&](int k, float& xx, float& w) {
                 const auto& h = noteHist[(size_t) ((trailAt - 1 - k + 2 * kHist) % kHist)];
                 if (!((m < 64 ? h[0] >> m : h[1] >> (m - 64)) & 1)) return false;
                 xx = x; w = m < 48 ? 0.05f : 0.03f;            // the bass lays a wider bar
                 return true;
-            }, col);
-            if ((m < 64 ? nowLo >> m : nowHi >> (m - 64)) & 1) orb(x, col, 1.0f);
+            }, orange, colAt);
+            if ((m < 64 ? nowLo >> m : nowHi >> (m - 64)) & 1) orb(x, colAt(0), 1.0f);
         }
     }
 
@@ -609,6 +627,16 @@ void BricklabStudioEditor::timerCallback() {
         trailLvl[(size_t) v] = proc.glide.level[(size_t) v];
     }
     noteHist[(size_t) trailAt] = {proc.noteBitsLo.load(), proc.noteBitsHi.load()};
+    {                                                      // which pad's chord is sounding: its colour
+        const auto root = chordRoot(proc.chordName());
+        int deg = chordHist[(size_t) ((trailAt - 1 + kHist) % kHist)];
+        for (int i = 0; i < pads.size(); ++i) if (root.isNotEmpty() && chordRoot(pads[i]->top) == root) deg = i;
+        chordHist[(size_t) trailAt] = (int8_t) deg;
+        for (int i = 0; i < pads.size(); ++i) {
+            const juce::Colour t = tab == 3 ? juce::Colour() : CCOL[i % 7];
+            if (pads[i]->tint != t) { pads[i]->tint = t; pads[i]->repaint(); }
+        }
+    }
     trailAt = (trailAt + 1) % kHist;
     if (proc.page() != tab) showTab(proc.page());       // the host changed it (automation, a preset)
     if (tab == 2 && proc.droneDegree() != litDrone) {   // the pad that's droning stays lit
