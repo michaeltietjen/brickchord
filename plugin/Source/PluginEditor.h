@@ -58,7 +58,7 @@ private:
     juce::TextButton latch{"latch"};
     juce::ComboBox sound, key, scale, mode, arpOct, bassMode, leadSound, droneSound, octave, droneSlide;
     juce::Slider leadGlide, droneY, droneX, glideTone;
-    juce::TextButton third{"3rd"}, bloomBtn{"bloom"}, stopBtn{"stop"}, glideSub{"sub"}, glideMore{"more"};
+    juce::TextButton third{"3rd"}, bloomBtn{"bloom"}, stopBtn{"stop"}, glideSub{"sub"}, glideMore{"more"}, glideStrike{"strike each chord"};
     juce::ComboBox glideSound, glideChord, glidePath, glideTiming, glideMove, glideTime, glideFade, glideBend, glideMpe;
     juce::Label glideChordL, glideToneL;
     juce::ComboBox presetBox, prSrc, tbSrc;
@@ -78,7 +78,7 @@ private:
     juce::Label spaceL, volumeL, soon, outNote, modeL, arpL, bassL;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aSound, aKey, aScale, aMode, aArpOct, aBassMode, aLeadSound, aDroneSound, aOctave, aDroneSlide,
         aGlideSound, aGlideChord, aGlidePath, aGlideTiming, aGlideMove, aGlideTime, aGlideFade, aGlideBend, aGlideMpe;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aLatch, aThird, aGlideSub;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> aLatch, aThird, aGlideSub, aGlideStrike;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aSpace, aVolume, aBassLvl, aLeadGlide, aDroneY, aDroneX, aGlideTone;
     int keyDown = -1;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BricklabStudioEditor)

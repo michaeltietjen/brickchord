@@ -205,6 +205,7 @@ void GlideEngine::glideAll(const std::vector<int>& notes, float glideX) {   // a
 
 std::string GlideEngine::apply(const std::vector<int>& pcs, int rootPc, float glideX) {
     auto notes = voicelead(pcs, rootPc);
+    ++chordSerial;
     bool fresh = true;
     for (int i = 0; i < kNCH; ++i) if (v_[i].on) fresh = false;
     if (fresh) {

@@ -3,6 +3,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include <cstdio>
 #include <set>
 #include "core/Engine.h"
 #include "core/Patterns.h"
@@ -108,7 +109,10 @@ public:
     static std::vector<int> glideSounds();    // the Glide page's sounds: the drones, then the chord sounds
 private:
     std::array<int, brick::kGlideVoices> mpeNote{}, mpeBend{}, mpePress{}, mpeTimbre{};
-    int mpeExpr = -1, lastOutMode = 0;
+    int mpeExpr = -1, lastOutMode = 0, mpeSerial = 0;
+    std::FILE* dbg = nullptr;                 // the diagnostic log (see prepareToPlay)
+    int64_t dbgBeat = 0;
+    int dbgOther = 0;
     int64_t mpeRefreshAt = 0;
     bool hostPlaying = false;
     juce::String instanceId = juce::Uuid().toString();

@@ -206,6 +206,9 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aTbDepth = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidetbdepth", tbDepth);
     aLfoRate = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidelfo", lfoRate);
     aGlideTone = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidetone", glideTone);
+    glideStrike.setClickingTogglesState(true);
+    addAndMakeVisible(glideStrike);
+    aGlideStrike = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "glidestrike", glideStrike);
     aGlideSub = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "glidesub", glideSub);
     aLatch = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "latch", latch);
     aMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "mode", mode);
@@ -282,7 +285,7 @@ void BricklabStudioEditor::showTab(int t) {
     show({&glideTone, &glideToneL}, gl && sounds);
     show({&glidePath, &glideMove, &glideTime, &glideFade}, gl && !more && !curves);
     show({&glideTiming, &glideBend}, gl && more);
-    show({&glideMpe}, gl && more && proc.kMidiFx);
+    show({&glideMpe, &glideStrike}, gl && more && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
@@ -461,7 +464,8 @@ void BricklabStudioEditor::layoutRows() {           // the bottom row: what this
         octave.setBounds(outRow.removeFromLeft(96));
         glideTiming.setBounds(adv.removeFromLeft(200)); adv.removeFromLeft(10);
         glideBend.setBounds(adv.removeFromLeft(130)); adv.removeFromLeft(10);
-        glideMpe.setBounds(adv.removeFromLeft(140));
+        glideMpe.setBounds(adv.removeFromLeft(140)); adv.removeFromLeft(10);
+        glideStrike.setBounds(adv.removeFromLeft(150));
     } else if (tab == 2) {
         octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(96)); outRow.removeFromLeft(12);
         slideL.setBounds(outRow.removeFromLeft(42)); droneSlide.setBounds(outRow.removeFromLeft(120)); outRow.removeFromLeft(12);

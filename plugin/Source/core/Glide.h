@@ -95,6 +95,7 @@ public:
     std::array<std::atomic<float>, kGlideVoices> pressure{}; // 0..1: each voice's pressure, as routed
     std::array<std::atomic<float>, kGlideVoices> timbre{};   // 0..1: each voice's timbre (0.5 centre), as routed
     std::array<std::atomic<float>, kGlideVoices> progress{}; // 0..1: how far through its glide (1: arrived)
+    std::atomic<int> chordSerial{0};                         // goes up with every chord played
     GlideCurves curves;                                      // the MPE editor's curves
     bool anyOn() const;
 
