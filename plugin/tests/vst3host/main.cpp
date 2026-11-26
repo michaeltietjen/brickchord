@@ -63,7 +63,8 @@ int main(int argc, char** argv) {
         pend.addEvent(juce::MidiMessage::pitchWheel(1, 8192), 0); run(1.5, "wheel centred");
         set("Pluck arp", 0.25f); run(1.0, "arp Up, 1/8");
         set("Pluck arp", 0.0f); run(2.0, "arp off");
-        set("Drone chord", 7.0f / 8.0f); key(true, 57); key(false, 57); run(2.0, "A, quartal");
+        set("Drone chord", 1.0f / 12.0f); key(true, 62); key(false, 62); run(0.3, "D, open"); key(true, 62); key(false, 62); run(0.2, "off");
+        set("Drone chord", 7.0f / 12.0f); key(true, 57); key(false, 57); run(2.0, "A, quartal");
         key(true, 57); key(false, 57); run(1.0, "stopped");
         set("Pluck level", 0.0f); set("Drone overtones", 0.0f); set("Sympathetic strings", 0.0f);
         for (int k = 0; k < 7; ++k) {                                         // each recorded drone sound, held 8 s

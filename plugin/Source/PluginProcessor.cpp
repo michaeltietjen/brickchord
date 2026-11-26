@@ -517,6 +517,7 @@ void BricklabStudioProcessor::pluckNow(int index, float vel, int pos, juce::Midi
 
 void BricklabStudioProcessor::runPlucks(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, int n, bool internal, bool out, double bpm) {
     const int ns = (int) strings.size();
+    droneAge += n;
     // the pointer on the field: where it is across is the string it's on; a sweep plays each one it crosses
     const float ux = uiStrum.load();
     if (ux < 0 || ns == 0) strumUi = -1;
@@ -631,9 +632,10 @@ void BricklabStudioProcessor::runPlucks(juce::AudioBuffer<float>& buffer, juce::
             const float r = (float) (cloudRng >> 8) / 16777216.0f;
             cloudLeap = st.leap == 0 ? 0.0f : (r < 0.55f ? 0.0f : (r < 0.78f ? 1.0f : (r < 0.90f || st.leap < 2 ? -1.0f : 7.0f / 12.0f)));
         }
-        cloud.freeze(st.freeze);
+        cloud.freeze(st.freeze && dronePc >= 0 && droneAge > (juce::int64) (1.5 * sr));   // once it has something to hold
         cloud.set(pos, st.size, st.pitch + cloudLeap, st.density, st.texture, 1.0f, st.feedback, st.reverb);
-        cloud.process(cbL.data(), cbR.data(), L, R, n, 1.3f * cl);
+        cloudGate += ((dronePc >= 0 ? 1.0f : 0.0f) - cloudGate) * (dronePc >= 0 ? 0.2f : (float) (1.0 - std::exp(-(double) n / (0.5 * sr))));   // with no drone it fades out
+        cloud.process(cbL.data(), cbR.data(), L, R, n, 1.3f * cl * cloudGate);
     }
 }
 
@@ -680,18 +682,25 @@ void BricklabStudioProcessor::droneToggle(int pc, int deg, int pos, juce::MidiBu
     const int root = 36 + pc + 12 * std::max(0, oct);
     const auto& sc = scaleSteps(player.scale());
     auto up = [&](int steps) {                               // semitones up to the note that many scale steps above
+        static const int major[] = {0, 2, 4, 5, 7, 9, 11};
+        if (deg < 0 || deg > 6) return 12 * (steps / 7) + major[steps % 7];   // a root outside the scale: as if major
         return 12 * (steps / 7) + ((sc[(size_t) ((deg + steps) % 7)] - sc[(size_t) deg]) % 12 + 12) % 12;
     };
     std::vector<int> notes{root, root + 7, root + 12, root + 19};
     const int shape = juce::jlimit(0, kNumDroneChords - 1, (int) params.getRawParameterValue("dronechord")->load());
     if (shape == 0) {
         if (params.getRawParameterValue("dronethird")->load() > 0.5f) notes.push_back(root + 12 + up(2));
-    } else {                                                 // a chord over the root, in scale steps
-        static const std::vector<std::vector<int>> shapes = {{}, {0, 4, 9}, {0, 2, 4}, {0, 2, 4, 6}, {0, 2, 4, 8},
-                                                             {0, 1, 4}, {0, 3, 4}, {0, 3, 6, 9}, {0, 4, 8, 12}};
+    } else if (shape == 2 || shape == 3 || shape == 4 || shape == 6) {   // triad, seventh, ninth, sus4: from the scale
+        static const std::vector<std::vector<int>> shapes = {{}, {}, {0, 2, 4}, {0, 2, 4, 6}, {0, 2, 4, 8}, {}, {0, 3, 4}};
         notes = {root};
         for (int st : shapes[(size_t) shape]) notes.push_back(root + 12 + up(st));
+    } else {                                                 // the colour chords: the very shapes Glide plays, in semitones
+        static const std::vector<std::vector<int>> semis = {{}, {0, 7, 16, 19, 26}, {}, {}, {}, {0, 2, 7, 14}, {}, {0, 5, 10, 15, 20}, {0, 7, 14, 21},
+                                                            {0, 4, 6, 11, 14, 18}, {0, 3, 7, 10, 14, 17}, {0, 4, 7, 11, 14}, {0, 2, 3, 5, 7}};
+        notes = {root};
+        for (int x : semis[(size_t) shape]) notes.push_back(root + 12 + x);
     }
+    droneAge = 0;
     setStrings(notes);
     symp.setNote((float) (root + 12));
     static const float slides[] = {0.f, 0.5f, 1.f, 2.f, 4.f};
@@ -776,6 +785,13 @@ void BricklabStudioProcessor::runMono(juce::AudioBuffer<float>& buffer, juce::Mi
         }
         if (e.type == 6) {                                   // panic
             if (dronePc >= 0) { player.drone({}, 0); for (int m : droneOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), e.pos); droneOut.clear(); dronePc = -1; droneDegLit = -1; setStrings({}); setName({}, {}); }
+            continue;
+        }
+        if (e.type == 2 && e.a == 100 && pg == DronePage) {   // Stop: the drone, the strum's tail, the echo and the cloud
+            if (dronePc >= 0) droneToggle(dronePc, 0, e.pos, midi, internal, out);
+            plucker.clear(); pluckLater.clear();
+            std::fill(echoL.begin(), echoL.end(), 0.0f); std::fill(echoR.begin(), echoR.end(), 0.0f);
+            cloudGate = 0;
             continue;
         }
         if ((e.type == 2 || e.type == 3) && (e.a < 0 || e.a > 6)) continue;   // not a pad of this page

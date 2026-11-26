@@ -62,8 +62,9 @@ inline float timeSeconds(const float* secs, int n, int index, double bpm) {
 inline const int kGlideBends[] = {1, 2, 3, 5, 7, 12, 24};   // semitones at full pitch bend
 constexpr int kNumGlideBends = 7;
 // the drone's chords: what sounds over the root
-inline const char* const kDroneChords[] = {"Root and fifth", "Open", "Triad", "Seventh", "Ninth", "Sus2", "Sus4", "Quartal", "Fifths"};
-constexpr int kNumDroneChords = 9;
+inline const char* const kDroneChords[] = {"Root and fifth", "Open", "Triad", "Seventh", "Ninth", "Sus2", "Sus4", "Quartal", "Fifths",
+                                           "Lydian", "Minor 11", "Major 9", "Cluster"};
+constexpr int kNumDroneChords = 13;
 // the drone's recorded sounds (folders of held notes in Resources/Sounds; CC0, from VSCO 2 Community Edition)
 struct RecInst { const char* name; const char* folder; };
 inline const RecInst kDroneRecs[] = {{"Cellos", "Cellos"}, {"Violas", "Violas"}, {"Violins", "Violins"}, {"Flute", "Flute"},

@@ -156,6 +156,8 @@ private:   // the free-running 16th clock (when the host isn't playing)
     float cloudLeap = 0;                      // octaves: the pitch the next grains take
     int cloudLeapLeft = 0;
     uint32_t cloudRng = 99;
+    float cloudGate = 0;                      // the cloud sounds only while a drone does
+    juce::int64 droneAge = 0;                 // samples since the drone last changed
     brick::SympStrings symp;                  // strings that ring when the strum plays into them
     std::vector<float> cbL, cbR;
     juce::ThreadPool pluckPool{1};            // reads the recorded instruments (declared after the bank it fills)

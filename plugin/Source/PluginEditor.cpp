@@ -423,6 +423,7 @@ void BricklabStudioEditor::showTab(int t) {
     show({&leadGlide, &glideL}, lead);
     third.setVisible(false);                                 // the Triad chord shape does this now
     show({&droneSlide, &droneChord, &droneY, &droneX, &pluckArp, &pluckRate}, drone);
+    stopBtn.setVisible(gl || drone);
     show({&pluckSound, &cloudStyle, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud}, drone && sounds);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
                     juce::dontSendNotification);
@@ -713,12 +714,12 @@ void BricklabStudioEditor::layout() {
         a.removeFromLeft(8);
         put(a, mode, 150); put(a, arpOct, 78); put(a, bassMode, 120); put(a, bassLvl, 90);
     } else if (drone) {
-        put(a, droneChord, 140); put(a, droneSlide, 112);
+        put(a, stopBtn, 52); put(a, droneChord, 132); put(a, droneSlide, 104);
         a.removeFromLeft(12);
-        if (!proc.kMidiFx) put(a, pluckSound, 170);
-        put(a, pluckArp, 112); put(a, pluckRate, 76);
+        if (!proc.kMidiFx) put(a, pluckSound, 160);
+        put(a, pluckArp, 104); put(a, pluckRate, 70);
         a.removeFromLeft(12);
-        if (!proc.kMidiFx) put(a, cloudStyle, 140);
+        if (!proc.kMidiFx) put(a, cloudStyle, 134);
     } else if (lead)
         put(a, leadGlide, 140);
     else if (curves) {                                      // the routing, under the editor
