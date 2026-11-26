@@ -125,7 +125,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"pluckecho", 1}, "Pluck echo", 0.f, 1.f, 0.35f));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"pluckring", 1}, "Sympathetic strings", 0.f, 1.f, 0.25f));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"dronecloud", 1}, "Drone cloud", 0.f, 1.f, 0.f));
-        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"cloudstyle", 1}, "Cloud grains", StringArray{"Grains", "Sparse", "Long", "Shimmer", "Deep", "Scatter"}, 0));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"cloudstyle", 1}, "Cloud grains", StringArray{"Grains", "Sparse", "Long", "Shimmer", "Deep", "Scatter", "Freeze"}, 0));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"pluckarp", 1}, "Pluck arp", StringArray{"Off", "Up", "Down", "Bounce", "Random"}, 0));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"pluckrate", 1}, "Pluck arp rate", StringArray{"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1));
     }
@@ -612,18 +612,27 @@ void BricklabStudioProcessor::runPlucks(juce::AudioBuffer<float>& buffer, juce::
         std::copy(R, R + n, cbR.begin());
         // Grains you can hear one by one: few of them, long enough to carry a pitch, each from a different moment of
         // the last second and a different place across the stereo. (Many short ones run together into a buzz.)
-        struct Style { float size, density, texture, feedback, reverb, pitch, wander; };
+        struct Style { float size, density, texture, feedback, reverb, pitch, wander; int leap; bool freeze; };
         static const Style styles[] = {
-            {0.62f, 0.60f, 0.30f, 0.10f, 0.40f, 0.0f, 0.30f},     // grains
-            {0.50f, 0.56f, 0.20f, 0.05f, 0.55f, 0.0f, 0.35f},     // sparse: a grain now and then
-            {0.90f, 0.60f, 0.35f, 0.15f, 0.50f, 0.0f, 0.20f},     // long: slow overlapping swells
-            {0.70f, 0.61f, 0.30f, 0.25f, 0.60f, 1.0f, 0.30f},     // shimmer: an octave up
-            {0.85f, 0.60f, 0.30f, 0.10f, 0.45f, -1.0f, 0.20f},    // deep: an octave down
-            {0.38f, 0.63f, 0.40f, 0.05f, 0.30f, 0.0f, 0.45f}};    // scatter: short ones, thrown about
-        const Style& st = styles[juce::jlimit(0, 5, (int) params.getRawParameterValue("cloudstyle")->load())];
+            {0.46f, 0.585f, 0.16f, 0.10f, 0.35f, 0.0f, 0.45f, 1, false},    // grains: each one distinct, some an octave off
+            {0.42f, 0.555f, 0.12f, 0.05f, 0.50f, 0.0f, 0.45f, 1, false},    // sparse: a grain now and then
+            {0.90f, 0.60f, 0.35f, 0.15f, 0.50f, 0.0f, 0.20f, 0, false},     // long: slow overlapping swells
+            {0.60f, 0.60f, 0.22f, 0.25f, 0.60f, 1.0f, 0.35f, 2, false},     // shimmer: an octave up, with fifths
+            {0.80f, 0.595f, 0.25f, 0.10f, 0.45f, -1.0f, 0.25f, 0, false},   // deep: an octave down
+            {0.30f, 0.61f, 0.10f, 0.05f, 0.30f, 0.0f, 0.50f, 2, false},     // scatter: short ones, thrown about in pitch and place
+            {0.50f, 0.59f, 0.15f, 0.00f, 0.50f, 0.0f, 0.50f, 1, true}};     // freeze: it stops listening and plays with what it has
+        const Style& st = styles[juce::jlimit(0, 6, (int) params.getRawParameterValue("cloudstyle")->load())];
         const double t = (double) clock / sr;
         const float pos = 0.5f + st.wander * (float) (0.6 * std::sin(t * 0.83) + 0.4 * std::sin(t * 2.17 + 1.0));
-        cloud.set(pos, st.size, st.pitch, st.density, st.texture, 1.0f, st.feedback, st.reverb);
+        cloudLeapLeft -= n;
+        if (cloudLeapLeft <= 0) {                             // each grain takes the pitch of the moment it starts in
+            cloudLeapLeft = (int) (0.14 * sr);
+            cloudRng = cloudRng * 1664525u + 1013904223u;
+            const float r = (float) (cloudRng >> 8) / 16777216.0f;
+            cloudLeap = st.leap == 0 ? 0.0f : (r < 0.55f ? 0.0f : (r < 0.78f ? 1.0f : (r < 0.90f || st.leap < 2 ? -1.0f : 7.0f / 12.0f)));
+        }
+        cloud.freeze(st.freeze);
+        cloud.set(pos, st.size, st.pitch + cloudLeap, st.density, st.texture, 1.0f, st.feedback, st.reverb);
         cloud.process(cbL.data(), cbR.data(), L, R, n, 1.3f * cl);
     }
 }

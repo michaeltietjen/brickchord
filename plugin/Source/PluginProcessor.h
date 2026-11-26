@@ -153,6 +153,9 @@ private:   // the free-running 16th clock (when the host isn't playing)
     int pluckId = -1;
     std::atomic<int> droneRecWanted{-1};      // which recorded drone sound is being read (-1: a rendered one)
     brick::Cloud cloud;                       // the granular texture over the drone
+    float cloudLeap = 0;                      // octaves: the pitch the next grains take
+    int cloudLeapLeft = 0;
+    uint32_t cloudRng = 99;
     brick::SympStrings symp;                  // strings that ring when the strum plays into them
     std::vector<float> cbL, cbR;
     juce::ThreadPool pluckPool{1};            // reads the recorded instruments (declared after the bank it fills)

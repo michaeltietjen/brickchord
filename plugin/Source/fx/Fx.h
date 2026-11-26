@@ -16,6 +16,7 @@ public:
     void set(float position, float size, float pitchOct, float density, float texture, float spread, float feedback, float reverb);
     void process(const float* inL, const float* inR, float* outL, float* outR, int n, float gain);   // adds the wet sound
 private:
+    void step(const float* inL, const float* inR, float* outL, float* outR, int n, float gain);
     struct Impl;
     std::unique_ptr<Impl> d;
 };

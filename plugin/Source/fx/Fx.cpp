@@ -71,6 +71,11 @@ void Cloud::set(float position, float size, float pitchOct, float density, float
     p->dry_wet = 1.0f; p->freeze = false; p->trigger = false; p->gate = false;
 }
 void Cloud::process(const float* inL, const float* inR, float* outL, float* outR, int n, float gain) {
+    // A little at a time: what goes in has to be read out before more goes in, or the short queue between the two
+    // rates overflows and drops samples (heard as static at a host block of 512 and up).
+    for (int at = 0; at < n; at += 64) step(inL + at, inR + at, outL + at, outR + at, n - at < 64 ? n - at : 64, gain);
+}
+void Cloud::step(const float* inL, const float* inR, float* outL, float* outR, int n, float gain) {
     Impl& s = *d;
     for (int i = 0; i < n; i++) {
         const float x[2] = {inL[i], inR[i]};

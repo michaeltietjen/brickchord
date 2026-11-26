@@ -254,7 +254,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     addAndMakeVisible(glideReach);
     pluckArp.addItemList({"Arp off", "Arp up", "Arp down", "Arp bounce", "Arp random"}, 1);
     pluckRate.addItemList({"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1);
-    cloudStyle.addItemList({"Cloud: grains", "Cloud: sparse", "Cloud: long", "Cloud: shimmer", "Cloud: deep", "Cloud: scatter"}, 1);
+    cloudStyle.addItemList({"Cloud: grains", "Cloud: sparse", "Cloud: long", "Cloud: shimmer", "Cloud: deep", "Cloud: scatter", "Cloud: freeze"}, 1);
     addAndMakeVisible(cloudStyle);
     for (auto* c : {&droneChord, &pluckSound, &pluckArp, &pluckRate}) addAndMakeVisible(c);
     for (auto* k : {&droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud}) { k->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0); addAndMakeVisible(k); }
