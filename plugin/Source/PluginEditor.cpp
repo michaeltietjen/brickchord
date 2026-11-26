@@ -558,34 +558,36 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
             g.setColour(Colours::white.withAlpha(0.05f + 0.20f * tw * (1 - d.z)));
             g.fillEllipse(c.x - 0.5f * sc, c.y - d.h * sc * 0.45f, 0.5f + 0.45f * sc, 0.5f + 0.45f * sc);
         }
-    if (spectrumView) {                                     // Spectrum: a spectrograph laid on the floor. Each note and each
-        // overtone is a streak of light running away from you; a change of chord bends the streaks into their new places.
+    if (spectrumView) {                                     // Spectrum: a spectrogram you could walk on. Loudness is height and
+        // colour together (blue for quiet, through green and yellow to red), and the surface rolls away as it ages.
         static std::array<PixelARGB, 256> lut;
         static bool made = false;
         if (!made) {
             made = true;
-            const Colour cs[] = {Colour(0x00120e24), Colour(0xff2c1f6e), Colour(0xff7a5cf0), Colour(0xffff6f9c), Colour(0xffffc46b), Colour(0xffffffff)};
-            const float at[] = {0.0f, 0.22f, 0.48f, 0.70f, 0.86f, 1.0f};
+            const Colour cs[] = {Colour(0xff15113a), Colour(0xff2f35c8), Colour(0xff1fb6c9), Colour(0xff58cf62), Colour(0xffffd84a), Colour(0xffff8a3c), Colour(0xffff3b4e)};
+            const float at[] = {0.0f, 0.16f, 0.36f, 0.54f, 0.72f, 0.87f, 1.0f};
             for (int i = 0; i < 256; ++i) {
                 const float v = (float) i / 255.0f;
                 int k = 0;
-                while (k < 4 && v > at[k + 1]) ++k;
-                const Colour c = cs[k].interpolatedWith(cs[k + 1], (v - at[k]) / (at[k + 1] - at[k]));
-                lut[(size_t) i] = c.withMultipliedAlpha(jlimit(0.0f, 1.0f, v / 0.14f)).getPixelARGB();
+                while (k < 5 && v > at[k + 1]) ++k;
+                lut[(size_t) i] = cs[k].interpolatedWith(cs[k + 1], (v - at[k]) / (at[k + 1] - at[k])).getPixelARGB();
             }
         }
-        const int yTop = (int) (hor + K / 2.12f), yBot = std::min((int) (hor + K / 0.22f), kH - 1), hh = yBot - yTop + 1;
+        const int yOff = (int) hor - 20, yBot = std::min((int) (hor + K / 0.22f) + 1, kH - 1), hh = yBot - yOff + 1;
         Image img(Image::ARGB, kW, hh, true);
         {
-            Image::BitmapData bd(img, Image::BitmapData::writeOnly);
+            Image::BitmapData bd(img, Image::BitmapData::readWrite);
+            std::array<int, kW> top;                         // per column, the highest point drawn so far (nearer land hides farther)
+            top.fill(hh);
             const float ph = terrainPhase ? 0.5f : 0.0f, a0 = (ph + 0.5f) / (float) kRows;
             auto hist = [&](int r) -> const std::array<float, kSpec>& { return spec[(size_t) ((terrainAt - 1 - std::clamp(r, 0, kRows - 1) + 2 * kRows) % kRows)]; };
             std::array<float, kSpec> row;
-            for (int yy = 0; yy < hh; ++yy) {
-                const float sc = ((float) (yTop + yy) + 0.5f - hor) / K, z = (1.0f / sc - 0.22f) / 1.9f;
-                if (z < 0 || z > 0.94f) continue;
-                const float age = std::pow(z / 0.94f, 1.0f / 1.35f);
-                if (age < a0) {                                // between this instant and the newest line of history
+            const int steps = 230;
+            int lastRow = -2;
+            for (int d = 0; d <= steps; ++d) {                // from your feet outwards
+                const float age = (float) d / (float) steps, z = std::pow(age, 1.35f) * 0.94f, sc = 1.0f / (0.22f + z * 1.9f);
+                bool seam = false;                            // where one moment's slice meets the next: a faint line, like a mesh
+                if (age < a0) {
                     const auto& h0 = hist(0);
                     const float t = age / a0;
                     for (int b = 0; b < kSpec; ++b) row[(size_t) b] = specNow[(size_t) b] + (h0[(size_t) b] - specNow[(size_t) b]) * t;
@@ -595,34 +597,29 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
                     const float f = u - (float) r;
                     const auto &h0 = hist(r), &h1 = hist(r + 1);
                     for (int b = 0; b < kSpec; ++b) row[(size_t) b] = h0[(size_t) b] + (h1[(size_t) b] - h0[(size_t) b]) * f;
+                    seam = r != lastRow; lastRow = r;
                 }
-                const float fade = std::pow(1.0f - z, 0.8f), per = (float) (kSpec - 1) / (2.44f * LK * sc), x0 = cx + (-1.22f * LK + camX) * sc;
-                auto* line = (PixelARGB*) bd.getLinePointer(yy);
+                const float floorY = hor + K * sc - (float) yOff, amp = 36.0f * sc;
+                const float light = (d == 0 ? 0.42f : (seam ? 0.80f : 1.0f)) * (0.25f + 0.75f * std::pow(1.0f - z, 0.7f));   // the cut face at the front is in shade
+                const float far = jlimit(0.0f, 1.0f, (0.94f - z) / 0.36f);   // the far end melts into the haze
+                const float per = (float) (kSpec - 1) / (2.44f * LK * sc), x0 = cx + (-1.22f * LK + camX) * sc;
                 const int xa = std::max(0, (int) std::ceil(x0)), xb = std::min(kW - 1, (int) (x0 + 2.44f * LK * sc));
                 for (int x = xa; x <= xb; ++x) {
                     const float bp = ((float) x - x0) * per;
                     const int b = std::min(kSpec - 2, (int) bp);
-                    const float v = row[(size_t) b] + (row[(size_t) (b + 1)] - row[(size_t) b]) * (bp - (float) b);
-                    PixelARGB p = lut[(size_t) jlimit(0, 255, (int) (v * v * 290.0f))];   // squared: the peaks stand out of the haze
-                    p.multiplyAlpha(fade);
-                    line[x] = p;
+                    float v = row[(size_t) b] + (row[(size_t) (b + 1)] - row[(size_t) b]) * (bp - (float) b);
+                    v = jmin(1.0f, v * v * 1.2f);                 // squared: the peaks stand up out of the plain
+                    const int yt = std::max(0, (int) (floorY - v * amp));
+                    int& tp = top[(size_t) x];
+                    if (yt >= tp) continue;                       // behind something nearer
+                    PixelARGB px = lut[(size_t) (int) (v * 255.0f)];
+                    px.setARGB((uint8) (255.0f * far), (uint8) ((float) px.getRed() * light * far), (uint8) ((float) px.getGreen() * light * far), (uint8) ((float) px.getBlue() * light * far));
+                    for (int y = yt; y < tp; ++y) ((PixelARGB*) bd.getLinePointer(y))[x] = px;
+                    tp = yt;
                 }
             }
         }
-        g.drawImageAt(img, 0, yTop);
-        Path live;                                           // and at your feet, the spectrum of this instant
-        const float sc0 = 1.0f / 0.22f, fy = hor + K * sc0;
-        Point<float> prev;
-        for (int b = 0; b < kSpec; ++b) {
-            const Point<float> pt(cx + ((-1.22f + 2.44f * (float) b / (float) (kSpec - 1)) * LK + camX) * sc0, fy - specNow[(size_t) b] * 16.0f * sc0);
-            if (b == 0) live.startNewSubPath(pt); else live.quadraticTo(prev, (prev + pt) * 0.5f);
-            prev = pt;
-        }
-        live.lineTo(prev);
-        g.setColour(orange.withAlpha(0.25f));
-        g.strokePath(live, PathStrokeType(5.0f, PathStrokeType::curved, PathStrokeType::rounded));
-        g.setColour(Colours::white.withAlpha(0.9f));
-        g.strokePath(live, PathStrokeType(1.4f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.drawImageAt(img, 0, yOff);
     } else if (terrainView) {                               // Terrain: the sound itself as a landscape
         static const Colour stops[] = {VCOL[0], VCOL[1], VCOL[2], VCOL[3], VCOL[4]};
         auto rowAt = [&](int r) -> const std::array<float, kBands>& { return terrain[(size_t) ((terrainAt - 1 - std::clamp(r, 0, kRows - 1) + 2 * kRows) % kRows)]; };
