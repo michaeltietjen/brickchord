@@ -60,6 +60,11 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidepath", 1}, "Glide path", pa, 2));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidetiming", 1}, "Glide timing", ti, 0));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidemove", 1}, "Glide move", mo, 0));
+        {
+            StringArray cr;
+            for (auto* c : brick::kGlideCrossings) cr.add(c);
+            l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidecross", 1}, "Glide crossing", cr, 0));
+        }
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidetime", 1}, "Glide time", tm, 4));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidefade", 1}, "Glide fade", fa, 2));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidebend", 1}, "Glide bend range", be, 4));
@@ -593,6 +598,7 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
     st.path = (int) params.getRawParameterValue("glidepath")->load();
     st.timing = (int) params.getRawParameterValue("glidetiming")->load();
     st.move = (int) params.getRawParameterValue("glidemove")->load();
+    st.cross = (int) params.getRawParameterValue("glidecross")->load();
     double bpm = 120;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
@@ -777,6 +783,7 @@ const std::vector<Preset>& presets() {
         {"Chord: EP Sevenths", {{"page", 0}, {"sound", 8}, {"mod7", 1}}},
         {"Drone: Deep Space Pulse", {{"page", 2}, {"dronesound", 0}, {"droney", -0.75f}, {"droneslide", 2}}},
         {"Drone: Cathedral Bloom", {{"page", 2}, {"dronesound", 3}, {"dronex", 0.75f}, {"dronethird", 1}}},
+        {"Glide: Crossing Voices", {{"page", 3}, {"glidesound", 1}, {"glidechord", 0}, {"glidetime", 5}, {"glidepath", 2}, {"glidecross", 1}, {"glidefade", 2}}},
     };
     return p;
 }

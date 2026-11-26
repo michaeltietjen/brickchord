@@ -203,11 +203,12 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (int i = 0; i < brick::kNumGlidePaths; ++i) glidePath.addItem(juce::String("Path: ") + brick::kGlidePaths[i], i + 1);
     for (int i = 0; i < brick::kNumGlideTimings; ++i) glideTiming.addItem(juce::String("Timing: ") + brick::kGlideTimings[i], i + 1);
     for (int i = 0; i < brick::kNumGlideMoves; ++i) glideMove.addItem(brick::kGlideMoves[i], i + 1);
+    for (int i = 0; i < brick::kNumGlideCrossings; ++i) glideCross.addItem(brick::kGlideCrossings[i], i + 1);
     for (auto& t : brick::timeNames(brick::kGlideTimes, brick::kNumGlideTimes, "Glide")) glideTime.addItem(t, glideTime.getNumItems() + 1);
     for (auto& t : brick::timeNames(brick::kGlideFades, brick::kNumGlideFades, "Fade")) glideFade.addItem(t, glideFade.getNumItems() + 1);
     for (int i = 0; i < brick::kNumGlideBends; ++i) glideBend.addItem("Bend " + juce::String(brick::kGlideBends[i]) + " st", i + 1);
     glideMpe.addItemList({"Out: MPE", "Out: notes", "Out: MPE + pressure"}, 1);
-    for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideTime, &glideFade, &glideBend, &glideMpe})
+    for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideCross, &glideTime, &glideFade, &glideBend, &glideMpe})
         addAndMakeVisible(c);
     glideSub.setClickingTogglesState(true);
     bloomBtn.onClick = [this] { proc.uiPad(101, true); };
@@ -309,6 +310,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aGlidePath = std::make_unique<CA>(ps, "glidepath", glidePath);
     aGlideTiming = std::make_unique<CA>(ps, "glidetiming", glideTiming);
     aGlideMove = std::make_unique<CA>(ps, "glidemove", glideMove);
+    aGlideCross = std::make_unique<CA>(ps, "glidecross", glideCross);
     aGlideTime = std::make_unique<CA>(ps, "glidetime", glideTime);
     aGlideFade = std::make_unique<CA>(ps, "glidefade", glideFade);
     aGlideBend = std::make_unique<CA>(ps, "glidebend", glideBend);
@@ -386,7 +388,7 @@ void BricklabStudioEditor::showTab(int t) {
     show({&glideSound}, gl && sounds);
     show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore}, gl);
     show({&glideTone, &glideToneL}, gl && sounds);
-    show({&glidePath, &glideMove, &glideTime, &glideFade, &glideTiming, &glideBend}, gl && more && !curves);
+    show({&glidePath, &glideMove, &glideCross, &glideTime, &glideFade, &glideTiming, &glideBend}, gl && more && !curves);
     show({&glideMpe, &glideStrike}, gl && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
@@ -611,8 +613,8 @@ void BricklabStudioEditor::layout() {
         put(a, tbL, 52); put(a, tbSrc, 150); put(a, tbDepth, 90); a.removeFromLeft(8);
         put(a, lfoL, 32); put(a, lfoRate, 100);
     } else {
-        put(a, glideTime, 116); put(a, glidePath, 140); put(a, glideMove, 120); put(a, glideFade, 100);
-        put(a, glideTiming, 150); put(a, glideBend, 92); put(a, octave, 78);
+        put(a, glideTime, 100); put(a, glidePath, 112); put(a, glideCross, 118); put(a, glideMove, 100); put(a, glideFade, 90);
+        put(a, glideTiming, 124); put(a, glideBend, 80); put(a, octave, 70);
     }
     curveEd->setBounds(20, 56, 782, 350);
 }

@@ -129,6 +129,42 @@ std::vector<int> GlideEngine::voicelead(const std::vector<int>& pcsIn, int rootP
     return best;
 }
 
+// The crossing: voicelead gives each voice the nearest note. Here the same notes are dealt out
+// again, so that some voices rise while others fall and pass through each other, and the chord
+// they land on is the very same chord. The bass keeps the root unless everything mirrors.
+void GlideEngine::cross(std::vector<int>& notes) {
+    const int mode = st_.cross % kNumGlideCrossings;
+    if (mode == 0) return;
+    std::vector<int> byNow(kNCH), tg(notes.begin(), notes.begin() + kNCH);
+    for (int i = 0; i < kNCH; ++i) byNow[(size_t) i] = i;
+    std::sort(byNow.begin(), byNow.end(), [&](int a, int b) { return v_[a].cur < v_[b].cur; });   // the voices, low to high
+    std::sort(tg.begin(), tg.end());                                                               // the notes, low to high
+    std::vector<int> p(kNCH);                                  // voice k (from the bottom) takes note p[k]
+    for (int k = 0; k < kNCH; ++k) p[(size_t) k] = k;
+    switch (mode) {
+        case 2: std::swap(p[2], p[3]); break;                                  // the two middle voices trade
+        case 3: std::swap(p[1], p[4]); break;                                  // the outer two trade, the middle holds
+        case 4: std::reverse(p.begin() + 1, p.end()); break;                   // every upper voice to its mirror
+        case 5: std::rotate(p.begin() + 1, p.begin() + 2, p.end()); break;     // each up a place, the top drops under
+        case 6: std::rotate(p.begin() + 1, p.end() - 1, p.end()); break;       // each down a place, the lowest leaps over
+        case 7: std::reverse(p.begin(), p.end()); break;                       // the bass too
+        default: {                                             // auto: shared notes hold, the voices that move trade ends
+            std::vector<int> movers;
+            for (int k = 1; k < kNCH; ++k)
+                if (std::abs(v_[byNow[(size_t) k]].cur - tg[(size_t) k] * 100.0) > 50.0) movers.push_back(k);
+            if (movers.size() < 2) {                           // nearly nothing moves: two neighbours trade instead
+                const int k = movers.empty() ? 2 + (crossTurn_ % 2) : std::clamp(movers[0], 2, kNCH - 1);
+                std::swap(p[(size_t) k], p[(size_t) (k - 1 < 1 ? k + 1 : k - 1)]);
+            } else if (movers.size() > 2 && (crossTurn_ % 3) == 1)   // now and then they go round instead of across
+                for (size_t j = 0; j < movers.size(); ++j) p[(size_t) movers[j]] = movers[(j + 1) % movers.size()];
+            else
+                for (size_t j = 0; j < movers.size(); ++j) p[(size_t) movers[j]] = movers[movers.size() - 1 - j];
+            ++crossTurn_;
+        }
+    }
+    for (int k = 0; k < kNCH; ++k) notes[(size_t) byNow[(size_t) k]] = tg[(size_t) p[(size_t) k]];
+}
+
 void GlideEngine::subFollow(const std::vector<int>& notes, double secs, bool jump) {   // ambient.amb_sub_follow
     V& s = v_[5];
     if (!st_.sub) {
@@ -211,8 +247,10 @@ std::string GlideEngine::apply(const std::vector<int>& pcs, int rootPc, float gl
     if (fresh) {
         layOut(notes);
         if (st_.move > 0) bloom();
-    } else
+    } else {
+        cross(notes);
         glideAll(notes, glideX);
+    }
     return {};
 }
 

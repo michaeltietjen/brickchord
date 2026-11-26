@@ -32,6 +32,10 @@ constexpr int kNumGlideTimings = 5;
 inline const char* const kGlideMoves[] = {"No move", "Bloom", "Cascade up", "Cascade down", "Spiral", "Swoop",
                                           "Scatter", "Converge", "Fall"};
 constexpr int kNumGlideMoves = 9;
+// which voice takes which note of the next chord: the nearest, or trading places so they cross on the way
+inline const char* const kGlideCrossings[] = {"No crossing", "Auto cross", "Swap middle", "Outside in", "Mirror",
+                                              "Rotate up", "Rotate down", "Mirror all"};
+constexpr int kNumGlideCrossings = 8;
 inline const float kGlideTimes[] = {0.25f, 0.4f, 0.6f, 1.0f, 1.5f, 2.0f, 4.0f, 6.0f, 8.0f, 12.0f, 20.0f, 30.0f, 60.0f};
 constexpr int kNumGlideTimes = 13;
 inline const float kGlideFades[] = {0.2f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 15.0f};
@@ -60,7 +64,7 @@ constexpr int kNumGlideBends = 7;
 constexpr int kGlideVoices = 6;                             // five chord voices and the sub
 
 struct GlideSettings {
-    int chord = 0, path = 2, timing = 0, move = 0;
+    int chord = 0, path = 2, timing = 0, move = 0, cross = 0;
     float time = 1.5f, fade = 1.0f;
     bool sub = true;
     float tone = 1.0f;                           // 0..1: the low-pass on the voices (1: open)
@@ -123,6 +127,7 @@ private:
     void push(int i, double tgtCents, double glide, int shape, double delay, const std::vector<double>& via, bool jump);
     std::vector<int> voicelead(const std::vector<int>& pcs, int rootPc) const;   // the five voices' new notes
     void glideAll(const std::vector<int>& notes, float glideX);
+    void cross(std::vector<int>& notes);                 // deal the chord's notes out so the voices cross
     void subFollow(const std::vector<int>& notes, double secs, bool jump);
     void layOut(const std::vector<int>& notes);
     std::string apply(const std::vector<int>& pcs, int rootPc, float glideX);
@@ -144,6 +149,7 @@ private:
     int curDeg_ = -1, oct_ = 0;
     bool silent_ = false;
     uint32_t rng_ = 98765;
+    int crossTurn_ = 0;
 };
 
 }  // namespace brick
