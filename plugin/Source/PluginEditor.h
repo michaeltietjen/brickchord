@@ -86,7 +86,7 @@ private:
     juce::TextButton latch{"latch"};
     juce::ComboBox sound, key, scale, mode, arpOct, bassMode, leadSound, droneSound, octave, droneSlide;
     juce::Slider leadGlide, droneY, droneX, glideTone, droneDrift, droneAir, pluckLevel, pluckEcho, pluckRing, droneCloud;
-    juce::ComboBox droneChord, pluckSound, pluckArp, pluckRate, cloudStyle, chordColour;
+    juce::ComboBox glideSubBox, droneChord, pluckSound, pluckArp, pluckRate, cloudStyle, chordColour;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aDroneChord, aPluckSound, aPluckArp, aPluckRate, aCloudStyle, aChordColour;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aDroneDrift, aDroneAir, aPluckLevel, aPluckEcho, aPluckRing, aDroneCloud;
     struct Spark { int midi; float age; };

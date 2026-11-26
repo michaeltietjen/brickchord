@@ -211,6 +211,14 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideCross, &glideTime, &glideFade, &glideBend, &glideMpe})
         addAndMakeVisible(c);
     glideSub.setClickingTogglesState(true);
+    glideSubBox.addItemList({"Sub off", "Sub", "Sub from E1", "Sub from A1", "Sub from C2"}, 1);   // on or off, and how low it may go
+    glideSubBox.onChange = [this] {
+        const int k = glideSubBox.getSelectedItemIndex();
+        if (k < 0) return;
+        if (auto* p = proc.params.getParameter("glidesub")) p->setValueNotifyingHost(k > 0 ? 1.0f : 0.0f);
+        if (k > 0) if (auto* p = proc.params.getParameter("glidesubfloor")) p->setValueNotifyingHost(p->convertTo0to1((float) (k - 1)));
+    };
+    addAndMakeVisible(glideSubBox);
     bloomBtn.onClick = [this] { proc.uiPad(101, true); };
     stopBtn.onClick = [this] { proc.uiPad(100, true); };
     // the MPE editor: the curves a glide follows, and what drives pressure and timbre
@@ -419,7 +427,8 @@ void BricklabStudioEditor::showTab(int t) {
     show({&octave}, !gl || (more && !curves));
     octL.setVisible(!gl);
     show({&glideSound}, gl && sounds);
-    show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore, &glideReach}, gl);
+    glideSub.setVisible(false);                              // the Sub menu does this now
+    show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSubBox, &glideMore, &glideReach}, gl);
     show({&glideTone, &glideToneL}, gl && sounds);
     show({&glidePath, &glideMove, &glideCross, &glideTime, &glideFade, &glideTiming, &glideBend}, gl && more && !curves);
     show({&glideMpe, &glideStrike}, gl && proc.kMidiFx);
@@ -700,15 +709,16 @@ void BricklabStudioEditor::layout() {
     const int w = (856 - 6 * 8) / 7;
     for (int i = 0; i < pads.size(); ++i) pads[i]->setBounds(22 + i * (w + 8), 512, w, 60);
     auto b = juce::Rectangle<int>(22, 466, 856, 32);
-    if (gl) { put(b, bloomBtn, 60); put(b, stopBtn, 56); put(b, glideChord, 108); put(b, glideSub, 50); }
+    const bool mf = proc.kMidiFx;
+    if (gl) { put(b, bloomBtn, 60); put(b, stopBtn, 56); put(b, glideChord, mf ? 100 : 108); put(b, glideSubBox, mf ? 88 : 96); }
     if (!proc.kMidiFx) {
-        auto sb = b.removeFromLeft(gl ? 170 : 190); b.removeFromLeft(8);
+        auto sb = b.removeFromLeft(gl ? 160 : 190); b.removeFromLeft(8);
         for (auto* c : {&sound, &leadSound, &droneSound, &glideSound}) c->setBounds(sb);
     }
-    if (gl && proc.kMidiFx) { put(b, glideMpe, 104); put(b, glideStrike, 112); }
+    if (gl && proc.kMidiFx) { put(b, glideMpe, 96); put(b, glideStrike, 104); }
     put(b, key, 60);
-    put(b, scale, gl ? 124 : 140);
-    if (gl) put(b, glideReach, 110);
+    put(b, scale, gl ? (mf ? 112 : 124) : 140);
+    if (gl) put(b, glideReach, mf ? 96 : 104);
     if (!gl) put(b, octave, 84);
 
     auto a = juce::Rectangle<int>(22, 424, 856, 32);
@@ -745,6 +755,11 @@ void BricklabStudioEditor::timerCallback() {
         trail[(size_t) v][(size_t) trailAt] = on ? proc.glide.cents[(size_t) v].load() : 0.0f;
         trailLv[(size_t) v][(size_t) trailAt] = proc.glide.level[(size_t) v];
         trailLvl[(size_t) v] = proc.glide.level[(size_t) v];
+    }
+    {                                                      // the Sub menu follows its two parameters (a preset, the host)
+        const bool on = proc.params.getRawParameterValue("glidesub")->load() > 0.5f;
+        const int k = on ? 1 + (int) proc.params.getRawParameterValue("glidesubfloor")->load() : 0;
+        if (glideSubBox.getSelectedItemIndex() != k && !glideSubBox.isPopupActive()) glideSubBox.setSelectedItemIndex(k, juce::dontSendNotification);
     }
     noteHist[(size_t) trailAt] = {proc.noteBitsLo.load(), proc.noteBitsHi.load()};
     {                                                      // which pad's chord is sounding: its colour

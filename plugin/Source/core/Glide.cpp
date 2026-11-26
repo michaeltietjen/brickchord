@@ -131,6 +131,30 @@ std::vector<int> GlideEngine::voicelead(const std::vector<int>& pcsIn, int rootP
         used.insert(pick % 12);
         prev = pick;
     }
+    // every note of the chord, when there are voices enough: a voice doubling a note another already has
+    // moves to the nearest note of one that is missing (a colour chord with its third left out is hollow)
+    for (int guard = 0; guard < 6; ++guard) {
+        int miss = -1;
+        for (int pc : pcsIn) { bool got = false; for (int n : best) got = got || n % 12 == pc; if (!got) { miss = pc; break; } }
+        if (miss < 0) break;
+        int who = -1, to = 0;
+        double wd = 1e9;
+        for (size_t k = 1; k < cur.size(); ++k) {              // never the bass
+            const int v = cur[k].second, n0 = best[(size_t) v];
+            int same = 0;
+            for (int n : best) same += n % 12 == n0 % 12;
+            if (same < 2) continue;
+            const int lo = best[(size_t) cur[k - 1].second], hi = k + 1 < cur.size() ? best[(size_t) cur[k + 1].second] : 200;
+            for (int n = n0 - 11; n <= n0 + 11; ++n) {
+                if (((n % 12) + 12) % 12 != miss || n < 24 || n > 96) continue;
+                const double d = std::abs(n - n0) + (n > lo && n < hi ? 0.0 : 6.0)   // better kept between its neighbours,
+                                 + (n < 54 ? 0.5 * (54 - n) : 0.0);                  // and not down low, where a third is mud
+                if (d < wd) { wd = d; who = v; to = n; }
+            }
+        }
+        if (who < 0) break;                                    // nothing doubled: more notes than voices
+        best[(size_t) who] = to;
+    }
     for (int& n : best) n = std::clamp(n + 12 * oct_, 12, 120);
     return best;
 }
@@ -177,10 +201,11 @@ void GlideEngine::subFollow(const std::vector<int>& notes, double secs, bool jum
         if (s.on) { s.on = false; s.lvlT = 0; }
         return;
     }
-    const int bass = *std::min_element(notes.begin(), notes.end());
+    int sub = *std::min_element(notes.begin(), notes.end()) - 12;
+    while (sub < st_.subFloor) sub += 12;                      // not below the floor (an instrument may have no notes down there)
     const bool was = s.on;
     s.on = true; s.lvlT = levelOf(5);
-    push(5, (bass - 12) * 100.0, secs, 2, 0, {}, jump || !was);
+    push(5, sub * 100.0, secs, 2, 0, {}, jump || !was);
 }
 
 void GlideEngine::layOut(const std::vector<int>& notes) {   // from silence: the voices lay the chord out and fade in
@@ -279,7 +304,13 @@ std::string GlideEngine::playDegree(int deg, const Mods& held, float glideX, boo
         const auto& s = steps[(size_t) (st_.chord % kNumGlideChords)];
         const auto& sc = scaleSteps(scale_);
         for (int x : s) pcs.push_back(name == "Eleventh" ? (key_ + sc[(size_t) ((deg + x) % 7)]) % 12 : (c.root + x) % 12);
-        label += " " + name;
+        size_t n = label.empty() ? 0 : 1;                      // the root's own name, then the colour's: these shapes
+        while (n < label.size() && (label[n] == '#' || label[n] == 'b')) ++n;   // are not the scale's major or minor
+        label = label.substr(0, n) + " " + name;
+        if (name != "Eleventh") {
+            c.iv.clear();
+            for (int p : pcs) c.iv.push_back(((p - c.root) % 12 + 12) % 12);
+        }
     }
     apply(pcs, c.root, glideX);
     curDeg_ = deg;

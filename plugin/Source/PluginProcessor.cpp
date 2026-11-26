@@ -157,6 +157,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidefade", 1}, "Glide fade", fa, 2));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidebend", 1}, "Glide bend range", be, 4));
         l.add(std::make_unique<AudioParameterBool>(ParameterID{"glidesub", 1}, "Glide sub", true));
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidesubfloor", 1}, "Glide sub floor", StringArray{"Any", "E1", "A1", "C2"}, 0));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidetone", 1}, "Glide tone", 0.f, 1.f, 1.f));
         StringArray ps, ts;
         for (auto* c : kPressureSources) ps.add(c);
@@ -957,6 +958,7 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
     st.time = timeSeconds(kGlideTimes, kNumGlideTimes, (int) params.getRawParameterValue("glidetime")->load(), bpm);
     st.fade = timeSeconds(kGlideFades, kNumGlideFades, (int) params.getRawParameterValue("glidefade")->load(), bpm);
     st.sub = params.getRawParameterValue("glidesub")->load() > 0.5f;
+    { static const int floors[] = {0, 28, 33, 36}; st.subFloor = floors[juce::jlimit(0, 3, (int) params.getRawParameterValue("glidesubfloor")->load())]; }
     st.tone = params.getRawParameterValue("glidetone")->load();
     st.prSrc = (int) params.getRawParameterValue("glideprsrc")->load();
     st.prDepth = params.getRawParameterValue("glideprdepth")->load();
