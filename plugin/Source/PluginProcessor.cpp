@@ -186,7 +186,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"modflip", 1}, "flip", false));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"space", 1}, "Space", 0.f, 1.f, 0.3f));
-    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"view", 1}, "View", StringArray{"Field", "Terrain", "Spectrum"}, 0));
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"view", 1}, "View", StringArray{"Field", "Terrain", "Spectrum", "Particles"}, 0));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"volume", 1}, "Volume", 0.f, 1.f, 0.8f));
     return l;
 }

@@ -13,7 +13,8 @@ const char* SOON[] = {"", "", "", ""};
 // one colour per chord of the scale (pads 1 to 7)
 const juce::Colour CCOL[] = {juce::Colour(0xffb9a6ff), juce::Colour(0xff6ec8be), juce::Colour(0xffffc46b), juce::Colour(0xff78a0ff),
                              juce::Colour(0xffff7896), juce::Colour(0xff8cd278), juce::Colour(0xffffaa6e)};
-static juce::String chordRoot(const juce::String& s) {    // "F#m7" gives "F#"
+static juce::String chordRoot(const juce::String& full) {    // "F#m7" gives "F#"; so does Glide's "iv  F#m Open"
+    const auto s = full.contains("  ") ? full.fromLastOccurrenceOf("  ", false, false) : full;
     int n = s.isEmpty() ? 0 : 1;
     while (n < s.length() && (s[n] == '#' || s[n] == 'b' || s[n] == 0x266f || s[n] == 0x266d)) ++n;
     return s.substring(0, n);
@@ -376,7 +377,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     droneY.setName("Pulse"); droneX.setName("Bloom"); droneDrift.setName("Drift"); droneAir.setName("Air");
     pluckLevel.setName("Strum"); pluckEcho.setName("Echo"); pluckRing.setName("Ring"); droneCloud.setName("Cloud");
     viewBtn.onClick = [this] {                               // Field or Terrain
-        const int v = ((int) proc.params.getRawParameterValue("view")->load() + 1) % 3;   // field, terrain, spectrum, and round again
+        const int v = ((int) proc.params.getRawParameterValue("view")->load() + 1) % 4;   // field, terrain, spectrum, particles, and round again
         if (auto* p = proc.params.getParameter("view")) p->setValueNotifyingHost(p->convertTo0to1((float) v));
     };
     canvas.addAndMakeVisible(viewBtn);
@@ -488,12 +489,14 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
         g.setGradientFill(ColourGradient(orange.withAlpha(0.40f * bloom), cx, hor + 12, orange.withAlpha(0.0f), cx + 340, hor + 12, true));
         g.fillEllipse(cx - 340, hor + 12 - 340, 680, 680);
     }
+    if (viewNow != 3)
     for (int k = 0; k <= 12; ++k) {                         // bars of time
         const float z = (float) k / 12.0f;
         auto a = proj(-1.3f, z), b = proj(1.3f, z);
         g.setColour(Colour(0xff3a3658).withAlpha(0.55f * (1 - z) * (1 - z) + 0.03f));
         g.drawLine(a.x, a.y, b.x, b.y, 1.0f);
     }
+    if (viewNow != 3)
     for (int k = -6; k <= 6; ++k) {                         // lanes of pitch
         auto a = proj((float) k / 5.0f, 0), b = proj((float) k / 5.0f, 1);
         g.setGradientFill(ColourGradient(Colour(0xff3a3658).withAlpha(0.5f), a.x, a.y, Colour(0x003a3658), b.x, b.y, false));
@@ -620,14 +623,70 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
             }
         }
         g.drawImageAt(img, 0, yOff);
+    } else if (viewNow == 3) {                              // Particles: rows of lights along waving lines, in the chord's
+        // colour. The sound lifts them; with none they still roll. Near and far ones go soft, as through a lens.
+        const double tm = Time::getMillisecondCounterHiRes() * 0.001;
+        const float yaw = 80.0f * (float) std::sin(tm * 0.11), sway = camX * 2.6f;   // a camera that turns and drifts
+        const int yOff = (int) hor - 40, yBot = std::min((int) (hor + K / 0.22f) + 16, kH - 1), hh = yBot - yOff + 1;
+        static thread_local std::vector<float> acc;
+        acc.assign((size_t) (kW * hh * 3), 0.0f);
+        auto rowAt = [&](int r) -> const std::array<float, kBands>& { return terrain[(size_t) ((terrainAt - 1 - std::clamp(r, 0, kRows - 1) + 2 * kRows) % kRows)]; };
+        for (int r = kRows - 1; r >= -1; --r) {
+            if (r < 0 && !terrainPhase) continue;
+            const float age = r < 0 ? 0.0f : ((float) r + (terrainPhase ? 0.5f : 0.0f) + 0.5f) / (float) kRows;
+            const float z = std::pow(age, 1.35f) * 0.94f, sc = 1.0f / (0.22f + z * 1.9f);
+            const Colour rc = r < 0 ? colNow : terrainCol[(size_t) ((terrainAt - 1 - r + 2 * kRows) % kRows)];
+            const float cr = rc.getFloatRed(), cg = rc.getFloatGreen(), cb = rc.getFloatBlue();
+            const auto& row = r < 0 ? bandNow : rowAt(r);
+            const float abs = (float) (terrainCount - r) - (terrainPhase ? 0.5f : 0.0f);      // which line this is, for ever: its wave travels with it
+            const float soft = std::abs(z - 0.17f), farFade = jlimit(0.0f, 1.0f, (0.94f - z) / 0.3f);
+            for (int b = 1; b < kBands - 1; ++b) {
+                const float xf = -1.22f + 2.44f * (float) b / (float) (kBands - 1), v = row[(size_t) b];
+                const float wave = 0.55f * std::sin(xf * 2.6f + abs * 0.22f) + 0.45f * std::sin(xf * 1.1f - abs * 0.13f + 1.7f);
+                const float px = cx + (xf * LK + sway) * sc + yaw * z;
+                const float py = hor + K * sc - (v * 30.0f + (wave + 1.0f) * 5.0f) * sc - (float) yOff;
+                const float rad = 0.7f + 0.42f * sc * (0.45f + 0.9f * v) + 7.0f * soft;        // out of focus: bigger and fainter
+                const float bright = (0.30f + 1.9f * v * v + 0.25f * (wave + 1.0f) * 0.5f) * farFade * jmin(1.0f, 3.2f / (rad * rad)) * 1.15f;
+                const float white = jmin(0.38f, v * v * 0.45f);                                 // the loud ones burn a little towards white
+                const float lr = (cr + (1 - cr) * white) * bright, lg = (cg + (1 - cg) * white) * bright, lb = (cb + (1 - cb) * white) * bright;
+                const int R = (int) std::ceil(rad * 2.2f), ix = (int) std::lround(px), iy = (int) std::lround(py);
+                const float inv = 1.0f / (rad * rad);
+                for (int dy = -R; dy <= R; ++dy) {
+                    const int y = iy + dy;
+                    if (y < 0 || y >= hh) continue;
+                    for (int dx = -R; dx <= R; ++dx) {
+                        const int x = ix + dx;
+                        if (x < 0 || x >= kW) continue;
+                        const float fx = (float) x - px, fy = (float) y - py, w = std::exp(-(fx * fx + fy * fy) * inv);
+                        float* a = &acc[(size_t) ((y * kW + x) * 3)];
+                        a[0] += lr * w; a[1] += lg * w; a[2] += lb * w;
+                    }
+                }
+            }
+        }
+        Image img(Image::ARGB, kW, hh, true);
+        {
+            Image::BitmapData bd(img, Image::BitmapData::writeOnly);
+            for (int y = 0; y < hh; ++y) {
+                auto* line = (PixelARGB*) bd.getLinePointer(y);
+                const float* a = &acc[(size_t) (y * kW * 3)];
+                for (int x = 0; x < kW; ++x, a += 3) {
+                    if (a[0] + a[1] + a[2] < 0.004f) continue;
+                    const float r2 = 1.0f - std::exp(-a[0]), g2 = 1.0f - std::exp(-a[1]), b2 = 1.0f - std::exp(-a[2]);   // light adds up, and never clips
+                    const float al = jmax(r2, g2, b2);
+                    line[x].setARGB((uint8) (al * 255.0f), (uint8) (r2 * 255.0f), (uint8) (g2 * 255.0f), (uint8) (b2 * 255.0f));
+                }
+            }
+        }
+        g.drawImageAt(img, 0, yOff);
     } else if (terrainView) {                               // Terrain: the sound itself as a landscape
-        static const Colour stops[] = {VCOL[0], VCOL[1], VCOL[2], VCOL[3], VCOL[4]};
         auto rowAt = [&](int r) -> const std::array<float, kBands>& { return terrain[(size_t) ((terrainAt - 1 - std::clamp(r, 0, kRows - 1) + 2 * kRows) % kRows)]; };
         for (int r = kRows - 1; r >= -1; --r) {              // the far ridges first, so the near ones stand in front of them
             // r = -1 is the land as it is this instant, at your feet; the rest slide back from there
             const float age = r < 0 ? 0.0f : ((float) r + (terrainPhase ? 0.5f : 0.0f) + 0.5f) / (float) kRows;
             if (r < 0 && !terrainPhase) continue;
             std::array<float, kBands> row;
+            const Colour rc = r < 0 ? colNow : terrainCol[(size_t) ((terrainAt - 1 - r + 2 * kRows) % kRows)];   // the colour of the chord it was
             if (r < 0) row = bandNow;
             else {                                           // each ridge shares a little with its neighbours in time: a surface
                 const auto &a0 = rowAt(r - 1), &a1 = rowAt(r), &a2 = rowAt(r + 1);
@@ -648,14 +707,10 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
             line.lineTo(prev); fill.lineTo(prev); fill.lineTo(prev.x, floorY); fill.closeSubPath();
             g.setColour(chassis.interpolatedWith(Colour(0xff1c1932), 0.35f * near).withAlpha(0.94f));   // it hides what is behind it
             g.fillPath(fill);
-            const float x0 = cx + (-1.22f * LK + camX) * sc, x1 = cx + (1.22f * LK + camX) * sc;
-            ColourGradient gr(stops[0].withAlpha(0.15f * near * near), 0, floorY - amp, stops[0].withAlpha(0.0f), 0, floorY, false);
+            ColourGradient gr(rc.withAlpha(0.22f * near * near), 0, floorY - amp, rc.withAlpha(0.0f), 0, floorY, false);
             g.setGradientFill(gr);                           // a glow inside each ridge
             g.fillPath(fill);
-            ColourGradient across(stops[0], x0, 0, stops[4], x1, 0, false);
-            for (int k = 1; k < 4; ++k) across.addColour(k / 4.0, stops[k]);
-            across.multiplyOpacity(0.06f + 0.94f * std::pow(near, 1.5f));
-            g.setGradientFill(across);
+            g.setColour(rc.interpolatedWith(Colours::white, 0.25f * near).withAlpha(0.06f + 0.94f * std::pow(near, 1.5f)));
             g.strokePath(line, PathStrokeType(0.7f + 1.5f * near, PathStrokeType::curved, PathStrokeType::rounded));
         }
     } else if (gl) {                                        // Glide: each voice a ribbon; a glide is a lane change
@@ -892,7 +947,7 @@ void BricklabStudioEditor::layout() {
         put(a, glideTiming, 124); put(a, glideBend, 80); put(a, octave, 70);
     }
     curveEd->setBounds(20, 56, 782, 350);
-    viewBtn.setBounds(24, 172, 76, 22);
+    viewBtn.setBounds(24, 172, 80, 22);
     viewBtn.setVisible(!(tab == 3 && curvesBtn.getToggleState()));
 }
 
@@ -932,7 +987,11 @@ void BricklabStudioEditor::timerCallback() {
         for (auto& d : dust) { d.z -= 0.0016f; d.ph += 0.05f; if (d.z < 0) { d.z = 1.0f; } }
         const int vw = (int) proc.params.getRawParameterValue("view")->load();
         const bool tv = vw > 0;
-        const char* vn = vw == 0 ? "field" : (vw == 1 ? "terrain" : "spectrum");
+        const char* vn = vw == 0 ? "field" : (vw == 1 ? "terrain" : (vw == 2 ? "spectrum" : "particles"));
+        {                                                    // the chord's colour, eased, so one chord's colour runs into the next
+            const juce::Colour want = CCOL[(size_t) juce::jlimit(0, 6, (int) chordHist[(size_t) ((trailAt - 1 + kHist) % kHist)])];
+            colNow = colNow.interpolatedWith(want, 0.14f);
+        }
         if (viewBtn.getButtonText() != vn) viewBtn.setButtonText(vn);
         if (tv) {                                            // a new ridge: the spectrum of the last moment
             const double sr = std::max(8000.0, proc.getSampleRate());
@@ -997,6 +1056,7 @@ void BricklabStudioEditor::timerCallback() {
             }
             terrainPhase = !terrainPhase;                    // a new ridge every other frame; between them the land slides half a step
             if (!terrainPhase) {
+                terrainCol[(size_t) terrainAt] = colNow;
                 spec[(size_t) terrainAt] = specNow;
                 terrain[(size_t) terrainAt] = bandNow;
                 terrainAt = (terrainAt + 1) % kRows;

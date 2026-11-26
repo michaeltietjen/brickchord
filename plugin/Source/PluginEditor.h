@@ -102,6 +102,8 @@ private:
     static constexpr int kSpec = 172;                  // the Spectrum view: half a semitone to a band
     std::array<std::array<float, kSpec>, kRows> spec{};
     std::array<float, kSpec> specNow{};
+    std::array<juce::Colour, kRows> terrainCol{};      // the chord's colour when each ridge was made
+    juce::Colour colNow{0xffb9a6ff};
     int terrainAt = 0, terrainCount = 0;
     bool terrainPhase = false;
     juce::TextButton viewBtn{"field"};
