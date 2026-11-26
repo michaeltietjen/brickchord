@@ -2,7 +2,7 @@
 # Build the PortMaster ports: one zip per app, for any firmware that runs PortMaster
 # (KNULLI, muOS, ROCKNIX, ArkOS, NextUI / NX Redux on the TrimUI Brick, and more).
 #   dist/brickchord-<ver>-portmaster.zip   dist/bricklab-<ver>-portmaster.zip
-#   dist/brickglide-<ver>-portmaster.zip
+#   dist/brickglide-<ver>-portmaster.zip  dist/brickchop-<ver>-portmaster.zip
 # Each runs on PortMaster's python_3.11 runtime (fetched by PortMaster on first launch)
 # with its own pylib/: NumPy 1.26.4 (manylinux2014 aarch64 wheel) and pygame 2.6.1
 # built for that runtime against the device's own SDL2. That pygame build comes from
@@ -11,7 +11,7 @@
 # Also writes dist/portmaster-new/ports/<name>/ folders laid out for a PortMaster-New PR.
 # Usage: tools/build_portmaster.sh [version]
 set -e
-VER="${1:-v0.4.0}"
+VER="${1:-v0.6.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 WORK="$(mktemp -d)"
@@ -37,6 +37,7 @@ build() {   # build <dir> <title> <edition> <short description> <genre>
     mkdir -p "$APP/samples" "$APP/licenses"
     cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$ROOT/brickchord/samples_README.txt" "$APP/"
     cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$APP/"
+    [ "$ED" = chop ] && cp -R "$ROOT/brickchord/voice" "$APP/"      # the robot voice the Brickchop demos use
     cp "$ROOT"/brickchord/samples/*.wav "$APP/samples/" 2>/dev/null || true
     [ "$ED" != "chord" ] && printf '%s\n' "$ED" > "$APP/edition.txt"
     cp -R "$WORK/pylib" "$APP/pylib"
@@ -141,5 +142,8 @@ build bricklab Bricklab lab \
   "other"
 build brickglide Brickglide glide \
   "An ambient machine on the Brickchord engine: six gliding voices, chords that glide into each other, blooms, drones, scenes and a live spectrogram." \
+  "other"
+build brickchop Brickchop chop \
+  "A pad sampler on the Brickchord engine: four groups of twelve pads, loops chopped across them, a sound played in keys, punch-in effects on the right stick, patterns and resampling." \
   "other"
 rm -rf "$WORK"

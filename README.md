@@ -41,6 +41,9 @@ It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`
 ## Brickglide
 An ambient machine on the same engine. Six drone voices (D-pad, X, Y) fade in and glide between notes over seconds or minutes, two melodic voices (A, B) step through five notes, and the screen draws each voice's pitch as a line against guides for the scale. Scenes morph the whole texture (SELECT + a drone button saves, R1 + it recalls), R2 evolves every voice to a nearby note, START freezes the cloud, the left stick spreads and moves the voices, L2 + left stick plays Cloud. Settings has a page per voice: sound, note and cents, level, pan, glide, fade, vibrato, tremolo, drift.
 
+## Brickchop
+A K.O. II-style sampler on the same engine. Four groups of twelve pads (A drums, B bass, C keys, D your samples), each pad its own sound: a kit part, a synth note, any WAV or a slice of one. Chop a loop across a group, play the last pad chromatically in keys (L3), and tune or level it with the left stick. The right stick is punch-in effects that last only while you hold it: stutter, beat repeat, filter sweep, bitcrush, tape stop, half speed, reverse and a reverb throw. START plays, R3 records onto the nearest 16th of the group's pattern, and Commit resamples every pattern, punch-ins included, into a new sound on group D. Eight song slots, USB MIDI in, and a guided demo on first launch. Page: https://michaeltietjen.github.io/brickchord/brickchop/
+
 ## Install (KNULLI)
 1. Download the latest zip from **[Releases](https://github.com/michaeltietjen/brickchord/releases)** (it bundles the ARM64 NumPy that Brickchord needs).
 2. Copy `brickchord/` and `Brickchord.sh` into `/userdata/roms/ports/` (on the SD card: `roms/ports/`).
@@ -51,8 +54,8 @@ An ambient machine on the same engine. Six drone voices (D-pad, X, Y) fade in an
 
 ## Install (PortMaster: NextUI / NX Redux, muOS, ROCKNIX, ArkOS, KNULLI and more)
 1. Make sure PortMaster is installed on the device (on NextUI and NX Redux it comes from the Pak Store / Xtras Store).
-2. Download `brickchord-*-portmaster.zip`, `bricklab-*-portmaster.zip` or `brickglide-*-portmaster.zip` from **[Releases](https://github.com/michaeltietjen/brickchord/releases)**.
-3. Unzip it into the ports folder PortMaster uses on your firmware: the launcher (`Brickchord.sh`, `Bricklab.sh` or `Brickglide.sh`) and its folder side by side.
+2. Download `brickchord-*-portmaster.zip`, `bricklab-*-portmaster.zip`, `brickglide-*-portmaster.zip` or `brickchop-*-portmaster.zip` from **[Releases](https://github.com/michaeltietjen/brickchord/releases)**.
+3. Unzip it into the ports folder PortMaster uses on your firmware: the launcher (`Brickchord.sh`, `Bricklab.sh`, `Brickglide.sh` or `Brickchop.sh`) and its folder side by side.
 4. Launch it from Ports. The first launch fetches PortMaster's Python 3.11 runtime if it isn't there yet, then asks you to press each button once. Quit from Settings > Quit.
 
 Each port bundles NumPy and a pygame built against the device's own SDL2, so it uses your firmware's screen and audio drivers. Logs: `log.txt` in the app folder. Tested so far on the TrimUI Brick Pro (KNULLI); reports from other devices are welcome. Build the zips with `tools/build_portmaster.sh` (screenshots for a PortMaster store listing go in `portmaster/screenshots/`).

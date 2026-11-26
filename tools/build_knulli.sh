@@ -1,11 +1,11 @@
 #!/bin/bash
 # Build the KNULLI release zips (TrimUI Brick Pro and other KNULLI devices):
-#   dist/brickchord-<ver>-knulli.zip  and  dist/bricklab-<ver>-knulli.zip
+#   dist/brickchord-<ver>-knulli.zip, bricklab, brickglide and brickchop
 # Each holds the app folder (code, kits, demos, samples, NumPy for Python 3.12
 # aarch64), its launcher and its menu artwork, laid out like roms/ports.
 # Usage: tools/build_knulli.sh [version]
 set -e
-VER="${1:-v0.3.0}"
+VER="${1:-v0.6.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 mkdir -p "$OUT"
@@ -52,6 +52,5 @@ EOF
 build brickchord Brickchord.sh "" brickchord
 build bricklab Bricklab.sh lab bricklab
 build brickglide Brickglide.sh glide bricklab
-# Brickchop is not released yet: WITH_CHOP=1 tools/build_knulli.sh builds it too
-[ "$WITH_CHOP" = 1 ] && build brickchop Brickchop.sh chop bricklab
+build brickchop Brickchop.sh chop bricklab
 rm -rf "$WHL"

@@ -1,5 +1,5 @@
-BRICKCHORD, BRICKLAB and BRICKGLIDE for the R36S, R36Max and other ArkOS-family handhelds
-=======================================================================================
+BRICKCHORD, BRICKLAB, BRICKGLIDE and BRICKCHOP for the R36S, R36Max and other ArkOS-family handhelds
+===================================================================================================
 
 INSTALL
 1. Turn the handheld off and take out the SD card. If it has two slots, use the
@@ -10,18 +10,22 @@ INSTALL
        ports/Brickchord.sh     ports/brickchord/
        ports/Bricklab.sh       ports/bricklab/
        ports/Brickglide.sh     ports/brickglide/
-       ports/brick_vendor/     (the libraries all three share: keep it)
+       ports/Brickchop.sh      ports/brickchop/
+       ports/brick_vendor/     (the libraries all four share: keep it)
    You can leave out an app you don't want; keep brick_vendor either way.
 4. Put the card back, turn it on, then Start > Quit > Restart EmulationStation
    (or reboot). The apps appear under Ports.
 5. The first launch takes a little longer: it unpacks the libraries for this
    device once, then asks you to press each button and push each stick once.
 
-THE THREE APPS
+THE FOUR APPS
 - Brickchord: the simple one. Seven chord buttons, a beat, effects.
 - Bricklab: the groovebox. A looper, patterns, songs, drums, samples, machines.
 - Brickglide: chords that glide. Press a chord and the voices slide into it;
   it opens with a guided demo of its controls.
+- Brickchop: the sampler. Four groups of twelve pads, loops chopped across
+  them, punch-in effects on the right stick, patterns you record and resample.
+  New in v0.6.0 and not yet tried on an R36: reports are welcome.
 
 IF IT DOESN'T START
 Look at the .log file inside the app's folder (for example

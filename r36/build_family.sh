@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build the R36 family zip: Brickchord, Bricklab and Brickglide for the R36Max,
+# Build the R36 family zip: Brickchord, Bricklab, Brickglide and Brickchop for the R36Max,
 # R36S and other ArkOS-family handhelds, sharing one set of NumPy/pygame wheels
 # (aarch64, Python 3.7-3.13, unpacked on the device at first launch).
 # Usage: r36/build_family.sh [version]
 set -e
-VER="${1:-v0.4.0}"
+VER="${1:-v0.6.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 STAGE="$(mktemp -d)"
@@ -15,6 +15,7 @@ app() {   # app <dir> <Name> <edition or empty> <description>
     mkdir -p "$P/$D/samples"
     cp "$ROOT"/brickchord/*.py "$ROOT/brickchord/README.txt" "$P/$D/"
     cp -R "$ROOT/brickchord/kits" "$ROOT/brickchord/demos" "$ROOT/brickchord/fonts" "$P/$D/"
+    [ "$E" = chop ] && cp -R "$ROOT/brickchord/voice" "$P/$D/"      # the robot voice the Brickchop demos use
     cp "$ROOT"/brickchord/samples/*.wav "$P/$D/samples/" 2>/dev/null || true
     [ -d "$ROOT/brickchord/samples/textures" ] && cp -R "$ROOT/brickchord/samples/textures" "$P/$D/samples/"
     [ -f "$ROOT/brickchord/samples/samples.json" ] && cp "$ROOT/brickchord/samples/samples.json" "$P/$D/samples/"
@@ -26,6 +27,7 @@ app() {   # app <dir> <Name> <edition or empty> <description>
 app brickchord Brickchord "" "pocket chord machine with an analog-VA voice"
 app bricklab Bricklab lab "the groovebox: looper, patterns, machines, drums"
 app brickglide Brickglide glide "chords that glide: an ambient machine"
+app brickchop Brickchop chop "a pad sampler: chop loops, punch-in effects, patterns"
 W="$P/brick_vendor/wheels"
 dl() { python3 -m pip download -q --only-binary=:all: --no-deps \
          --platform manylinux2014_aarch64 --implementation cp --python-version "$1" -d "$W" "$2"; }
