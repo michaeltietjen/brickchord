@@ -67,6 +67,7 @@ public:
     // what this instance played, kept so it can be dragged into the DAW as a MIDI clip
     juce::File writePhrase();                 // the last 8 bars as a .mid file (or an empty File if nothing was played)
     bool hasPhrase() const { return captured.load() > 0; }
+    std::atomic<uint64_t> noteBitsLo{0}, noteBitsHi{0};   // which notes sound now (Chord and Drone), for the page's field
     static juce::StringArray soundNames();
 
 private:

@@ -13,11 +13,11 @@ public:
 
     void paint(juce::Graphics& g) override {
         using namespace juce;
-        const Colour bg(0xff121016), line(0xff35323c), text(0xffa39fae), orange(0xffff5a1f), cream(0xffece4d6);
-        g.setColour(Colour(0xff26242b));
+        const Colour bg(0xff0b0a12), line(0xff37344a), text(0xff9d9ab0), orange(0xffb9a6ff), cream(0xffece4d6);
+        g.setColour(Colour(0xff37344a));
         g.fillRoundedRectangle(getLocalBounds().toFloat(), 16);
         g.setColour(bg);
-        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(7), 11);
+        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(1), 15);
         chips.clear();
         auto top = getLocalBounds().reduced(18, 14).removeFromTop(26);
         g.setFont(FontOptions(13.f));

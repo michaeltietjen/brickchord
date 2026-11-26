@@ -12,6 +12,16 @@ public:
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override { lit = true; repaint(); if (onDown) onDown(); }
     void mouseUp(const juce::MouseEvent&) override { lit = false; repaint(); if (onUp) onUp(); }
+    // a pad is a button to VoiceOver and Switch Control too: pressing it plays a short tap
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override {
+        setTitle(top);
+        return std::make_unique<juce::AccessibilityHandler>(*this, juce::AccessibilityRole::button,
+            juce::AccessibilityActions().addAction(juce::AccessibilityActionType::press, [this] {
+                lit = true; repaint(); if (onDown) onDown();
+                juce::Component::SafePointer<Pad> me(this);
+                juce::Timer::callAfterDelay(450, [me] { if (me != nullptr) { me->lit = false; me->repaint(); if (me->onUp) me->onUp(); } });
+            }));
+    }
 };
 
 // drag what was played into the DAW as a MIDI clip
@@ -22,6 +32,18 @@ struct DragMidi : juce::Component {
     void paint(juce::Graphics& g) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override { dragging = false; }
+};
+
+// the look: dark glass, one accent
+struct BrickLook : juce::LookAndFeel_V4 {
+    BrickLook();
+    void drawButtonBackground(juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
+    juce::Font getTextButtonFont(juce::TextButton&, int) override;
+    juce::Font getComboBoxFont(juce::ComboBox&) override;
+    juce::Font getPopupMenuFont() override;
+    void drawComboBox(juce::Graphics&, int, int, bool, int, int, int, int, juce::ComboBox&) override;
+    void drawLinearSlider(juce::Graphics&, int, int, int, int, float, float, float, juce::Slider::SliderStyle, juce::Slider&) override;
+    void drawRotarySlider(juce::Graphics&, int, int, int, int, float, float, float, juce::Slider&) override;
 };
 
 // the page, drawn at its own size and scaled to the window
@@ -49,6 +71,7 @@ private:
     void layoutRows();
     void padPress(int d, bool down);
     BricklabStudioProcessor& proc;
+    BrickLook look;
     Canvas canvas;                                 // declared first, so it outlives what sits on it
     int tab = 0;
     juce::OwnedArray<juce::TextButton> tabs;
@@ -69,9 +92,13 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aPrSrc, aTbSrc;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aPrDepth, aTbDepth, aLfoRate;
     DragMidi dragMidi;
-    std::array<std::array<float, 150>, 6> trail{};     // the Glide voices' last 10 seconds (cents; 0 = silent)
+    static constexpr int kHist = 240;                  // 8 seconds at 30 a second
+    std::array<std::array<float, kHist>, 6> trail{};   // the Glide voices' paths (cents; 0 = silent)
+    std::array<std::array<float, kHist>, 6> trailLv{}; // and their levels
+    std::array<std::array<uint64_t, 2>, kHist> noteHist{};   // Chord and Drone: which notes sounded
     std::array<float, 6> trailLvl{};
     int trailAt = 0;
+    float fieldLo = 3300, fieldHi = 7200;
     juce::Label octL, glideL, slideL, pulseL, bloomL;
     int litDrone = -2;
     juce::Slider space, volume, bassLvl;

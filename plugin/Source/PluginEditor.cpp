@@ -2,9 +2,11 @@
 #include "core/PatchData.h"
 
 namespace {
-constexpr int kW = 900, kH = 560;                         // the page's own size; the window scales it
-const juce::Colour chassis(0xffe4e2dc), plate(0xffefede8), ink(0xff18161c), dim(0xff6d6874),
-    seam(0xffcfccc4), orange(0xffff5a1f), screen(0xff121016), sink(0xffece4d6), teal(0xff3f9e95);
+constexpr int kW = 900, kH = 590;                         // the page's own size; the window scales it
+constexpr int kPadTop = 312, kPadH = 96;                  // the pads sit under the screen
+// the dark studio palette
+const juce::Colour chassis(0xff07060c), panel(0xff12111a), plate(0xff211f2e), ink(0xffecebf3), dim(0xff9d9ab0),
+    seam(0xff37344a), orange(0xffb9a6ff) /* the accent: violet now */, screen(0xff07060c), sink(0xffecebf3), teal(0xff3f9e95);
 const char* TAB_NAMES[] = {"Chord", "Lead", "Drone", "Glide"};    // by page; Lead stays in the engine, off the tabs
 const int TAB_PAGES[] = {3, 0, 2};
 const char* SOON[] = {"", "", "", ""};
@@ -14,16 +16,114 @@ const juce::Colour VCOL[] = {juce::Colour(110, 200, 190), juce::Colour(190, 140,
 
 void Pad::paint(juce::Graphics& g) {
     auto r = getLocalBounds().toFloat().reduced(2);
-    g.setColour(lit ? orange : plate);
+    if (lit) {
+        g.setColour(orange.withAlpha(0.25f));
+        g.fillRoundedRectangle(r.expanded(2), 14);
+        g.setGradientFill(juce::ColourGradient(orange.brighter(0.15f), 0, r.getY(), orange.darker(0.15f), 0, r.getBottom(), false));
+    } else
+        g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(r, 12);
-    g.setColour(seam);
-    g.drawRoundedRectangle(r, 12, 1.2f);
-    g.setColour(ink);
-    g.setFont(juce::FontOptions(20.f, juce::Font::bold));
-    g.drawFittedText(top, r.withTrimmedBottom(r.getHeight() * 0.35f).toNearestInt(), juce::Justification::centredBottom, 1);
-    g.setColour(lit ? ink : dim);
-    g.setFont(juce::FontOptions(13.f));
+    g.setColour(lit ? orange.brighter(0.4f) : seam);
+    g.drawRoundedRectangle(r, 12, 1.0f);
+    g.setColour(juce::Colours::white.withAlpha(lit ? 0.25f : 0.05f));     // a light edge along the top
+    g.drawLine(r.getX() + 12, r.getY() + 1, r.getRight() - 12, r.getY() + 1, 1.0f);
+    g.setColour(lit ? chassis : ink);
+    g.setFont(juce::FontOptions(17.f, juce::Font::bold));
+    g.drawFittedText(top, r.withTrimmedBottom(r.getHeight() * 0.40f).toNearestInt(), juce::Justification::centredBottom, 1);
+    g.setColour(lit ? chassis.withAlpha(0.75f) : dim);
+    g.setFont(juce::FontOptions(10.5f));
     g.drawFittedText(sub, r.withTrimmedTop(r.getHeight() * 0.62f).toNearestInt(), juce::Justification::centredTop, 1);
+}
+
+// ---------------------------------------------------------------- the look: dark, flat, one accent
+BrickLook::BrickLook() {
+    setColour(juce::TextButton::buttonColourId, plate);
+    setColour(juce::TextButton::buttonOnColourId, orange);
+    setColour(juce::TextButton::textColourOffId, ink);
+    setColour(juce::TextButton::textColourOnId, chassis);
+    setColour(juce::ComboBox::backgroundColourId, plate);
+    setColour(juce::ComboBox::textColourId, ink);
+    setColour(juce::ComboBox::outlineColourId, seam);
+    setColour(juce::ComboBox::arrowColourId, dim);
+    setColour(juce::PopupMenu::backgroundColourId, juce::Colour(0xff17171e));
+    setColour(juce::PopupMenu::textColourId, ink);
+    setColour(juce::PopupMenu::headerTextColourId, dim);
+    setColour(juce::PopupMenu::highlightedBackgroundColourId, orange);
+    setColour(juce::PopupMenu::highlightedTextColourId, chassis);
+    setColour(juce::Label::textColourId, dim);
+    setColour(juce::Slider::thumbColourId, ink);
+    setColour(juce::Slider::trackColourId, orange);
+    setColour(juce::Slider::backgroundColourId, seam);
+}
+
+void BrickLook::drawButtonBackground(juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) {
+    auto r = b.getLocalBounds().toFloat().reduced(0.5f);
+    const bool on = b.getToggleState();
+    juce::Colour c = on ? orange : plate;
+    if (down) c = c.brighter(0.12f); else if (over) c = c.brighter(0.06f);
+    g.setColour(c);
+    g.fillRoundedRectangle(r, 8);
+    g.setColour(on ? orange.brighter(0.3f) : seam);
+    g.drawRoundedRectangle(r, 8, 1.0f);
+}
+
+juce::Font BrickLook::getTextButtonFont(juce::TextButton&, int) { return juce::FontOptions(13.5f); }
+juce::Font BrickLook::getComboBoxFont(juce::ComboBox&) { return juce::FontOptions(13.5f); }
+juce::Font BrickLook::getPopupMenuFont() { return juce::FontOptions(14.f); }
+
+void BrickLook::drawComboBox(juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box) {
+    auto r = juce::Rectangle<float>(0, 0, (float) w, (float) h).reduced(0.5f);
+    g.setColour(box.isMouseOver(true) ? plate.brighter(0.06f) : plate);
+    g.fillRoundedRectangle(r, 8);
+    g.setColour(seam);
+    g.drawRoundedRectangle(r, 8, 1.0f);
+    juce::Path p;                                           // a chevron
+    const float cx = (float) w - 15, cy = (float) h * 0.5f;
+    p.startNewSubPath(cx - 4, cy - 2); p.lineTo(cx, cy + 2); p.lineTo(cx + 4, cy - 2);
+    g.setColour(dim);
+    g.strokePath(p, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+void BrickLook::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h, float pos, float, float,
+                                 juce::Slider::SliderStyle, juce::Slider& s) {
+    const float cy = (float) y + (float) h * 0.5f;
+    g.setColour(seam);
+    g.fillRoundedRectangle((float) x, cy - 2, (float) w, 4, 2);
+    const bool bipolar = s.getMinimum() < 0;                // from the centre, for the two-way ones
+    const float from = bipolar ? (float) x + (float) w * 0.5f : (float) x;
+    g.setColour(orange);
+    g.fillRoundedRectangle(std::min(from, pos), cy - 2, std::abs(pos - from), 4, 2);
+    g.setColour(chassis);
+    g.fillEllipse(pos - 7, cy - 7, 14, 14);
+    g.setColour(ink);
+    g.fillEllipse(pos - 5, cy - 5, 10, 10);
+}
+
+void BrickLook::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider& s) {
+    auto area = juce::Rectangle<float>((float) x, (float) y, (float) w, (float) h);
+    auto label = area.removeFromBottom(16);
+    const float rad = std::min(area.getWidth(), area.getHeight()) * 0.5f - 5, cx = area.getCentreX(), cy = area.getCentreY();
+    const float ang = a0 + pos * (a1 - a0);
+    juce::Path track, value;
+    track.addCentredArc(cx, cy, rad, rad, 0, a0, a1, true);
+    value.addCentredArc(cx, cy, rad, rad, 0, a0, ang, true);
+    const juce::PathStrokeType st(3.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+    g.setColour(seam);
+    g.strokePath(track, st);
+    g.setColour(orange.withAlpha(0.25f));
+    g.strokePath(value, juce::PathStrokeType(8.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour(orange);
+    g.strokePath(value, st);
+    const float kr = rad - 7;                               // the cap
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff34343f), cx, cy - kr, juce::Colour(0xff1b1b22), cx, cy + kr, false));
+    g.fillEllipse(cx - kr, cy - kr, kr * 2, kr * 2);
+    g.setColour(juce::Colours::black.withAlpha(0.5f));
+    g.drawEllipse(cx - kr, cy - kr, kr * 2, kr * 2, 1.0f);
+    g.setColour(ink);
+    g.drawLine(cx + std::sin(ang) * kr * 0.35f, cy - std::cos(ang) * kr * 0.35f, cx + std::sin(ang) * kr * 0.85f, cy - std::cos(ang) * kr * 0.85f, 2.2f);
+    g.setColour(s.isMouseOverOrDragging() ? ink : dim);
+    g.setFont(juce::FontOptions(10.5f));
+    g.drawText(s.isMouseOverOrDragging() ? juce::String(juce::roundToInt(s.getValue() * 100)) : s.getName().toUpperCase(), label, juce::Justification::centred);
 }
 
 void DragMidi::paint(juce::Graphics& g) {
@@ -218,23 +318,13 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
     aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
 
-    auto& lf = getLookAndFeel();
-    lf.setColour(juce::TextButton::buttonColourId, plate);
-    lf.setColour(juce::TextButton::buttonOnColourId, ink);
-    lf.setColour(juce::TextButton::textColourOffId, ink);
-    lf.setColour(juce::TextButton::textColourOnId, plate);
-    lf.setColour(juce::ComboBox::backgroundColourId, plate);
-    lf.setColour(juce::ComboBox::textColourId, ink);
-    lf.setColour(juce::ComboBox::outlineColourId, seam);
-    lf.setColour(juce::ComboBox::arrowColourId, dim);
-    lf.setColour(juce::PopupMenu::backgroundColourId, plate);
-    lf.setColour(juce::PopupMenu::textColourId, ink);
-    lf.setColour(juce::ToggleButton::textColourId, ink);
-    lf.setColour(juce::ToggleButton::tickColourId, orange);
-    lf.setColour(juce::Slider::thumbColourId, orange);
-    lf.setColour(juce::Slider::trackColourId, orange.withAlpha(0.6f));
-    lf.setColour(juce::Slider::backgroundColourId, seam);
-
+    for (auto* k : {&glideTone, &space, &volume}) {          // the knobs
+        k->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        k->setRotaryParameters(juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+        k->setMouseDragSensitivity(140);
+    }
+    glideTone.setName("Tone"); space.setName("Space"); volume.setName("Volume");
+    setLookAndFeel(&look);
     setWantsKeyboardFocus(true);
     canvas.painter = [this](juce::Graphics& g) { paintContent(g); };
     std::vector<juce::Component*> kids;                     // everything lives on the canvas, which scales
@@ -246,10 +336,10 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     if (auto* k = getConstrainer()) k->setFixedAspectRatio((double) kW / kH);
     setSize(kW, kH);
     showTab(proc.page());
-    startTimerHz(15);
+    startTimerHz(30);
 }
 
-BricklabStudioEditor::~BricklabStudioEditor() { stopTimer(); releaseKey(); }
+BricklabStudioEditor::~BricklabStudioEditor() { stopTimer(); releaseKey(); setLookAndFeel(nullptr); }
 
 void BricklabStudioEditor::releaseKey() {                 // a computer key held when the page loses focus or closes
     if (keyDown < 0) return;
@@ -278,14 +368,13 @@ void BricklabStudioEditor::showTab(int t) {
     show({&key, &scale}, playing);
     show({&space, &volume, &spaceL, &volumeL}, playing && sounds);
     show({&mode, &arpOct, &bassMode, &modeL, &arpL, &bassL}, chord);
-    show({&octave}, !gl || (!more && !curves));
+    show({&octave}, !gl || (more && !curves));
     octL.setVisible(!gl);
     show({&glideSound}, gl && sounds);
     show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore}, gl);
     show({&glideTone, &glideToneL}, gl && sounds);
-    show({&glidePath, &glideMove, &glideTime, &glideFade}, gl && !more && !curves);
-    show({&glideTiming, &glideBend}, gl && more);
-    show({&glideMpe, &glideStrike}, gl && more && proc.kMidiFx);
+    show({&glidePath, &glideMove, &glideTime, &glideFade, &glideTiming, &glideBend}, gl && more && !curves);
+    show({&glideMpe, &glideStrike}, gl && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
@@ -295,7 +384,7 @@ void BricklabStudioEditor::showTab(int t) {
     litDrone = -2;
     soon.setText(SOON[t], juce::dontSendNotification);
     soon.setVisible(!playing);
-    layoutRows();
+    layout();
     repaint();
 }
 
@@ -310,84 +399,139 @@ void BricklabStudioEditor::padPress(int d, bool down) {
 
 void BricklabStudioEditor::paint(juce::Graphics& g) { g.fillAll(chassis); }
 
-void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x 560, scaled to the window
-    g.fillAll(chassis);
-    auto r = juce::Rectangle<int>(0, 0, kW, kH);
-    auto bar = r.removeFromTop(56);
-    g.setColour(ink);
-    g.fillRect(bar);
-    g.setColour(sink);
-    g.setFont(juce::FontOptions(22.f, juce::Font::bold));
-    g.drawText("bricklab", bar.withTrimmedLeft(22).withWidth(110), juce::Justification::centredLeft);
-    g.setColour(sink.withAlpha(0.6f));
-    g.setFont(juce::FontOptions(22.f));
-    g.drawText("studio", bar.withTrimmedLeft(122).withWidth(90), juce::Justification::centredLeft);
-    // the screen: key, sound, the chord
-    auto scr = juce::Rectangle<int>(22, 72, kW - 44, 170);
-    g.setColour(juce::Colour(0xff26242b));
-    g.fillRoundedRectangle(scr.toFloat(), 16);
-    g.setColour(screen);
-    g.fillRoundedRectangle(scr.toFloat().reduced(7), 11);
-    auto in = scr.reduced(22, 16);
-    g.setColour(juce::Colour(0xffa39fae));
-    g.setFont(juce::FontOptions(13.f));
-    auto top = in.removeFromTop(18);
-    g.drawText((key.getText() + " " + scale.getText()).toUpperCase(), top, juce::Justification::centredLeft);
-    auto* sc = tab == 0 ? &sound : (tab == 1 ? &leadSound : (tab == 2 ? &droneSound : &glideSound));
-    g.drawText(TAB_NAMES[tab] + juce::String("  ") + (!proc.kMidiFx ? sc->getText().toUpperCase() : ""), top, juce::Justification::centredRight);
-    if (tab == 3) {                                       // the voices' paths over the last 10 seconds, as on the Brick
-        auto area = in.toFloat().withTrimmedBottom(4).withTrimmedRight(26);   // the paths, full width; where they head, at the right
-        float lo = 1e9f, hi = -1e9f;                       // the range the voices used, with room around it
+void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x 590, scaled to the window
+    using namespace juce;
+    const bool gl = tab == 3, sounds = !proc.kMidiFx;
+    const bool rowA = !gl || glideMore.getToggleState() || curvesBtn.getToggleState();
+    g.setGradientFill(ColourGradient(Colour(0xff1c1932), kW * 0.5f, 90, chassis, kW * 0.5f, 560, true));
+    g.fillAll();
+
+    // ---- the field: a floor running to a horizon. "Now" is at the front; the past recedes.
+    const float cx = 440, hor = 118, K = 60, LK = 79;
+    auto proj = [&](float x, float z) { const float s = 1.0f / (0.22f + z * 1.9f); return Point<float>(cx + x * LK * s, hor + K * s); };
+    for (int k = 0; k <= 12; ++k) {                         // bars of time
+        const float z = (float) k / 12.0f;
+        auto a = proj(-1.3f, z), b = proj(1.3f, z);
+        g.setColour(Colour(0xff3a3658).withAlpha(0.55f * (1 - z) * (1 - z) + 0.03f));
+        g.drawLine(a.x, a.y, b.x, b.y, 1.0f);
+    }
+    for (int k = -6; k <= 6; ++k) {                         // lanes of pitch
+        auto a = proj((float) k / 5.0f, 0), b = proj((float) k / 5.0f, 1);
+        g.setGradientFill(ColourGradient(Colour(0xff3a3658).withAlpha(0.5f), a.x, a.y, Colour(0x003a3658), b.x, b.y, false));
+        g.drawLine(a.x, a.y, b.x, b.y, 1.0f);
+    }
+    // a ribbon along the floor: xs (lateral, -1..1) and widths by age; gaps where w <= 0
+    auto ribbon = [&](const std::function<bool(int, float&, float&)>& at, Colour col) {
+        const int chunk = 6;
+        for (int k0 = 0; k0 < kHist - 1; k0 += chunk) {
+            Path p;
+            std::vector<Point<float>> L, R;
+            for (int k = k0; k <= std::min(kHist - 1, k0 + chunk); ++k) {
+                float x, w;
+                if (!at(k, x, w)) { L.clear(); R.clear(); break; }
+                const float z = (float) k / (kHist - 1);
+                L.push_back(proj(x - w, z)); R.push_back(proj(x + w, z));
+            }
+            if (L.size() < 2) continue;
+            p.startNewSubPath(L[0]);
+            for (size_t i = 1; i < L.size(); ++i) p.lineTo(L[i]);
+            for (size_t i = R.size(); i-- > 0;) p.lineTo(R[i]);
+            p.closeSubPath();
+            const float z = (float) k0 / (kHist - 1);
+            g.setColour(col.withAlpha(0.92f * std::pow(1 - z, 1.6f) + 0.02f));
+            g.fillPath(p);
+        }
+    };
+    auto orb = [&](float x, Colour col, float lvl) {
+        auto c = proj(x, 0);
+        g.setColour(col.withAlpha(0.16f * lvl));
+        g.fillEllipse(c.x - 24, c.y - 24, 48, 48);
+        g.setColour(col.withAlpha(0.3f * lvl));
+        g.fillEllipse(c.x - 13, c.y - 13, 26, 26);
+        g.setColour(col);
+        g.fillEllipse(c.x - 7, c.y - 7, 14, 14);
+        g.setColour(Colours::white);
+        g.fillEllipse(c.x - 2.5f, c.y - 2.5f, 5, 5);
+    };
+    if (gl) {                                               // Glide: each voice a ribbon; a glide is a lane change
+        float lo = 1e9f, hi = -1e9f;
         for (auto& tv : trail) for (float c : tv) if (c > 0) { lo = std::min(lo, c); hi = std::max(hi, c); }
         for (int v = 0; v < 6; ++v) if (proc.glide.on[(size_t) v]) { float t = proc.glide.target[(size_t) v]; lo = std::min(lo, t); hi = std::max(hi, t); }
-        if (lo > hi) { lo = 3600; hi = 7200; }
-        lo -= 300; hi += 300;
-        if (hi - lo < 2400) { float m = (hi + lo) / 2; lo = m - 1200; hi = m + 1200; }
-        auto y = [&](float cents) { return area.getBottom() - (cents - lo) / (hi - lo) * area.getHeight(); };
-        for (int v = 0; v < 6; ++v) {
-            juce::Path p;
-            bool started = false;
-            for (int k = 0; k < 150; ++k) {
-                float c = trail[(size_t) v][(size_t) ((trailAt + k) % 150)];
-                float x = area.getX() + area.getWidth() * (float) k / 149.0f;
-                if (c <= 0) { started = false; continue; }
-                if (!started) { p.startNewSubPath(x, y(c)); started = true; } else p.lineTo(x, y(c));
-            }
-            g.setColour(VCOL[v].withAlpha(0.35f + 0.65f * juce::jlimit(0.0f, 1.0f, trailLvl[(size_t) v] / 0.6f)));
-            g.strokePath(p, juce::PathStrokeType(2.6f));
-            if (proc.glide.on[(size_t) v]) {                 // where the voice is going: a dot, and its note
-                const float ty = y(proc.glide.target[(size_t) v]);
-                g.fillEllipse(area.getRight() + 6, ty - 4, 8, 8);
+        if (lo > hi) { lo = 3300; hi = 7200; }
+        if (hi - lo < 3000) { const float m = (hi + lo) / 2; lo = m - 1500; hi = m + 1500; }
+        fieldLo += (lo - fieldLo) * 0.08f; fieldHi += (hi - fieldHi) * 0.08f;   // the view eases to the range in use
+        const float mid = (fieldLo + fieldHi) / 2, half = (fieldHi - fieldLo) / 2 * 1.12f;
+        for (int v = 5; v >= 0; --v) {
+            ribbon([&](int k, float& x, float& w) {
+                const size_t i = (size_t) ((trailAt - 1 - k + 2 * kHist) % kHist);
+                const float c = trail[(size_t) v][i];
+                if (c <= 0) return false;
+                x = (c - mid) / half;
+                w = 0.012f + 0.03f * jlimit(0.0f, 1.0f, trailLv[(size_t) v][i] / 0.7f);
+                return true;
+            }, VCOL[v]);
+            if (proc.glide.level[(size_t) v] > 0.01f) {
+                const float tx = (proc.glide.target[(size_t) v] - mid) / half, nx = (proc.glide.cents[(size_t) v] - mid) / half;
+                if (proc.glide.on[(size_t) v] && std::abs(tx - nx) > 0.01f) {   // where it's headed
+                    auto t = proj(tx, 0);
+                    g.setColour(VCOL[v].withAlpha(0.8f));
+                    g.drawEllipse(t.x - 7, t.y - 7, 14, 14, 1.5f);
+                }
+                orb(nx, VCOL[v], jlimit(0.3f, 1.0f, proc.glide.level[(size_t) v] / 0.6f));
             }
         }
-        g.setColour(juce::Colour(0xcc121016));               // the name sits on the paths, legible
-        g.fillRoundedRectangle(in.toFloat().withWidth(260).withHeight(56).translated(-6, 2), 8);
-        auto name = proc.chordName();
-        g.setColour(orange);
-        g.setFont(juce::FontOptions(40.f, juce::Font::bold));
-        g.drawText(name.isEmpty() ? "" : name, in.withWidth(250).withTrimmedTop(4).withHeight(52), juce::Justification::centredLeft);
-        g.setColour(sink);
-        g.setFont(juce::FontOptions(14.f));
-        int ready = proc.soundsReady(), want = proc.soundsWanted();
-        juce::String sub = ready < want ? "making the sound: " + juce::String(ready) + " / " + juce::String(want) + " notes"
-                                        : (name.isEmpty() ? "play a pad or chords: the voices glide from one to the next. Mod wheel stretches, bend bends" : "");
-        g.drawText(sub, scr.reduced(22, 16).removeFromBottom(20), juce::Justification::centred);
+    } else {                                                // Chord and Drone: every note a bar of light laid on the floor
+        const uint64_t nowLo = noteHist[(size_t) ((trailAt - 1 + kHist) % kHist)][0], nowHi = noteHist[(size_t) ((trailAt - 1 + kHist) % kHist)][1];
+        uint64_t anyLo = 0, anyHi = 0;
+        for (auto& h : noteHist) { anyLo |= h[0]; anyHi |= h[1]; }
+        for (int m = 0; m < 128; ++m) {
+            if (!((m < 64 ? anyLo >> m : anyHi >> (m - 64)) & 1)) continue;
+            const float x = jlimit(-1.15f, 1.15f, ((float) m - 58.0f) / 30.0f);
+            const Colour col = VCOL[(size_t) (m % 12) % 6].interpolatedWith(orange, (m % 12) >= 6 ? 0.35f : 0.0f);
+            ribbon([&](int k, float& xx, float& w) {
+                const auto& h = noteHist[(size_t) ((trailAt - 1 - k + 2 * kHist) % kHist)];
+                if (!((m < 64 ? h[0] >> m : h[1] >> (m - 64)) & 1)) return false;
+                xx = x; w = m < 48 ? 0.05f : 0.03f;            // the bass lays a wider bar
+                return true;
+            }, col);
+            if ((m < 64 ? nowLo >> m : nowHi >> (m - 64)) & 1) orb(x, col, 1.0f);
+        }
     }
-    if (tab <= 2) {
-        auto name = proc.chordName();
-        g.setColour(orange);
-        g.setFont(juce::FontOptions(86.f, juce::Font::bold));
-        g.drawText(name.isEmpty() ? "-" : name, in.withTrimmedBottom(22), juce::Justification::centred);
-        g.setColour(sink);
-        g.setFont(juce::FontOptions(14.f));
-        juce::String sub = proc.chordRoman();
-        int ready = proc.soundsReady(), want = proc.soundsWanted();
-        if (ready < want) sub += (sub.isEmpty() ? "" : "   ") + juce::String("making the sound: ") + juce::String(ready) + " / " + juce::String(want) + " notes";
-        if (sub.isEmpty()) sub = tab == 0 ? "play a pad, or chords from your MIDI keyboard"
-                               : (tab == 1 ? "play a pad, or your MIDI keyboard: one note at a time"
-                                           : "tap a pad or key to drone on it, again to stop. Mod wheel pulses, bend thins or blooms");
-        g.drawText(sub, in.removeFromBottom(20), juce::Justification::centred);
-    }
+
+    // ---- the words
+    g.setColour(ink);
+    g.setFont(Font(FontOptions(15.f, Font::bold)).withExtraKerningFactor(0.16f));
+    g.drawText("BRICKLAB", 22, 10, 110, 32, Justification::centredLeft);
+    g.setColour(ink.withAlpha(0.5f));
+    g.setFont(Font(FontOptions(15.f)).withExtraKerningFactor(0.16f));
+    g.drawText("STUDIO", 112, 10, 70, 32, Justification::centredLeft);
+    auto* sc = tab == 0 ? &sound : (tab == 1 ? &leadSound : (tab == 2 ? &droneSound : &glideSound));
+    g.setColour(dim);
+    g.setFont(Font(FontOptions(11.f)).withExtraKerningFactor(0.14f));
+    g.drawText((key.getText() + " " + scale.getText() + (sounds ? String::fromUTF8("   \xc2\xb7   ") + sc->getText() : String())).toUpperCase(), 24, 62, 500, 14, Justification::centredLeft);
+    const auto name = proc.chordName();
+    g.setColour(ink);
+    g.setFont(FontOptions(gl ? 46.f : 58.f));
+    g.drawText(name, 22, 78, 520, 62, Justification::centredLeft);
+    String sub = gl ? String() : proc.chordRoman();
+    const int ready = proc.soundsReady(), want = proc.soundsWanted();
+    if (ready < want) sub = "making the sound: " + String(ready) + " / " + String(want) + " notes";
+    else if (name.isEmpty()) sub = gl ? "play a pad or a chord: the voices glide from one to the next"
+                                  : (tab == 2 ? "tap a pad or a key to drone on it, again to stop" : "play a pad, or chords from your keyboard");
+    g.setColour(dim);
+    g.setFont(FontOptions(12.5f));
+    g.drawText(sub, 24, name.isEmpty() ? 84 : 142, 600, 16, Justification::centredLeft);
+
+    // ---- the glass the controls sit on
+    auto glass = [&](Rectangle<float> r, float rad) {
+        g.setColour(Colour(0xd012111a));
+        g.fillRoundedRectangle(r, rad);
+        g.setColour(Colours::white.withAlpha(0.10f));
+        g.drawRoundedRectangle(r, rad, 1.0f);
+    };
+    const float dockTop = rowA ? 412.0f : 454.0f;
+    glass({12, dockTop, kW - 24.0f, 582.0f - dockTop}, 18);
+    if (sounds) glass({810, 68, 76, gl ? 204.0f : 140.0f}, 16);
 }
 
 void BricklabStudioEditor::resized() {                     // any size: the whole page scales, keeping its shape
@@ -397,91 +541,75 @@ void BricklabStudioEditor::resized() {                     // any size: the whol
 }
 
 void BricklabStudioEditor::layout() {
-    auto bar = juce::Rectangle<int>(0, 0, kW, kH).removeFromTop(56).withTrimmedLeft(240).reduced(0, 11);
-    for (auto* t : tabs) { t->setBounds(bar.removeFromLeft(96)); bar.removeFromLeft(6); }
-    bar.removeFromLeft(14);
-    presetBox.setBounds(bar.removeFromLeft(190));
-    bar.removeFromLeft(10);
-    dragMidi.setBounds(bar.removeFromLeft(120));
-    soon.setBounds(60, 90, kW - 120, 140);
-    auto r = juce::Rectangle<int>(0, 0, kW, kH).withTrimmedTop(260).reduced(22, 0);
-    auto padRow = r.removeFromTop(110);
-    int w = (padRow.getWidth() - 6 * 8) / 7;
-    for (int i = 0; i < pads.size(); ++i) pads[i]->setBounds(padRow.getX() + i * (w + 8), padRow.getY(), w, padRow.getHeight());
-    r.removeFromTop(14);
-    auto modRow = r.removeFromTop(34);
-    for (auto* b : modButtons) { b->setBounds(modRow.removeFromLeft(86)); modRow.removeFromLeft(8); }
-    modRow.removeFromLeft(16);
-    latch.setBounds(modRow.removeFromLeft(86));
-    third.setBounds(22, modRow.getY(), 86, modRow.getHeight());
-    r.removeFromTop(16);
-    auto row = r.removeFromTop(30);
-    sound.setBounds(row.removeFromLeft(240)); row.removeFromLeft(10);
-    leadSound.setBounds(sound.getBounds());
-    glideSound.setBounds(sound.getBounds());
-    droneSound.setBounds(sound.getBounds());
-    key.setBounds(row.removeFromLeft(80)); row.removeFromLeft(10);
-    scale.setBounds(row.removeFromLeft(130)); row.removeFromLeft(18);
-    spaceL.setBounds(row.removeFromLeft(56)); space.setBounds(row.removeFromLeft(120)); row.removeFromLeft(10);
-    volumeL.setBounds(row.removeFromLeft(62)); volume.setBounds(row.removeFromLeft(120));
-    layoutRows();
+    const bool gl = tab == 3, chord = tab == 0, drone = tab == 2, lead = tab == 1;
+    const bool curves = gl && curvesBtn.getToggleState();
+    const juce::Rectangle<int> none;
+    for (juce::Component* c : std::initializer_list<juce::Component*>{&modeL, &arpL, &bassL, &octL, &glideChordL, &slideL, &glideL, &spaceL,
+                                                                      &volumeL, &glideToneL, &outNote, &soon})
+        c->setBounds(none);                                // the glass layout needs no captions
+    auto put = [](juce::Rectangle<int>& r, juce::Component& c, int w) { c.setBounds(r.removeFromLeft(w)); r.removeFromLeft(8); };
+
+    // the top bar
+    int x = 196;
+    for (auto* t : tabs) { t->setBounds(x, 10, 76, 32); x += 82; }
+    dragMidi.setBounds(kW - 20 - 96, 10, 96, 32);
+    glideMore.setBounds(kW - 20 - 96 - 6 - 60, 10, 60, 32);
+    curvesBtn.setBounds(kW - 20 - 96 - 6 - 60 - 6 - 70, 10, 70, 32);
+    presetBox.setBounds(gl ? 466 : 608, 10, 170, 32);
+
+    // the knobs, on the right
+    int ky = 74;
+    if (gl) { glideTone.setBounds(818, ky, 60, 62); ky += 64; } else glideTone.setBounds(none);
+    space.setBounds(818, ky, 60, 62);
+    volume.setBounds(818, ky + 64, 60, 62);
+
+    // the dock: the pads, the page's main row above them, its second row above that
+    const int w = (856 - 6 * 8) / 7;
+    for (int i = 0; i < pads.size(); ++i) pads[i]->setBounds(22 + i * (w + 8), 512, w, 60);
+    auto b = juce::Rectangle<int>(22, 466, 856, 32);
+    if (gl) { put(b, bloomBtn, 64); put(b, stopBtn, 64); put(b, glideChord, 120); put(b, glideSub, 54); }
+    if (!proc.kMidiFx) {
+        auto sb = b.removeFromLeft(190); b.removeFromLeft(8);
+        for (auto* c : {&sound, &leadSound, &droneSound, &glideSound}) c->setBounds(sb);
+    }
+    if (gl && proc.kMidiFx) { put(b, glideMpe, 110); put(b, glideStrike, 130); }
+    put(b, key, 64);
+    put(b, scale, 140);
+    if (!gl) put(b, octave, 84);
+
+    auto a = juce::Rectangle<int>(22, 424, 856, 32);
+    if (chord) {
+        for (auto* m : modButtons) put(a, *m, 60);
+        put(a, latch, 60);
+        a.removeFromLeft(8);
+        put(a, mode, 150); put(a, arpOct, 78); put(a, bassMode, 120); put(a, bassLvl, 90);
+    } else if (drone) {
+        put(a, third, 60); put(a, droneSlide, 130);
+        put(a, pulseL, 90); put(a, droneY, 120); put(a, bloomL, 88); put(a, droneX, 120);
+    } else if (lead)
+        put(a, leadGlide, 140);
+    else if (curves) {                                      // the routing, under the editor
+        put(a, prL, 62); put(a, prSrc, 150); put(a, prDepth, 90); a.removeFromLeft(8);
+        put(a, tbL, 52); put(a, tbSrc, 150); put(a, tbDepth, 90); a.removeFromLeft(8);
+        put(a, lfoL, 32); put(a, lfoRate, 100);
+    } else {
+        put(a, glideTime, 116); put(a, glidePath, 140); put(a, glideMove, 120); put(a, glideFade, 100);
+        put(a, glideTiming, 150); put(a, glideBend, 92); put(a, octave, 78);
+    }
+    curveEd->setBounds(20, 56, 782, 350);
 }
 
-void BricklabStudioEditor::layoutRows() {           // the bottom row: what this page sets
-    auto outRow = juce::Rectangle<int>(22, 260 + 110 + 14 + 34 + 16 + 30 + 14, kW - 44, 30);
-    if (tab == 0) {                                   // the chord's octave sits by latch
-        octL.setBounds(520, 260 + 110 + 14, 56, 34); octave.setBounds(576, 260 + 110 + 16, 96, 30);
-        modeL.setBounds(outRow.removeFromLeft(38)); mode.setBounds(outRow.removeFromLeft(180)); outRow.removeFromLeft(14);
-        arpL.setBounds(outRow.removeFromLeft(34)); arpOct.setBounds(outRow.removeFromLeft(84)); outRow.removeFromLeft(14);
-        bassL.setBounds(outRow.removeFromLeft(40)); bassMode.setBounds(outRow.removeFromLeft(130)); outRow.removeFromLeft(8);
-        bassLvl.setBounds(outRow.removeFromLeft(100));
-    } else if (tab == 1) {
-        octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(100)); outRow.removeFromLeft(18);
-        glideL.setBounds(outRow.removeFromLeft(46)); leadGlide.setBounds(outRow.removeFromLeft(180));
-    } else if (tab == 3) {
-        auto mod = juce::Rectangle<int>(22, 260 + 110 + 14, kW - 44, 34);
-        bloomBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(8);
-        stopBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(20);
-        glideChordL.setBounds(mod.removeFromLeft(48)); glideChord.setBounds(mod.removeFromLeft(140).reduced(0, 2)); mod.removeFromLeft(10);
-        glideSub.setBounds(mod.removeFromLeft(70));
-        glideMore.setBounds(mod.removeFromRight(86)); mod.removeFromRight(8);
-        curvesBtn.setBounds(mod.removeFromRight(86)); mod.removeFromRight(12);
-        curveEd->setBounds(22, 72, kW - 44, 298);
-        {
-            auto rt = outRow;                                // the routing, under the editor
-            prL.setBounds(rt.removeFromLeft(66)); prSrc.setBounds(rt.removeFromLeft(150)); rt.removeFromLeft(6);
-            prDepth.setBounds(rt.removeFromLeft(90)); rt.removeFromLeft(16);
-            tbL.setBounds(rt.removeFromLeft(54)); tbSrc.setBounds(rt.removeFromLeft(150)); rt.removeFromLeft(6);
-            tbDepth.setBounds(rt.removeFromLeft(90)); rt.removeFromLeft(16);
-            lfoL.setBounds(rt.removeFromLeft(36)); lfoRate.setBounds(rt.removeFromLeft(110));
-        }
-        glideTone.setBounds(mod.removeFromRight(120)); glideToneL.setBounds(mod.removeFromRight(42));
-        auto adv = outRow;
-        glideTime.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(10);
-        glidePath.setBounds(outRow.removeFromLeft(190)); outRow.removeFromLeft(10);
-        glideMove.setBounds(outRow.removeFromLeft(170)); outRow.removeFromLeft(10);
-        glideFade.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(10);
-        octave.setBounds(outRow.removeFromLeft(96));
-        glideTiming.setBounds(adv.removeFromLeft(200)); adv.removeFromLeft(10);
-        glideBend.setBounds(adv.removeFromLeft(130)); adv.removeFromLeft(10);
-        glideMpe.setBounds(adv.removeFromLeft(140)); adv.removeFromLeft(10);
-        glideStrike.setBounds(adv.removeFromLeft(150));
-    } else if (tab == 2) {
-        octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(96)); outRow.removeFromLeft(12);
-        slideL.setBounds(outRow.removeFromLeft(42)); droneSlide.setBounds(outRow.removeFromLeft(120)); outRow.removeFromLeft(12);
-        pulseL.setBounds(outRow.removeFromLeft(96)); droneY.setBounds(outRow.removeFromLeft(110)); outRow.removeFromLeft(10);
-        bloomL.setBounds(outRow.removeFromLeft(90)); droneX.setBounds(outRow.removeFromLeft(110));
-    }
-    outNote.setBounds(outRow);
-}
+void BricklabStudioEditor::layoutRows() { layout(); }
 
 void BricklabStudioEditor::timerCallback() {
     for (int v = 0; v < 6; ++v) {                          // the Glide trails
         const bool on = proc.glide.level[(size_t) v] > 0.01f;
         trail[(size_t) v][(size_t) trailAt] = on ? proc.glide.cents[(size_t) v].load() : 0.0f;
+        trailLv[(size_t) v][(size_t) trailAt] = proc.glide.level[(size_t) v];
         trailLvl[(size_t) v] = proc.glide.level[(size_t) v];
     }
-    trailAt = (trailAt + 1) % 150;
+    noteHist[(size_t) trailAt] = {proc.noteBitsLo.load(), proc.noteBitsHi.load()};
+    trailAt = (trailAt + 1) % kHist;
     if (proc.page() != tab) showTab(proc.page());       // the host changed it (automation, a preset)
     if (tab == 2 && proc.droneDegree() != litDrone) {   // the pad that's droning stays lit
         litDrone = proc.droneDegree();
@@ -496,7 +624,7 @@ void BricklabStudioEditor::timerCallback() {
             pads[d]->repaint();
         }
     }
-    canvas.repaint(0, 56, kW, 200);
+    canvas.repaint();
     if (curveEd->isVisible()) curveEd->repaint();
     dragMidi.repaint();
 }

@@ -697,6 +697,11 @@ void BricklabStudioProcessor::capture(bool on, int note, int vel, int pos) {
     } else if (!capOpen.erase(note))
         return;
     cap.push_back({clock + pos, on, note, vel});
+    {
+        uint64_t lo = 0, hi = 0;
+        for (int m : capOpen) { if (m < 64) lo |= 1ull << m; else if (m < 128) hi |= 1ull << (m - 64); }
+        noteBitsLo = lo; noteBitsHi = hi;
+    }
     const int64_t keep = (int64_t) (600 * sr);              // ten minutes is plenty
     if (cap.size() > 4096 && clock - cap.front().t > keep) cap.erase(cap.begin(), cap.begin() + 1024);
     captured = (int) cap.size();
