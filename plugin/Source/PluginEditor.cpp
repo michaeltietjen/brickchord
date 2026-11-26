@@ -375,10 +375,18 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     glideTone.setName("Tone"); space.setName("Space"); volume.setName("Volume");
     droneY.setName("Pulse"); droneX.setName("Bloom"); droneDrift.setName("Drift"); droneAir.setName("Air");
     pluckLevel.setName("Strum"); pluckEcho.setName("Echo"); pluckRing.setName("Ring"); droneCloud.setName("Cloud");
+    viewBtn.onClick = [this] {                               // Field or Terrain
+        if (auto* p = proc.params.getParameter("view")) p->setValueNotifyingHost(p->getValue() > 0.5f ? 0.0f : 1.0f);
+    };
+    canvas.addAndMakeVisible(viewBtn);
+    {
+        juce::Random r(7);
+        for (int i = 0; i < 46; ++i) dust.push_back({r.nextFloat() * 2.6f - 1.3f, r.nextFloat(), 8.0f + r.nextFloat() * 46.0f, r.nextFloat() * 6.28f});
+    }
     canvas.pointer = [this](juce::Point<float> p, bool down) {   // Drone: the field is the strings; drag across to strum
         if (tab != 2 || !down || p.y < 150) { proc.uiStrum = -1.0f; return; }
         const float sc = (p.y - fieldHor) / fieldK;             // undo the perspective: which lane is under the pointer
-        proc.uiStrum = juce::jlimit(0.0f, 1.0f, ((p.x - 440.0f) / (79.0f * std::max(0.5f, sc)) + 1.0f) * 0.5f);
+        proc.uiStrum = juce::jlimit(0.0f, 1.0f, ((p.x - 440.0f) / (79.0f * std::max(0.5f, sc)) - camX / 79.0f + 1.0f) * 0.5f);
     };
     setLookAndFeel(&look);
     setWantsKeyboardFocus(true);
@@ -468,8 +476,16 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
     g.fillAll();
 
     // ---- the field: a floor running to a horizon. "Now" is at the front; the past recedes.
-    const float cx = 440, hor = fieldHor, K = fieldK, LK = 79;
-    auto proj = [&](float x, float z) { const float s = 1.0f / (0.22f + z * 1.9f); return Point<float>(cx + x * LK * s, hor + K * s); };
+    const bool terrainView = proc.params.getRawParameterValue("view")->load() > 0.5f;
+    const float cx = 440, hor = fieldHor + camY, K = fieldK, LK = 79;
+    // the camera drifts a little from side to side: near things move across far ones, which is what reads as depth
+    auto proj = [&](float x, float z) { const float s = 1.0f / (0.22f + z * 1.9f); return Point<float>(cx + (x * LK + camX) * s, hor + K * s); };
+    if (bloom > 0.01f) {                                    // a change of chord lights the horizon
+        Graphics::ScopedSaveState keep(g);                   // a round glow, pressed flat along the horizon
+        g.addTransform(AffineTransform::scale(1.0f, 0.24f, cx, hor + 12));
+        g.setGradientFill(ColourGradient(orange.withAlpha(0.40f * bloom), cx, hor + 12, orange.withAlpha(0.0f), cx + 340, hor + 12, true));
+        g.fillEllipse(cx - 340, hor + 12 - 340, 680, 680);
+    }
     for (int k = 0; k <= 12; ++k) {                         // bars of time
         const float z = (float) k / 12.0f;
         auto a = proj(-1.3f, z), b = proj(1.3f, z);
@@ -486,30 +502,43 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
         const int chunk = 6;
         for (int k0 = 0; k0 < kHist - 1; k0 += chunk) {
             std::vector<Point<float>> L, R;
+            std::vector<Point<float>> GL, GR;                // its glow on the floor, wider
             auto flush = [&] {                              // fill the run gathered so far
                 if (L.size() >= 2) {
-                    Path p;
+                    const float z = (float) k0 / (kHist - 1);
+                    const Colour cc = colAt ? colAt(k0) : col;
+                    Path gp, p;
+                    gp.startNewSubPath(GL[0]);
+                    for (size_t i = 1; i < GL.size(); ++i) gp.lineTo(GL[i]);
+                    for (size_t i = GR.size(); i-- > 0;) gp.lineTo(GR[i]);
+                    gp.closeSubPath();
+                    g.setColour(cc.withAlpha(0.20f * std::pow(1 - z, 1.6f)));
+                    g.fillPath(gp);
                     p.startNewSubPath(L[0]);
                     for (size_t i = 1; i < L.size(); ++i) p.lineTo(L[i]);
                     for (size_t i = R.size(); i-- > 0;) p.lineTo(R[i]);
                     p.closeSubPath();
-                    const float z = (float) k0 / (kHist - 1);
-                    g.setColour((colAt ? colAt(k0) : col).withAlpha(0.92f * std::pow(1 - z, 1.6f) + 0.02f));
+                    g.setColour(cc.withAlpha(0.92f * std::pow(1 - z, 1.6f) + 0.02f));
                     g.fillPath(p);
                 }
-                L.clear(); R.clear();
+                L.clear(); R.clear(); GL.clear(); GR.clear();
             };
             for (int k = k0; k <= std::min(kHist - 1, k0 + chunk); ++k) {
                 float x, w;
                 if (!at(k, x, w)) { flush(); continue; }
-                const float z = (float) k / (kHist - 1);
-                L.push_back(proj(x - w, z)); R.push_back(proj(x + w, z));
+                const float z = (float) k / (kHist - 1), up = kLift / (0.22f + z * 1.9f);   // lifted off the floor
+                auto a = proj(x - w, z), b2 = proj(x + w, z);
+                GL.push_back(proj(x - w * 2.2f, z)); GR.push_back(proj(x + w * 2.2f, z));
+                L.push_back({a.x, a.y - up}); R.push_back({b2.x, b2.y - up});
             }
             flush();
         }
     };
     auto orb = [&](float x, Colour col, float lvl) {
         auto c = proj(x, 0);
+        g.setColour(col.withAlpha(0.22f * lvl));              // its light on the floor
+        g.fillEllipse(c.x - 30, c.y - 7, 60, 14);
+        c.y -= kLift / 0.22f;
         g.setColour(col.withAlpha(0.16f * lvl));
         g.fillEllipse(c.x - 24, c.y - 24, 48, 48);
         g.setColour(col.withAlpha(0.3f * lvl));
@@ -519,7 +548,43 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
         g.setColour(Colours::white);
         g.fillEllipse(c.x - 2.5f, c.y - 2.5f, 5, 5);
     };
-    if (gl) {                                               // Glide: each voice a ribbon; a glide is a lane change
+    if (!terrainView)                                       // dust in the air, drifting towards you
+        for (auto& d : dust) {
+            const float sc = 1.0f / (0.22f + d.z * 1.9f);
+            auto c = proj(d.x, d.z);
+            const float tw = 0.5f + 0.5f * std::sin(d.ph);
+            g.setColour(Colours::white.withAlpha(0.05f + 0.20f * tw * (1 - d.z)));
+            g.fillEllipse(c.x - 0.5f * sc, c.y - d.h * sc * 0.45f, 0.5f + 0.45f * sc, 0.5f + 0.45f * sc);
+        }
+    if (terrainView) {                                      // Terrain: the sound itself as a landscape
+        static const Colour stops[] = {VCOL[0], VCOL[1], VCOL[2], VCOL[3], VCOL[4]};
+        for (int r = kRows - 1; r >= 0; --r) {               // the far ridges first, so the near ones stand in front of them
+            const auto& row = terrain[(size_t) ((terrainAt - 1 - r + 2 * kRows) % kRows)];
+            const float z = (float) r / (float) (kRows - 1) * 0.94f, sc = 1.0f / (0.22f + z * 1.9f), near = 1.0f - z;
+            const float floorY = hor + K * sc, amp = 30.0f * sc;
+            Path line, fill;
+            Point<float> prev;
+            for (int b = 0; b < kBands; ++b) {
+                const float x = -1.22f + 2.44f * (float) b / (float) (kBands - 1);
+                const Point<float> pt(cx + (x * LK + camX) * sc, floorY - row[(size_t) b] * amp);
+                if (b == 0) { line.startNewSubPath(pt); fill.startNewSubPath(pt.x, floorY); fill.lineTo(pt); }
+                else { const auto mid = (prev + pt) * 0.5f; line.quadraticTo(prev, mid); fill.quadraticTo(prev, mid); }
+                prev = pt;
+            }
+            line.lineTo(prev); fill.lineTo(prev); fill.lineTo(prev.x, floorY); fill.closeSubPath();
+            g.setColour(chassis.interpolatedWith(Colour(0xff1c1932), 0.35f * near).withAlpha(0.94f));   // it hides what is behind it
+            g.fillPath(fill);
+            const float x0 = cx + (-1.22f * LK + camX) * sc, x1 = cx + (1.22f * LK + camX) * sc;
+            ColourGradient gr(stops[0].withAlpha(0.15f * near * near), 0, floorY - amp, stops[0].withAlpha(0.0f), 0, floorY, false);
+            g.setGradientFill(gr);                           // a glow inside each ridge
+            g.fillPath(fill);
+            ColourGradient across(stops[0], x0, 0, stops[4], x1, 0, false);
+            for (int k = 1; k < 4; ++k) across.addColour(k / 4.0, stops[k]);
+            across.multiplyOpacity(0.06f + 0.94f * std::pow(near, 1.5f));
+            g.setGradientFill(across);
+            g.strokePath(line, PathStrokeType(0.7f + 1.5f * near, PathStrokeType::curved, PathStrokeType::rounded));
+        }
+    } else if (gl) {                                        // Glide: each voice a ribbon; a glide is a lane change
         float lo = 1e9f, hi = -1e9f;
         for (auto& tv : trail) for (float c : tv) if (c > 0) { lo = std::min(lo, c); hi = std::max(hi, c); }
         for (int v = 0; v < 6; ++v) if (proc.glide.on[(size_t) v]) { float t = proc.glide.target[(size_t) v]; lo = std::min(lo, t); hi = std::max(hi, t); }
@@ -540,6 +605,7 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
                 const float tx = (proc.glide.target[(size_t) v] - mid) / half, nx = (proc.glide.cents[(size_t) v] - mid) / half;
                 if (proc.glide.on[(size_t) v] && std::abs(tx - nx) > 0.01f) {   // where it's headed
                     auto t = proj(tx, 0);
+                    t.y -= kLift / 0.22f;
                     g.setColour(VCOL[v].withAlpha(0.8f));
                     g.drawEllipse(t.x - 7, t.y - 7, 14, 14, 1.5f);
                 }
@@ -594,7 +660,7 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
             g.setGradientFill(ColourGradient(cc.withAlpha(jmin(0.9f, (air ? 0.75f : 0.8f) * lvl)), b.x, b.y, cc.withAlpha(0.0f), b.x + sway, b.y - hgt, false));
             g.fillPath(p);
             g.setColour(cc.withAlpha(jmin(0.5f, 0.3f * lvl)));
-            g.fillEllipse(b.x - wd * 4, b.y - wd * 1.1f, wd * 8, wd * 2.2f);
+            g.fillEllipse(b.x - wd * 2.6f, b.y - wd * 0.7f, wd * 5.2f, wd * 1.4f);
             g.setColour(Colours::white.withAlpha(jmin(0.9f, 0.7f * lvl)));
             g.fillEllipse(b.x - wd * 0.6f, b.y - wd * 0.3f, wd * 1.2f, wd * 0.6f);
             ++ci;
@@ -626,6 +692,13 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
             }, orange, colAt);
             if ((m < 64 ? nowLo >> m : nowHi >> (m - 64)) & 1) orb(x, colAt(0), 1.0f);
         }
+    }
+
+    {                                                       // haze where the floor meets the sky
+        g.setGradientFill(ColourGradient(chassis.withAlpha(0.0f), 0, hor + K / 0.6f, Colour(0xff1c1932).withAlpha(0.55f), 0, hor + K / 2.12f, false));
+        g.fillRect(0.0f, hor + K / 2.12f, (float) kW, K / 0.6f - K / 2.12f);
+        g.setGradientFill(ColourGradient(Colour(0xff1c1932).withAlpha(0.55f), 0, hor + K / 2.12f, Colour(0xff1c1932).withAlpha(0.0f), 0, hor + K / 2.12f - 46, false));
+        g.fillRect(0.0f, hor + K / 2.12f - 46, (float) kW, 46.0f);   // and up into the sky, so there is no edge
     }
 
     // ---- the words
@@ -717,8 +790,8 @@ void BricklabStudioEditor::layout() {
     }
     if (gl && proc.kMidiFx) { put(b, glideMpe, 96); put(b, glideStrike, 104); }
     put(b, key, 60);
-    put(b, scale, gl ? (mf ? 112 : 124) : 140);
-    if (gl) put(b, glideReach, mf ? 96 : 104);
+    put(b, scale, gl ? (mf ? 104 : 124) : 140);
+    if (gl) put(b, glideReach, 104);
     if (!gl) put(b, octave, 84);
 
     auto a = juce::Rectangle<int>(22, 424, 856, 32);
@@ -745,6 +818,8 @@ void BricklabStudioEditor::layout() {
         put(a, glideTiming, 124); put(a, glideBend, 80); put(a, octave, 70);
     }
     curveEd->setBounds(20, 56, 782, 350);
+    viewBtn.setBounds(24, 172, 66, 22);
+    viewBtn.setVisible(!(tab == 3 && curvesBtn.getToggleState()));
 }
 
 void BricklabStudioEditor::layoutRows() { layout(); }
@@ -760,6 +835,73 @@ void BricklabStudioEditor::timerCallback() {
         const bool on = proc.params.getRawParameterValue("glidesub")->load() > 0.5f;
         const int k = on ? 1 + (int) proc.params.getRawParameterValue("glidesubfloor")->load() : 0;
         if (glideSubBox.getSelectedItemIndex() != k && !glideSubBox.isPopupActive()) glideSubBox.setSelectedItemIndex(k, juce::dontSendNotification);
+    }
+    if (++shotTick >= 30) {                                // for testing: while ~/BrickchordBuild/shot.on exists, a picture of
+        shotTick = 0;                                      // this window goes to ~/BrickchordBuild/shot.png once a second
+        const auto dir = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("BrickchordBuild");
+        if (dir.getChildFile("shot.on").existsAsFile()) {
+            const auto img = createComponentSnapshot(getLocalBounds(), true, 1.5f);
+            const auto tmp = dir.getChildFile("shot.tmp");
+            tmp.deleteFile();
+            { juce::FileOutputStream os(tmp); if (os.openedOk()) juce::PNGImageFormat().writeImageToStream(img, os); }
+            tmp.moveFileTo(dir.getChildFile("shot.png"));
+        }
+    }
+    {                                                      // the camera, the bloom, the dust
+        const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        camX = 5.0f * (float) std::sin(t * 0.21) + 2.0f * (float) std::sin(t * 0.57 + 1.3);
+        camY = 2.5f * (float) std::sin(t * 0.16 + 0.7);
+        const auto nm = proc.chordName();
+        if (nm != bloomName) { bloomName = nm; if (nm.isNotEmpty()) bloom = 1.0f; }
+        bloom *= 0.93f;
+        for (auto& d : dust) { d.z -= 0.0016f; d.ph += 0.05f; if (d.z < 0) { d.z = 1.0f; } }
+        const bool tv = proc.params.getRawParameterValue("view")->load() > 0.5f;
+        if (viewBtn.getButtonText() != (tv ? "terrain" : "field")) viewBtn.setButtonText(tv ? "terrain" : "field");
+        if (tv) {                                            // a new ridge: the spectrum of the last moment
+            const double sr = std::max(8000.0, proc.getSampleRate());
+            std::array<float, kBands> band{};
+            if (!proc.kMidiFx) {
+                const int at = proc.scopeAt.load(), N = 4096;
+                for (int i = 0; i < N; ++i) {
+                    const float w = 0.5f - 0.5f * std::cos(6.2831853f * (float) i / (float) (N - 1));
+                    fftBuf[(size_t) i] = proc.scope[(size_t) ((at - N + i + 16384) & 8191)] * w;
+                }
+                std::fill(fftBuf.begin() + N, fftBuf.end(), 0.0f);
+                fft.performFrequencyOnlyForwardTransform(fftBuf.data());
+                for (int b = 0; b < kBands; ++b) {           // bands a semitone and a bit wide, 41 Hz to 6 kHz
+                    const double f0 = 440.0 * std::pow(2.0, (28.0 + (b - 0.5) * 86.0 / (kBands - 1) - 69.0) / 12.0);
+                    const double f1 = 440.0 * std::pow(2.0, (28.0 + (b + 0.5) * 86.0 / (kBands - 1) - 69.0) / 12.0);
+                    const double p0 = f0 * N / sr, p1 = f1 * N / sr;
+                    float m = 0;
+                    if (p1 - p0 < 1.0) {                      // down low the bands are narrower than the bins: read between them
+                        const double pc = 0.5 * (p0 + p1); const int i0 = (int) pc;
+                        m = fftBuf[(size_t) i0] + (fftBuf[(size_t) (i0 + 1)] - fftBuf[(size_t) i0]) * (float) (pc - i0);
+                    } else
+                        for (int i = (int) p0; i <= (int) p1 && i < N / 2; ++i) m = std::max(m, fftBuf[(size_t) i]);
+                    const float db = 20.0f * std::log10(std::max(1e-7f, m / (float) N * 4.0f)) + 9.0f * (float) b / (float) kBands;   // a tilt, so the top shows
+                    band[(size_t) b] = juce::jlimit(0.0f, 1.0f, (db + 62.0f) / 46.0f);
+                }
+            } else {                                         // the MIDI builds make no sound: the notes they send, and their overtones
+                auto add = [&](double midi, float lv) {
+                    for (int h = 1; h <= 5; ++h) {
+                        const double m = midi + 12.0 * std::log2((double) h), bb = (m - 28.0) * (kBands - 1) / 86.0;
+                        for (int b = std::max(0, (int) bb - 2); b <= std::min(kBands - 1, (int) bb + 3); ++b)
+                            band[(size_t) b] = std::max(band[(size_t) b], lv / (float) h * (float) std::exp(-(b - bb) * (b - bb) / 1.2));
+                    }
+                };
+                if (tab == 3) { for (int v = 0; v < 6; ++v) if (proc.glide.level[(size_t) v] > 0.01f) add(proc.glide.cents[(size_t) v] / 100.0, juce::jlimit(0.0f, 1.0f, proc.glide.level[(size_t) v] / 0.6f)); }
+                else {
+                    const uint64_t lo = proc.noteBitsLo.load(), hi = proc.noteBitsHi.load();
+                    for (int m = 0; m < 128; ++m) if ((m < 64 ? lo >> m : hi >> (m - 64)) & 1) add(m, 0.85f);
+                }
+            }
+            for (int b = 0; b < kBands; ++b) {                // the land runs out to nothing at either side
+                band[(size_t) b] *= juce::jlimit(0.0f, 1.0f, (float) std::min(b, kBands - 1 - b) / 5.0f);
+                bandNow[(size_t) b] = std::max(band[(size_t) b], bandNow[(size_t) b] * 0.86f);   // quick up, slow down
+            }
+            terrain[(size_t) terrainAt] = bandNow;
+            terrainAt = (terrainAt + 1) % kRows;
+        }
     }
     noteHist[(size_t) trailAt] = {proc.noteBitsLo.load(), proc.noteBitsHi.load()};
     {                                                      // which pad's chord is sounding: its colour

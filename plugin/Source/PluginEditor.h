@@ -93,6 +93,20 @@ private:
     std::vector<Spark> sparks;                         // plucked notes, travelling away down their strings
     std::array<float, 128> stringGlow{};
     int pluckSeen = 0, hoverString = -1;
+    // the Terrain view: the sound's spectrum, a ridge for each moment, rolling away as it ages
+    static constexpr int kBands = 76, kRows = 56;
+    juce::dsp::FFT fft{12};
+    std::array<float, 8192> fftBuf{};
+    std::array<std::array<float, kBands>, kRows> terrain{};
+    std::array<float, kBands> bandNow{};
+    int terrainAt = 0;
+    juce::TextButton viewBtn{"field"};
+    // the Field's depth: a camera that drifts, a bloom at each change of chord, dust in the air
+    int shotTick = 0;
+    float camX = 0, camY = 0, bloom = 0;
+    juce::String bloomName;
+    struct Dust { float x, z, h, ph; };
+    std::vector<Dust> dust;
     juce::TextButton third{"3rd"}, bloomBtn{"bloom"}, stopBtn{"stop"}, glideSub{"sub"}, glideMore{"more"}, glideStrike{"strike each chord"};
     juce::ComboBox glideSound, glideChord, glidePath, glideTiming, glideMove, glideCross, glideReach, glideTime, glideFade, glideBend, glideMpe;
     juce::Label glideChordL, glideToneL;
@@ -112,7 +126,7 @@ private:
     std::array<float, 6> trailLvl{};
     int trailAt = 0;
     float fieldLo = 3300, fieldHi = 7200;
-    static constexpr float fieldHor = 118, fieldK = 60;   // the floor's horizon and depth scale
+    static constexpr float fieldHor = 118, fieldK = 60, kLift = 2.6f;   // kLift: how far a ribbon rides above the floor   // the floor's horizon and depth scale
     juce::Label octL, glideL, slideL, pulseL, bloomL;
     int litDrone = -2;
     juce::Slider space, volume, bassLvl;

@@ -186,6 +186,7 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"modflip", 1}, "flip", false));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"space", 1}, "Space", 0.f, 1.f, 0.3f));
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"view", 1}, "View", StringArray{"Field", "Terrain"}, 0));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"volume", 1}, "Volume", 0.f, 1.f, 0.8f));
     return l;
 }
@@ -1152,7 +1153,7 @@ const juce::String BricklabStudioProcessor::getProgramName(int i) { return i >= 
 void BricklabStudioProcessor::setCurrentProgram(int i) {
     if (i < 0 || i >= getNumPrograms()) return;
     currentProgram = i;
-    static const std::set<juce::String> keep = {"key", "scale", "octave", "volume", "space", "basslevel", "glidebend", "glidempe", "page"};
+    static const std::set<juce::String> keep = {"key", "scale", "octave", "volume", "space", "basslevel", "glidebend", "glidempe", "page", "view"};
     for (auto* p : getParameters())                          // everything to its default, but your key, scale and level
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(p))
             if (!keep.count(rp->getParameterID())) rp->setValueNotifyingHost(rp->getDefaultValue());
@@ -1246,6 +1247,13 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
 
     buffer.applyGain(2.0f);                                  // the level the old reverb's dry path gave (its dry gain was 2)
     hall.process(buffer.getWritePointer(0), buffer.getWritePointer(1), n, params.getRawParameterValue("space")->load());
+    {
+        const float* l = buffer.getReadPointer(0);
+        const float* r = buffer.getReadPointer(1);
+        int at = scopeAt.load();
+        for (int i = 0; i < n; ++i) { scope[(size_t) at] = 0.5f * (l[i] + r[i]); at = (at + 1) & 8191; }
+        scopeAt = at;
+    }
     const float vol = params.getRawParameterValue("volume")->load();
     for (int c = 0; c < 2; ++c) {
         auto* d = buffer.getWritePointer(c);

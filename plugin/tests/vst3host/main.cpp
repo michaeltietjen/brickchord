@@ -69,6 +69,31 @@ int main(int argc, char** argv) {
         key(true, 57); run(0.3, "A, Open"); key(false, 57); run(0.2, "off");
         return 0;
     }
+    if (argc > 5 && juce::String(argv[2]) == "shot") {                    // vst3host plugin.vst3 shot <page> <view> <file.png>: a picture of the window
+        auto set = [&](const char* name, float v01) { for (auto* q : p->getParameters()) if (q->getName(64) == name) q->setValueNotifyingHost(v01); };
+        const int pg = juce::String(argv[3]).getIntValue();
+        setPage(pg);
+        set("View", juce::String(argv[4]).getFloatValue());
+        const auto mark = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("BrickchordBuild/shot.on");
+        mark.replaceWithText("1");
+        juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("BrickchordBuild/shot.png").deleteFile();
+        std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+        ed->setTopLeftPosition(-4000, -4000);                              // on the desktop so it runs, off the screen
+        ed->addToDesktop(0);
+        ed->setVisible(true);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(pg == 3 ? 9000 : 5000);
+        if (pg == 2) { set("Pluck arp", 0.25f); key(true, 57); key(false, 57); run(3.0, "drone"); }
+        else if (pg == 0) { for (int k : {57, 65, 60, 55}) { key(true, k); run(0.9, "chord"); key(false, k); run(0.1, "-"); } key(true, 57); run(0.6, "chord"); }
+        else { for (int k : {57, 62, 55, 60}) { key(true, k); run(0.05, "k"); key(false, k); run(1.3, "glide"); } key(true, 64); run(0.05, "k"); key(false, 64); run(0.5, "mid glide"); }
+        // the plugin pictures itself (while ~/BrickchordBuild/shot.on exists): a host cannot see inside its window
+        const auto shot = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("BrickchordBuild/shot.png");
+        juce::File out(argv[5]);
+        out.deleteFile();
+        std::cout << (shot.copyFileTo(out) ? "wrote " : "no picture for ") << out.getFullPathName() << "\n";
+        mark.deleteFile();
+        ed.reset();
+        return 0;
+    }
     if (argc > 2 && juce::String(argv[2]) == "drone") {                   // vst3host plugin.vst3 drone: the strum and arp
         auto set = [&](const char* name, float v01) { for (auto* q : p->getParameters()) if (q->getName(64) == name) q->setValueNotifyingHost(v01); };
         setPage(2);

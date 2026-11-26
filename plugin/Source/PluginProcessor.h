@@ -72,6 +72,9 @@ public:
     bool hasPhrase() const { return captured.load() > 0; }
     std::atomic<uint64_t> noteBitsLo{0}, noteBitsHi{0};   // which notes sound now (Chord and Drone), for the page's field
     // the strum and arp over the drone: the strings (the chord's notes across three octaves), and what was plucked
+    // the sound as it leaves (before the volume), for the Terrain view: the last 8192 samples, mono
+    std::array<float, 8192> scope{};
+    std::atomic<int> scopeAt{0};
     std::atomic<uint64_t> stringBitsLo{0}, stringBitsHi{0};
     std::atomic<float> uiStrum{-1.0f};        // the pointer across the field, 0..1 (below 0: lifted)
     std::atomic<int> pluckSerial{0};
