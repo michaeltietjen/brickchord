@@ -17,6 +17,7 @@ static int repeatSteps(const char* mode) { return has(mode, "1/4") ? 4 : (has(mo
 void Patterns::note(int64_t at, int ch, int m, float gain, float pan, Tag tag, int64_t gate, float rel) {
     if (m < 0 || m > 127) return;
     const uint32_t id = nextId_++;
+    gain *= 0.35f + 0.65f * vel_ / 0.85f;                // velocity: the pads play at 0.85, unchanged
     q_.push_back({at, true, ch, m, gain, pan, -1, id});
     if (gate >= 0) q_.push_back({at + std::max<int64_t>(1, gate), false, ch, m, 0, 0, rel, id});
     auto& l = live_[tag];
@@ -38,8 +39,9 @@ std::vector<int> Patterns::arpNotes() const {           // engine._arp_notes
     return out.empty() ? base : out;
 }
 
-void Patterns::chord(const std::vector<int>& notes, int64_t t) {   // engine.c_chord
+void Patterns::chord(const std::vector<int>& notes, int64_t t, float vel) {   // engine.c_chord
     if (notes.size() < 2) return;
+    vel_ = std::clamp(vel, 0.05f, 1.0f);
     notes_ = notes;
     pat_.assign(notes.begin() + 1, notes.end());
     pat_.push_back(notes[1] + 12);

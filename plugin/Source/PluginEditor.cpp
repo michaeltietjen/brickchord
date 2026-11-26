@@ -2,9 +2,11 @@
 #include "core/PatchData.h"
 
 namespace {
+constexpr int kW = 900, kH = 560;                         // the page's own size; the window scales it
 const juce::Colour chassis(0xffe4e2dc), plate(0xffefede8), ink(0xff18161c), dim(0xff6d6874),
     seam(0xffcfccc4), orange(0xffff5a1f), screen(0xff121016), sink(0xffece4d6), teal(0xff3f9e95);
-const char* TAB_NAMES[] = {"Chord", "Lead", "Drone", "Glide"};
+const char* TAB_NAMES[] = {"Chord", "Lead", "Drone", "Glide"};    // by page; Lead stays in the engine, off the tabs
+const int TAB_PAGES[] = {3, 0, 2};
 const char* SOON[] = {"", "", "", ""};
 const juce::Colour VCOL[] = {juce::Colour(110, 200, 190), juce::Colour(190, 140, 255), juce::Colour(255, 170, 110),
                              juce::Colour(120, 200, 140), juce::Colour(255, 120, 160), juce::Colour(140, 170, 255)};
@@ -24,8 +26,28 @@ void Pad::paint(juce::Graphics& g) {
     g.drawFittedText(sub, r.withTrimmedTop(r.getHeight() * 0.62f).toNearestInt(), juce::Justification::centredTop, 1);
 }
 
+void DragMidi::paint(juce::Graphics& g) {
+    const bool on = ready && ready();
+    auto r = getLocalBounds().toFloat().reduced(1);
+    g.setColour(juce::Colour(0xff26242b));
+    g.fillRoundedRectangle(r, 6);
+    g.setColour(on ? orange : juce::Colour(0xff6d6874));
+    g.drawRoundedRectangle(r, 6, 1.2f);
+    g.setFont(juce::FontOptions(13.f));
+    g.drawText(on ? "drag MIDI" : "play, then drag", r.toNearestInt(), juce::Justification::centred);
+}
+
+void DragMidi::mouseDrag(const juce::MouseEvent&) {
+    if (dragging || !make) return;
+    auto f = make();
+    if (!f.existsAsFile()) return;
+    dragging = true;
+    juce::DragAndDropContainer::performExternalDragDropOfFiles({f.getFullPathName()}, false, this, [this] { dragging = false; });
+}
+
 BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioProcessorEditor(&p), proc(p) {
-    for (int t = 0; t < 4; ++t) {
+    for (int k = 0; k < 3; ++k) {                         // Glide first: it's what this plugin is for
+        const int t = TAB_PAGES[k];
         auto* b = tabs.add(new juce::TextButton(TAB_NAMES[t]));
         b->setClickingTogglesState(false);
         b->onClick = [this, t] {                             // the page is the instance's: saved with the project
@@ -34,6 +56,16 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
         };
         addAndMakeVisible(b);
     }
+    for (int i = 0; i < proc.getNumPrograms(); ++i) presetBox.addItem(proc.getProgramName(i), i + 1);
+    presetBox.setTextWhenNothingSelected("Presets");
+    presetBox.onChange = [this] {
+        const int i = presetBox.getSelectedItemIndex();
+        if (i >= 0) { proc.setCurrentProgram(i); proc.updateHostDisplay(); showTab(proc.page()); }
+    };
+    addAndMakeVisible(presetBox);
+    dragMidi.make = [this] { return proc.writePhrase(); };
+    dragMidi.ready = [this] { return proc.hasPhrase(); };
+    addAndMakeVisible(dragMidi);
     for (int d = 0; d < 7; ++d) {
         auto* pad = pads.add(new Pad());
         pad->onDown = [this, d] { padPress(d, true); };
@@ -44,11 +76,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (int i = 0; i < 4; ++i) {
         auto* b = modButtons.add(new juce::TextButton(modNames[i]));
         b->setClickingTogglesState(true);
-        b->onClick = [this, i, b] {
-            bool on = b->getToggleState();
-            auto& m = proc.mods;
-            if (i == 0) m.seventh = on; else if (i == 1) m.sus = on; else if (i == 2) m.ninth = on; else m.flip = on;
-        };
+        static const char* ids[] = {"mod7", "modsus", "mod9", "modflip"};
+        modAttach.add(new juce::AudioProcessorValueTreeState::ButtonAttachment(proc.params, ids[i], *b));
         addAndMakeVisible(b);
     }
     latch.setClickingTogglesState(true);
@@ -61,8 +90,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (int i = 0; i < brick::kNumGlidePaths; ++i) glidePath.addItem(juce::String("Path: ") + brick::kGlidePaths[i], i + 1);
     for (int i = 0; i < brick::kNumGlideTimings; ++i) glideTiming.addItem(juce::String("Timing: ") + brick::kGlideTimings[i], i + 1);
     for (int i = 0; i < brick::kNumGlideMoves; ++i) glideMove.addItem(brick::kGlideMoves[i], i + 1);
-    for (int i = 0; i < brick::kNumGlideTimes; ++i) glideTime.addItem("Glide " + juce::String(brick::kGlideTimes[i]) + " s", i + 1);
-    for (int i = 0; i < brick::kNumGlideFades; ++i) glideFade.addItem("Fade " + juce::String(brick::kGlideFades[i]) + " s", i + 1);
+    for (auto& t : brick::timeNames(brick::kGlideTimes, brick::kNumGlideTimes, "Glide")) glideTime.addItem(t, glideTime.getNumItems() + 1);
+    for (auto& t : brick::timeNames(brick::kGlideFades, brick::kNumGlideFades, "Fade")) glideFade.addItem(t, glideFade.getNumItems() + 1);
     for (int i = 0; i < brick::kNumGlideBends; ++i) glideBend.addItem("Bend " + juce::String(brick::kGlideBends[i]) + " st", i + 1);
     glideMpe.addItemList({"Out: MPE", "Out: notes"}, 1);
     for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideTime, &glideFade, &glideBend, &glideMpe})
@@ -70,7 +99,15 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     glideSub.setClickingTogglesState(true);
     bloomBtn.onClick = [this] { proc.uiPad(101, true); };
     stopBtn.onClick = [this] { proc.uiPad(100, true); };
-    for (auto* b : {&bloomBtn, &stopBtn, &glideSub}) addAndMakeVisible(b);
+    glideMore.setClickingTogglesState(true);                 // the plumbing (timing, bend range, MIDI out) behind "more"
+    glideMore.onClick = [this] { showTab(tab); };
+    for (auto* b : {&bloomBtn, &stopBtn, &glideSub, &glideMore}) addAndMakeVisible(b);
+    glideTone.setSliderStyle(juce::Slider::LinearHorizontal);
+    glideTone.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    addAndMakeVisible(glideTone);
+    glideToneL.setText("Tone", juce::dontSendNotification);
+    glideToneL.setColour(juce::Label::textColourId, dim);
+    addAndMakeVisible(glideToneL);
     glideChordL.setText("Chord", juce::dontSendNotification);
     glideChordL.setColour(juce::Label::textColourId, dim);
     addAndMakeVisible(glideChordL);
@@ -98,7 +135,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
         sound.addItem(brick::kPatches[i].name, i + 1);
     }
     key.addItemList({"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 1);
-    scale.addItemList({"Major", "Minor", "Dorian", "Mixolydian"}, 1);
+    for (int i = 0; i < brick::kNumScales; ++i) scale.addItem(brick::kScaleNames[i], i + 1);
     for (int i = 0; i < brick::kNumPlayModes; ++i) mode.addItem(brick::kPlayModes[i], i + 1);
     arpOct.addItemList({"1 oct", "2 oct", "3 oct", "4 oct"}, 1);
     for (int i = 0; i < brick::kNumBassModes; ++i) bassMode.addItem(brick::kBassModes[i], i + 1);
@@ -145,6 +182,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aGlideFade = std::make_unique<CA>(ps, "glidefade", glideFade);
     aGlideBend = std::make_unique<CA>(ps, "glidebend", glideBend);
     aGlideMpe = std::make_unique<CA>(ps, "glidempe", glideMpe);
+    aGlideTone = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "glidetone", glideTone);
     aGlideSub = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "glidesub", glideSub);
     aLatch = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(ps, "latch", latch);
     aMode = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(ps, "mode", mode);
@@ -172,7 +210,15 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     lf.setColour(juce::Slider::backgroundColourId, seam);
 
     setWantsKeyboardFocus(true);
-    setSize(900, 560);
+    canvas.painter = [this](juce::Graphics& g) { paintContent(g); };
+    std::vector<juce::Component*> kids;                     // everything lives on the canvas, which scales
+    for (auto* c : getChildren()) kids.push_back(c);
+    addAndMakeVisible(canvas);
+    for (auto* c : kids) { const bool v = c->isVisible(); canvas.addChildComponent(c); c->setVisible(v); }
+    setResizable(true, true);
+    setResizeLimits(kW * 3 / 4, kH * 3 / 4, kW * 2, kH * 2);
+    if (auto* k = getConstrainer()) k->setFixedAspectRatio((double) kW / kH);
+    setSize(kW, kH);
     showTab(proc.page());
     startTimerHz(15);
 }
@@ -181,7 +227,7 @@ BricklabStudioEditor::~BricklabStudioEditor() { stopTimer(); }
 
 void BricklabStudioEditor::showTab(int t) {
     tab = t;
-    for (int i = 0; i < tabs.size(); ++i) tabs[i]->setToggleState(i == t, juce::dontSendNotification);
+    for (int i = 0; i < tabs.size(); ++i) tabs[i]->setToggleState(TAB_PAGES[i] == t, juce::dontSendNotification);
     const bool chord = t == 0, lead = t == 1, drone = t == 2, gl = t == 3, playing = true, sounds = !proc.kMidiFx;
     auto show = [](std::initializer_list<juce::Component*> cs, bool on) { for (auto* c : cs) c->setVisible(on); };
     for (auto* p : pads) p->setVisible(playing);
@@ -195,8 +241,12 @@ void BricklabStudioEditor::showTab(int t) {
     show({&mode, &arpOct, &bassMode, &modeL, &arpL, &bassL}, chord);
     show({&octave, &octL}, !gl);
     show({&glideSound}, gl && sounds);
-    show({&glideChord, &glideChordL, &glidePath, &glideTiming, &glideMove, &glideTime, &glideFade, &glideBend, &bloomBtn, &stopBtn, &glideSub}, gl);
-    show({&glideMpe}, gl && proc.kMidiFx);
+    const bool more = glideMore.getToggleState();
+    show({&glideChord, &glideChordL, &bloomBtn, &stopBtn, &glideSub, &glideMore}, gl);
+    show({&glideTone, &glideToneL}, gl && sounds);
+    show({&glidePath, &glideMove, &glideTime, &glideFade}, gl && !more);
+    show({&glideTiming, &glideBend}, gl && more);
+    show({&glideMpe}, gl && more && proc.kMidiFx);
     show({&leadGlide, &glideL}, lead);
     show({&third, &droneSlide, &slideL, &droneY, &droneX, &pulseL, &bloomL}, drone);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
@@ -219,9 +269,11 @@ void BricklabStudioEditor::padPress(int d, bool down) {
         proc.uiPad(d, down);
 }
 
-void BricklabStudioEditor::paint(juce::Graphics& g) {
+void BricklabStudioEditor::paint(juce::Graphics& g) { g.fillAll(chassis); }
+
+void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x 560, scaled to the window
     g.fillAll(chassis);
-    auto r = getLocalBounds();
+    auto r = juce::Rectangle<int>(0, 0, kW, kH);
     auto bar = r.removeFromTop(56);
     g.setColour(ink);
     g.fillRect(bar);
@@ -232,7 +284,7 @@ void BricklabStudioEditor::paint(juce::Graphics& g) {
     g.setFont(juce::FontOptions(22.f));
     g.drawText("studio", bar.withTrimmedLeft(122).withWidth(90), juce::Justification::centredLeft);
     // the screen: key, sound, the chord
-    auto scr = juce::Rectangle<int>(22, 72, getWidth() - 44, 170);
+    auto scr = juce::Rectangle<int>(22, 72, kW - 44, 170);
     g.setColour(juce::Colour(0xff26242b));
     g.fillRoundedRectangle(scr.toFloat(), 16);
     g.setColour(screen);
@@ -245,9 +297,10 @@ void BricklabStudioEditor::paint(juce::Graphics& g) {
     auto* sc = tab == 0 ? &sound : (tab == 1 ? &leadSound : (tab == 2 ? &droneSound : &glideSound));
     g.drawText(TAB_NAMES[tab] + juce::String("  ") + (!proc.kMidiFx ? sc->getText().toUpperCase() : ""), top, juce::Justification::centredRight);
     if (tab == 3) {                                       // the voices' paths over the last 10 seconds, as on the Brick
-        auto area = in.toFloat().withTrimmedBottom(4).withTrimmedLeft(in.getWidth() * 0.3f);
+        auto area = in.toFloat().withTrimmedBottom(4).withTrimmedRight(26);   // the paths, full width; where they head, at the right
         float lo = 1e9f, hi = -1e9f;                       // the range the voices used, with room around it
         for (auto& tv : trail) for (float c : tv) if (c > 0) { lo = std::min(lo, c); hi = std::max(hi, c); }
+        for (int v = 0; v < 6; ++v) if (proc.glide.on[(size_t) v]) { float t = proc.glide.target[(size_t) v]; lo = std::min(lo, t); hi = std::max(hi, t); }
         if (lo > hi) { lo = 3600; hi = 7200; }
         lo -= 300; hi += 300;
         if (hi - lo < 2400) { float m = (hi + lo) / 2; lo = m - 1200; hi = m + 1200; }
@@ -262,12 +315,18 @@ void BricklabStudioEditor::paint(juce::Graphics& g) {
                 if (!started) { p.startNewSubPath(x, y(c)); started = true; } else p.lineTo(x, y(c));
             }
             g.setColour(VCOL[v].withAlpha(0.35f + 0.65f * juce::jlimit(0.0f, 1.0f, trailLvl[(size_t) v] / 0.6f)));
-            g.strokePath(p, juce::PathStrokeType(2.2f));
+            g.strokePath(p, juce::PathStrokeType(2.6f));
+            if (proc.glide.on[(size_t) v]) {                 // where the voice is going: a dot, and its note
+                const float ty = y(proc.glide.target[(size_t) v]);
+                g.fillEllipse(area.getRight() + 6, ty - 4, 8, 8);
+            }
         }
+        g.setColour(juce::Colour(0xcc121016));               // the name sits on the paths, legible
+        g.fillRoundedRectangle(in.toFloat().withWidth(260).withHeight(56).translated(-6, 2), 8);
         auto name = proc.chordName();
         g.setColour(orange);
-        g.setFont(juce::FontOptions(44.f, juce::Font::bold));
-        g.drawText(name.isEmpty() ? "" : name, in.removeFromLeft(in.getWidth() / 2).withTrimmedTop(4).removeFromTop(52), juce::Justification::centredLeft);
+        g.setFont(juce::FontOptions(40.f, juce::Font::bold));
+        g.drawText(name.isEmpty() ? "" : name, in.withWidth(250).withTrimmedTop(4).withHeight(52), juce::Justification::centredLeft);
         g.setColour(sink);
         g.setFont(juce::FontOptions(14.f));
         int ready = proc.soundsReady(), want = proc.soundsWanted();
@@ -292,11 +351,21 @@ void BricklabStudioEditor::paint(juce::Graphics& g) {
     }
 }
 
-void BricklabStudioEditor::resized() {
-    auto bar = getLocalBounds().removeFromTop(56).withTrimmedLeft(240).reduced(0, 11);
+void BricklabStudioEditor::resized() {                     // any size: the whole page scales, keeping its shape
+    canvas.setBounds(0, 0, kW, kH);
+    canvas.setTransform(juce::AffineTransform::scale((float) getWidth() / (float) kW));
+    layout();
+}
+
+void BricklabStudioEditor::layout() {
+    auto bar = juce::Rectangle<int>(0, 0, kW, kH).removeFromTop(56).withTrimmedLeft(240).reduced(0, 11);
     for (auto* t : tabs) { t->setBounds(bar.removeFromLeft(96)); bar.removeFromLeft(6); }
-    soon.setBounds(60, 90, getWidth() - 120, 140);
-    auto r = getLocalBounds().withTrimmedTop(260).reduced(22, 0);
+    bar.removeFromLeft(14);
+    presetBox.setBounds(bar.removeFromLeft(190));
+    bar.removeFromLeft(10);
+    dragMidi.setBounds(bar.removeFromLeft(120));
+    soon.setBounds(60, 90, kW - 120, 140);
+    auto r = juce::Rectangle<int>(0, 0, kW, kH).withTrimmedTop(260).reduced(22, 0);
     auto padRow = r.removeFromTop(110);
     int w = (padRow.getWidth() - 6 * 8) / 7;
     for (int i = 0; i < pads.size(); ++i) pads[i]->setBounds(padRow.getX() + i * (w + 8), padRow.getY(), w, padRow.getHeight());
@@ -320,7 +389,7 @@ void BricklabStudioEditor::resized() {
 }
 
 void BricklabStudioEditor::layoutRows() {           // the bottom row: what this page sets
-    auto outRow = juce::Rectangle<int>(22, 260 + 110 + 14 + 34 + 16 + 30 + 14, getWidth() - 44, 30);
+    auto outRow = juce::Rectangle<int>(22, 260 + 110 + 14 + 34 + 16 + 30 + 14, kW - 44, 30);
     if (tab == 0) {                                   // the chord's octave sits by latch
         octL.setBounds(520, 260 + 110 + 14, 56, 34); octave.setBounds(576, 260 + 110 + 16, 96, 30);
         modeL.setBounds(outRow.removeFromLeft(38)); mode.setBounds(outRow.removeFromLeft(180)); outRow.removeFromLeft(14);
@@ -331,18 +400,21 @@ void BricklabStudioEditor::layoutRows() {           // the bottom row: what this
         octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(100)); outRow.removeFromLeft(18);
         glideL.setBounds(outRow.removeFromLeft(46)); leadGlide.setBounds(outRow.removeFromLeft(180));
     } else if (tab == 3) {
-        auto mod = juce::Rectangle<int>(22, 260 + 110 + 14, getWidth() - 44, 34);
+        auto mod = juce::Rectangle<int>(22, 260 + 110 + 14, kW - 44, 34);
         bloomBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(8);
         stopBtn.setBounds(mod.removeFromLeft(86)); mod.removeFromLeft(20);
         glideChordL.setBounds(mod.removeFromLeft(48)); glideChord.setBounds(mod.removeFromLeft(140).reduced(0, 2)); mod.removeFromLeft(10);
         glideSub.setBounds(mod.removeFromLeft(70));
-        glideMpe.setBounds(mod.removeFromRight(130).reduced(0, 2));
-        glideTime.setBounds(outRow.removeFromLeft(118)); outRow.removeFromLeft(8);
-        glidePath.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(8);
-        glideTiming.setBounds(outRow.removeFromLeft(170)); outRow.removeFromLeft(8);
-        glideMove.setBounds(outRow.removeFromLeft(130)); outRow.removeFromLeft(8);
-        glideFade.setBounds(outRow.removeFromLeft(110)); outRow.removeFromLeft(8);
-        glideBend.setBounds(outRow.removeFromLeft(110));
+        glideMore.setBounds(mod.removeFromRight(86)); mod.removeFromRight(12);
+        glideTone.setBounds(mod.removeFromRight(120)); glideToneL.setBounds(mod.removeFromRight(42));
+        auto adv = outRow;
+        glideTime.setBounds(outRow.removeFromLeft(150)); outRow.removeFromLeft(10);
+        glidePath.setBounds(outRow.removeFromLeft(190)); outRow.removeFromLeft(10);
+        glideMove.setBounds(outRow.removeFromLeft(170)); outRow.removeFromLeft(10);
+        glideFade.setBounds(outRow.removeFromLeft(150));
+        glideTiming.setBounds(adv.removeFromLeft(200)); adv.removeFromLeft(10);
+        glideBend.setBounds(adv.removeFromLeft(130)); adv.removeFromLeft(10);
+        glideMpe.setBounds(adv.removeFromLeft(140));
     } else if (tab == 2) {
         octL.setBounds(outRow.removeFromLeft(56)); octave.setBounds(outRow.removeFromLeft(96)); outRow.removeFromLeft(12);
         slideL.setBounds(outRow.removeFromLeft(42)); droneSlide.setBounds(outRow.removeFromLeft(120)); outRow.removeFromLeft(12);
@@ -373,7 +445,8 @@ void BricklabStudioEditor::timerCallback() {
             pads[d]->repaint();
         }
     }
-    repaint(0, 56, getWidth(), 200);
+    canvas.repaint(0, 56, kW, 200);
+    dragMidi.repaint();
 }
 
 // the computer keyboard plays the pads too: 1 to 7, or A to J (as on Bricklab web)

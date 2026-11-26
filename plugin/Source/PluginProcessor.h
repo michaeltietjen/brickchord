@@ -35,10 +35,10 @@ public:
     static constexpr bool kSilentBus = false;
 #endif
     double getTailLengthSeconds() const override { return 3.0; }
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return {}; }
+    int getNumPrograms() override;                 // the factory presets
+    int getCurrentProgram() override { return currentProgram; }
+    void setCurrentProgram(int) override;
+    const juce::String getProgramName(int) override;
     void changeProgramName(int, const juce::String&) override {}
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
@@ -53,7 +53,7 @@ public:
     // the Chord page and MIDI both play through these
     void padDown(int degree, int pos = 0);
     void padUp(int pos = 0);
-    brick::Mods mods;                         // 7th, sus4, 9th, flip: set by the page's buttons
+    brick::Mods heldMods() const;             // 7th, sus4, 9th, flip: the page's buttons, as parameters
     juce::String chordName() const;
     juce::String chordRoman() const;
     std::vector<juce::String> padNames() const;
@@ -61,6 +61,9 @@ public:
     int soundsWanted() const { return wantedCount.load(); }
 
     juce::AudioProcessorValueTreeState params;
+    // what this instance played, kept so it can be dragged into the DAW as a MIDI clip
+    juce::File writePhrase();                 // the last 8 bars as a .mid file (or an empty File if nothing was played)
+    bool hasPhrase() const { return captured.load() > 0; }
     static juce::StringArray soundNames();
 
 private:
@@ -78,6 +81,18 @@ private:
     void sendOff(juce::MidiBuffer&, int pos);  // every MIDI note this instance has on: off
     void setName(const juce::String& name, const juce::String& sub);
 
+    struct Cap { int64_t t; bool on; int note, vel; };
+    juce::SpinLock capLock;
+    std::vector<Cap> cap;                     // note ons and offs, in samples of the clock
+    std::set<int> capOpen;                    // notes captured on and not yet off
+    std::vector<int> capGlide, capDrone;      // the Glide chord and the drone as captured
+    std::vector<int> droneNotesNow;
+    std::atomic<int> captured{0};
+    double lastBpm = 120;
+    int currentProgram = 0;
+    void capture(bool on, int note, int vel, int pos);
+    void captureSet(std::vector<int>& was, std::vector<int> now, int vel, int pos);
+
     juce::SpinLock uiLock;
     std::vector<std::pair<int, bool>> uiQueue;        // (degree, down) from the Lead and Drone pads
     std::vector<std::pair<int, int>> leadStack;       // (key or 100 + pad, note): the lead plays the newest
@@ -90,14 +105,16 @@ public:
     brick::GlideEngine glide{cache};
     static std::vector<int> glideSounds();    // the Glide page's sounds: the drones, then the chord sounds
 private:
-    std::array<int, brick::kGlideVoices> mpeNote{}, mpeBend{};
+    std::array<int, brick::kGlideVoices> mpeNote{}, mpeBend{}, mpePress{}, mpeTimbre{};
+    int mpeExpr = -1;
     std::vector<int> glideNotesOut;           // the Notes mode's chord on MIDI out
     bool mpeReady = false, wasPlaying = false;
     float glideSwell = 0;
     int lastExpr = 127;                               // the expression MIDI out last sent (the drone's pulse)
     void queueOut(bool on, int pos);          // a chord just started (or was let go): for Patterns
 
-    struct ChordEvent { int pos; std::vector<int> notes; };   // notes empty = let go
+    struct ChordEvent { int pos; std::vector<int> notes; float vel = 0.85f; };   // notes empty = let go
+    float keyVel = 0.85f;                     // the last key's velocity (0..1); the pads play at 0.85
     juce::SpinLock outLock;
     std::vector<ChordEvent> outQueue;         // filled by the page and by playHeld, read in processBlock
     brick::Patterns patterns;                 // play mode and bass mode: chords into note events

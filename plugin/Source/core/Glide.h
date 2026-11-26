@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 #include "Engine.h"
@@ -28,6 +29,25 @@ inline const float kGlideTimes[] = {0.25f, 0.4f, 0.6f, 1.0f, 1.5f, 2.0f, 4.0f, 6
 constexpr int kNumGlideTimes = 13;
 inline const float kGlideFades[] = {0.2f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 15.0f};
 constexpr int kNumGlideFades = 7;
+// glide and fade times: seconds, then bars of the host's tempo (so a glide lands on the downbeat)
+inline const float kBarLengths[] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
+inline const char* const kBarNames[] = {"1/4 bar", "1/2 bar", "1 bar", "2 bars", "4 bars", "8 bars"};
+constexpr int kNumBarLengths = 6;
+inline std::vector<std::string> timeNames(const float* secs, int n, const char* prefix) {
+    std::vector<std::string> out;
+    for (int i = 0; i < n; ++i) {
+        char b[48];
+        std::snprintf(b, sizeof b, "%s %g s", prefix, (double) secs[i]);
+        out.push_back(b);
+    }
+    for (auto* b : kBarNames) out.push_back(std::string(prefix) + " " + b);
+    return out;
+}
+inline float timeSeconds(const float* secs, int n, int index, double bpm) {
+    if (index < n) return secs[index < 0 ? 0 : index];
+    const int k = index - n < kNumBarLengths ? index - n : kNumBarLengths - 1;
+    return (float) (kBarLengths[k] * 4.0 * 60.0 / (bpm > 20 ? bpm : 120.0));
+}
 inline const int kGlideBends[] = {1, 2, 3, 5, 7, 12, 24};   // semitones at full pitch bend
 constexpr int kNumGlideBends = 7;
 constexpr int kGlideVoices = 6;                             // five chord voices and the sub
@@ -36,6 +56,7 @@ struct GlideSettings {
     int chord = 0, path = 2, timing = 0, move = 0;
     float time = 1.5f, fade = 1.0f;
     bool sub = true;
+    float tone = 1.0f;                           // 0..1: the low-pass on the voices (1: open)
 };
 
 class GlideEngine {
@@ -51,11 +72,15 @@ public:
     void bloom();
     void setBend(float semis) { bend_ = semis * 100.0f; }
     void setSwell(float x) { swell_ = x; }
+    void setVelocity(float v) { vel_ = v < 0.05f ? 0.05f : (v > 1 ? 1 : v); }   // the next chord's: scales its level
+    float velocity() const { return vel_; }
+    float swell() const { return swell_; }
     void render(float* L, float* R, int n);              // adds into L and R
     // what each voice is doing, for the screen and for MIDI out (MPE)
     std::array<std::atomic<float>, kGlideVoices> cents{}, level{};
     std::array<std::atomic<bool>, kGlideVoices> on{};
     std::array<std::atomic<float>, kGlideVoices> target{};   // where each voice is headed (cents)
+    std::array<std::atomic<float>, kGlideVoices> pressure{}; // 0..1: the voice's level now (fades, swell, bloom), for MPE
     bool anyOn() const;
 
 private:
@@ -73,6 +98,10 @@ private:
         std::shared_ptr<Note> note;                      // the sound, rendered at sampleMidi
         int sampleMidi = -1;
         double r0 = 1, pos = 0;
+        std::shared_ptr<Note> old;                       // the sound it's crossfading from, after a long glide
+        int oldMidi = -1, xf = 0, xfLen = 1;
+        double oldR0 = 1, oldPos = 0;
+        float z1[2] = {}, z2[2] = {};                    // the low-pass, per side
     };
     void push(int i, double tgtCents, double glide, int shape, double delay, const std::vector<double>& via, bool jump);
     std::vector<int> voicelead(const std::vector<int>& pcs, int rootPc) const;   // the five voices' new notes
@@ -92,7 +121,8 @@ private:
     int64_t t_ = 0;
     int key_ = 9;
     Scale scale_ = Scale::Minor;
-    float bend_ = 0, swell_ = 0;
+    float bend_ = 0, swell_ = 0, vel_ = 0.85f;
+    float levelOf(int i) const { return v_[i].level * (0.45f + 0.55f * vel_ / 0.85f); }
     int curDeg_ = -1;
     uint32_t rng_ = 98765;
 };

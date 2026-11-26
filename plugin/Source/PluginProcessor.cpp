@@ -16,9 +16,13 @@ std::vector<int> BricklabStudioProcessor::soundsOf(int group) {
     return v;
 }
 
-std::vector<int> BricklabStudioProcessor::glideSounds() {     // ambient.amb_bank: drones and pads first
+std::vector<int> BricklabStudioProcessor::glideSounds() {     // the sounds that hold up over long glides: drones, then pads
     auto v = soundsOf(2);
-    for (int i : soundsOf(0)) v.push_back(i);
+    for (int i : soundsOf(0)) {
+        const juce::String n = kPatches[i].name;
+        if (n == "Juno Pad" || n == "PWM Strings" || n == "Choir Pad" || n == "Vox Pad" || n == "Air Pad" || n == "Lofi Strings")
+            v.push_back(i);
+    }
     return v;
 }
 
@@ -31,7 +35,7 @@ static juce::StringArray namesOf(int group) {
 static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout l;
-    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"page", 1}, "Page", StringArray{"Chord", "Lead", "Drone", "Glide"}, 0));
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"page", 1}, "Page", StringArray{"Chord", "Lead", "Drone", "Glide"}, 3));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"sound", 1}, "Sound", BricklabStudioProcessor::soundNames(), 0));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"leadsound", 1}, "Lead sound", namesOf(1), 0));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dronesound", 1}, "Drone sound", namesOf(2), 0));
@@ -48,8 +52,8 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         for (auto* c : kGlidePaths) pa.add(c);
         for (auto* c : kGlideTimings) ti.add(c);
         for (auto* c : kGlideMoves) mo.add(c);
-        for (float t : kGlideTimes) tm.add("Glide " + String(t) + " s");
-        for (float t : kGlideFades) fa.add("Fade " + String(t) + " s");
+        for (auto& t : timeNames(kGlideTimes, kNumGlideTimes, "Glide")) tm.add(t);
+        for (auto& t : timeNames(kGlideFades, kNumGlideFades, "Fade")) fa.add(t);
         for (int b : kGlideBends) be.add("Bend " + String(b) + " st");
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidesound", 1}, "Glide sound", gs, 0));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidechord", 1}, "Glide chord", ch, 0));
@@ -60,11 +64,12 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidefade", 1}, "Glide fade", fa, 2));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidebend", 1}, "Glide bend range", be, 4));
         l.add(std::make_unique<AudioParameterBool>(ParameterID{"glidesub", 1}, "Glide sub", true));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"glidetone", 1}, "Glide tone", 0.f, 1.f, 1.f));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"glidempe", 1}, "Glide MIDI out", StringArray{"MPE", "Notes"}, 0));
     }
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"key", 1}, "Key",
         StringArray{"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"}, 9));
-    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"scale", 1}, "Scale", StringArray{"Major", "Minor", "Dorian", "Mixolydian"}, 1));
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"scale", 1}, "Scale", [] { StringArray s; for (auto* n : kScaleNames) s.add(n); return s; }(), 1));
     StringArray modes, basses;
     for (auto* m : kPlayModes) modes.add(m);
     for (auto* b : kBassModes) basses.add(b);
@@ -72,6 +77,10 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"bassmode", 1}, "Bass", basses, 0));
     l.add(std::make_unique<AudioParameterInt>(ParameterID{"arpoct", 1}, "Arp octaves", 1, 4, 1));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"latch", 1}, "Latch", false));
+    l.add(std::make_unique<AudioParameterBool>(ParameterID{"mod7", 1}, "7th", false));
+    l.add(std::make_unique<AudioParameterBool>(ParameterID{"modsus", 1}, "sus4", false));
+    l.add(std::make_unique<AudioParameterBool>(ParameterID{"mod9", 1}, "9th", false));
+    l.add(std::make_unique<AudioParameterBool>(ParameterID{"modflip", 1}, "flip", false));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"basslevel", 1}, "Bass level", 0.f, 1.f, 0.4f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"space", 1}, "Space", 0.f, 1.f, 0.3f));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"volume", 1}, "Volume", 0.f, 1.f, 0.8f));
@@ -139,8 +148,17 @@ void BricklabStudioProcessor::applySoundAndKey() {
     cache.want(w);
 }
 
+Mods BricklabStudioProcessor::heldMods() const {           // 7th, sus4, 9th, flip: saved with the project, automatable
+    Mods m;
+    m.seventh = params.getRawParameterValue("mod7")->load() > 0.5f;
+    m.sus = params.getRawParameterValue("modsus")->load() > 0.5f;
+    m.ninth = params.getRawParameterValue("mod9")->load() > 0.5f;
+    m.flip = params.getRawParameterValue("modflip")->load() > 0.5f;
+    return m;
+}
+
 void BricklabStudioProcessor::padDown(int degree, int pos) {
-    auto c = player.playDegree(degree, mods);
+    auto c = player.playDegree(degree, heldMods());
     queueOut(true, pos);
     const juce::SpinLock::ScopedLockType l(nameLock);
     lastName = c.name;
@@ -153,7 +171,7 @@ void BricklabStudioProcessor::padUp(int pos) {
 }
 
 void BricklabStudioProcessor::queueOut(bool on, int pos) {
-    ChordEvent e{pos, on ? player.lastNotes() : std::vector<int>{}};
+    ChordEvent e{pos, on ? player.lastNotes() : std::vector<int>{}, pos > 0 || !held.empty() ? keyVel : 0.85f};
     if (on && e.notes.size() < 2) return;
     const juce::SpinLock::ScopedLockType l(outLock);
     outQueue.push_back(std::move(e));
@@ -208,7 +226,7 @@ void BricklabStudioProcessor::runChord(juce::AudioBuffer<float>& buffer, juce::M
         for (const auto meta : midi) {
             const auto m = meta.getMessage();
             advance(std::min(n, meta.samplePosition));
-            if (m.isNoteOn()) held.insert(m.getNoteNumber());
+            if (m.isNoteOn()) { held.insert(m.getNoteNumber()); keyVel = m.getFloatVelocity(); }
             else if (m.isNoteOff()) held.erase(m.getNoteNumber());
             else if (m.isAllNotesOff() || m.isAllSoundOff()) held.clear();
             else continue;
@@ -255,7 +273,7 @@ void BricklabStudioProcessor::runChord(juce::AudioBuffer<float>& buffer, juce::M
     for (auto& c : chords) {
         const int64_t t = clock + juce::jlimit(0, std::max(0, n - 1), c.pos);
         for (; si < steps.size() && steps[si].first < t; ++si) patterns.step(steps[si].second, steps[si].first);
-        if (c.notes.empty()) patterns.clear(t); else patterns.chord(c.notes, t);
+        if (c.notes.empty()) patterns.clear(t); else patterns.chord(c.notes, t, c.vel);
     }
     for (; si < steps.size(); ++si) patterns.step(steps[si].second, steps[si].first);
     events.clear();
@@ -269,12 +287,14 @@ void BricklabStudioProcessor::runChord(juce::AudioBuffer<float>& buffer, juce::M
         const int p = (int) juce::jlimit<int64_t>(0, n - 1, e.at - clock);
         if (audio && p > at) { player.render(L + at, R + at, p - at); at = p; }
         if (e.on) {
+            capture(true, e.note, juce::jlimit(1, 127, (int) std::lround(e.gain * 120)), p);
             if (internal) player.noteOn(e.ch, e.note, e.gain, e.pan);
             if (out) {
                 midi.addEvent(juce::MidiMessage::noteOn(e.ch, e.note, (juce::uint8) juce::jlimit(1, 127, (int) std::lround(e.gain * 120))), p);
                 sounding.insert({e.ch, e.note});
             }
         } else {
+            capture(false, e.note, 0, p);
             player.noteOff(e.ch, e.note, e.rel);
             if (sounding.erase({e.ch, e.note})) midi.addEvent(juce::MidiMessage::noteOff(e.ch, e.note), p);
         }
@@ -331,7 +351,8 @@ void BricklabStudioProcessor::leadRelease(int id, int pos, juce::MidiBuffer& mid
     if (leadOut >= 0) { midi.addEvent(juce::MidiMessage::noteOff(1, leadOut), pos); leadOut = -1; }
 }
 
-void BricklabStudioProcessor::droneToggle(int pc, int deg, int pos, juce::MidiBuffer& midi, bool internal, bool out) {   // modes.drone_toggle
+void BricklabStudioProcessor::droneToggle(int pc, int deg, int pos, juce::MidiBuffer& midi, bool internal, bool out) {
+    struct CapLater { BricklabStudioProcessor* p; int pos; ~CapLater() { p->captureSet(p->capDrone, p->dronePc < 0 ? std::vector<int>{} : p->droneNotesNow, 90, pos); } } capLater{this, pos};   // modes.drone_toggle
     for (int m : droneOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), pos);
     droneOut.clear();
     if (pc == dronePc) {                                     // the same one again: off
@@ -349,6 +370,7 @@ void BricklabStudioProcessor::droneToggle(int pc, int deg, int pos, juce::MidiBu
     }
     static const float slides[] = {0.f, 0.5f, 1.f, 2.f, 4.f};
     const float slide = slides[juce::jlimit(0, 4, (int) params.getRawParameterValue("droneslide")->load())];
+    droneNotesNow = notes;
     if (internal) player.drone(notes, slide);
     if (out) {
         for (int m : notes) midi.addEvent(juce::MidiMessage::noteOn(1, m, (juce::uint8) 90), pos);
@@ -456,9 +478,13 @@ void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool all
         want.erase(std::unique(want.begin(), want.end()), want.end());
         if (want != glideNotesOut) {
             for (int m : glideNotesOut) midi.addEvent(juce::MidiMessage::noteOff(1, m), pos);
-            for (int m : want) midi.addEvent(juce::MidiMessage::noteOn(1, m, (juce::uint8) 96), pos);
+            for (int m : want) midi.addEvent(juce::MidiMessage::noteOn(1, m, (juce::uint8) juce::jlimit(1, 127, (int) (glide.velocity() * 127))), pos);
             glideNotesOut = want;
         }
+        float lv = 0;                                        // the fades and swells, as expression (CC 11)
+        for (int i = 0; i < kGlideVoices; ++i) lv = std::max(lv, glide.pressure[(size_t) i].load());
+        const int ex = juce::jlimit(0, 127, (int) std::lround(lv * 127));
+        if (!glideNotesOut.empty() && std::abs(ex - mpeExpr) >= 2) { midi.addEvent(juce::MidiMessage::controllerEvent(1, 11, ex), pos); mpeExpr = ex; }
         return;
     }
     if (!mpeReady) {                                         // MPE: the zone (ch 2..7) and a 48-semitone bend range
@@ -485,15 +511,20 @@ void BricklabStudioProcessor::glideOut(juce::MidiBuffer& midi, int pos, bool all
         if (note > 0 && std::abs(c - (note - 1) * 100.0) > 4700) { midi.addEvent(juce::MidiMessage::noteOff(ch, note - 1), pos); note = 0; }
         const int bendFor = note > 0 ? note - 1 : juce::jlimit(0, 127, (int) std::lround(c / 100.0));
         const int pb = juce::jlimit(0, 16383, 8192 + (int) std::lround((c - bendFor * 100.0) / 4800.0 * 8191.0));
+        const int pr = juce::jlimit(0, 127, (int) std::lround(glide.pressure[(size_t) i] * 127));   // the voice's level: pressure
+        const int tb = juce::jlimit(0, 127, 64 + (int) std::lround(glide.swell() * 63));             // the swell: timbre (CC 74)
         if (note == 0) {
             midi.addEvent(juce::MidiMessage::pitchWheel(ch, pb), pos);
-            midi.addEvent(juce::MidiMessage::noteOn(ch, bendFor, (juce::uint8) 96), pos);
+            midi.addEvent(juce::MidiMessage::channelPressureChange(ch, pr), pos);
+            midi.addEvent(juce::MidiMessage::controllerEvent(ch, 74, tb), pos);
+            midi.addEvent(juce::MidiMessage::noteOn(ch, bendFor, (juce::uint8) juce::jlimit(1, 127, (int) (glide.velocity() * 127))), pos);
             note = bendFor + 1;
-            mpeBend[(size_t) i] = pb;
-        } else if (std::abs(pb - mpeBend[(size_t) i]) >= 2) {
-            midi.addEvent(juce::MidiMessage::pitchWheel(ch, pb), pos);
-            mpeBend[(size_t) i] = pb;
+            mpeBend[(size_t) i] = pb; mpePress[(size_t) i] = pr; mpeTimbre[(size_t) i] = tb;
+            continue;
         }
+        if (std::abs(pb - mpeBend[(size_t) i]) >= 2) { midi.addEvent(juce::MidiMessage::pitchWheel(ch, pb), pos); mpeBend[(size_t) i] = pb; }
+        if (std::abs(pr - mpePress[(size_t) i]) >= 2) { midi.addEvent(juce::MidiMessage::channelPressureChange(ch, pr), pos); mpePress[(size_t) i] = pr; }
+        if (tb != mpeTimbre[(size_t) i]) { midi.addEvent(juce::MidiMessage::controllerEvent(ch, 74, tb), pos); mpeTimbre[(size_t) i] = tb; }
     }
 }
 
@@ -503,9 +534,14 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
     st.path = (int) params.getRawParameterValue("glidepath")->load();
     st.timing = (int) params.getRawParameterValue("glidetiming")->load();
     st.move = (int) params.getRawParameterValue("glidemove")->load();
-    st.time = kGlideTimes[juce::jlimit(0, kNumGlideTimes - 1, (int) params.getRawParameterValue("glidetime")->load())];
-    st.fade = kGlideFades[juce::jlimit(0, kNumGlideFades - 1, (int) params.getRawParameterValue("glidefade")->load())];
+    double bpm = 120;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto b = pos->getBpm()) bpm = *b;
+    st.time = timeSeconds(kGlideTimes, kNumGlideTimes, (int) params.getRawParameterValue("glidetime")->load(), bpm);
+    st.fade = timeSeconds(kGlideFades, kNumGlideFades, (int) params.getRawParameterValue("glidefade")->load(), bpm);
     st.sub = params.getRawParameterValue("glidesub")->load() > 0.5f;
+    st.tone = params.getRawParameterValue("glidetone")->load();
     glide.set(st);
     glide.setKey(player.key(), player.scale());
     const int range = kGlideBends[juce::jlimit(0, kNumGlideBends - 1, (int) params.getRawParameterValue("glidebend")->load())];
@@ -533,7 +569,7 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
             const auto m = meta.getMessage();
             const int p = juce::jlimit(0, std::max(0, n - 1), meta.samplePosition);
             advance(p);
-            if (m.isNoteOn()) { held.insert(m.getNoteNumber()); pending = (int) (0.035 * sr); }
+            if (m.isNoteOn()) { held.insert(m.getNoteNumber()); keyVel = m.getFloatVelocity(); pending = (int) (0.035 * sr); }
             else if (m.isNoteOff()) held.erase(m.getNoteNumber());       // let go: the chord holds
             else if (m.isPitchWheel()) acts.push_back({p, 4, m.getPitchWheelValue()});
             else if (m.isController() && m.getControllerNumber() == 1) acts.push_back({p, 5, m.getControllerValue()});
@@ -560,22 +596,132 @@ void BricklabStudioProcessor::runGlide(juce::AudioBuffer<float>& buffer, juce::M
     int at = 0;
     for (auto& e : acts) {
         if (e.pos > at) { glide.render(l + at, r + at, e.pos - at); if (out) glideOut(midi, at, false); at = e.pos; }
+        auto captureGlide = [&](int pos) {
+            std::vector<int> want;
+            for (int i = 0; i < kGlideVoices; ++i)
+                if (glide.on[(size_t) i]) want.push_back((int) std::lround(glide.target[(size_t) i] / 100.0f));
+            captureSet(capGlide, want, juce::jlimit(1, 127, (int) (glide.velocity() * 127)), pos);
+        };
         const float gx = 1.0f + 3.0f * glideSwell;              // the mod wheel stretches the glides up to 4x
         if (e.type == 0) {
+            glide.setVelocity(keyVel);
             std::vector<int> keys(held.begin(), held.end());
             if (keys.size() >= 2) setName(glide.follow(keys, gx), "Keys");
             else if (keys.size() == 1) setName(glide.playDegree(degreeOf(keys[0], player.key(), player.scale()), Mods{}, gx, false), "Glide");
         } else if (e.type == 2) {
+            glide.setVelocity(0.85f);
             auto name = glide.playDegree(e.a, Mods{}, gx, true);
             setName(name, name.empty() ? "" : "Glide");
         } else if (e.type == 4) glide.setBend((float) (e.a - 8192) / 8192.0f * (float) range);
         else if (e.type == 5) { glideSwell = (float) e.a / 127.0f; glide.setSwell(glideSwell); }
         else if (e.type == 6) { glide.stop(); setName({}, {}); if (out) glideOut(midi, e.pos, true); }
         else if (e.type == 7) glide.bloom();
+        captureGlide(e.pos);
     }
     if (at < n) glide.render(l + at, r + at, n - at);
     if (out) glideOut(midi, std::max(0, n - 1), false);
     if (!sound && audio) buffer.clear();
+}
+
+// ---------------------------------------------------------------- what was played, as a MIDI clip
+void BricklabStudioProcessor::capture(bool on, int note, int vel, int pos) {
+    const juce::SpinLock::ScopedLockType l(capLock);
+    if (on) {
+        if (capOpen.count(note)) cap.push_back({clock + pos, false, note, 0});   // the same note again: retrigger
+        capOpen.insert(note);
+    } else if (!capOpen.erase(note))
+        return;
+    cap.push_back({clock + pos, on, note, vel});
+    const int64_t keep = (int64_t) (600 * sr);              // ten minutes is plenty
+    if (cap.size() > 4096 && clock - cap.front().t > keep) cap.erase(cap.begin(), cap.begin() + 1024);
+    captured = (int) cap.size();
+}
+
+void BricklabStudioProcessor::captureSet(std::vector<int>& was, std::vector<int> now, int vel, int pos) {
+    std::sort(now.begin(), now.end());
+    now.erase(std::unique(now.begin(), now.end()), now.end());
+    if (now == was) return;
+    for (int m : was) if (!std::binary_search(now.begin(), now.end(), m)) capture(false, m, 0, pos);
+    for (int m : now) if (!std::binary_search(was.begin(), was.end(), m)) capture(true, m, vel, pos);
+    was = now;
+}
+
+juce::File BricklabStudioProcessor::writePhrase() {
+    std::vector<Cap> ev;
+    std::set<int> open;
+    int64_t now;
+    {
+        const juce::SpinLock::ScopedLockType l(capLock);
+        ev = cap;
+        open = capOpen;
+        now = clock;
+    }
+    if (ev.empty()) return {};
+    const double bpm = lastBpm > 20 ? lastBpm : 120, spb = 60.0 / bpm * sr;   // samples per beat
+    int64_t start = std::max<int64_t>(ev.front().t, now - (int64_t) (32 * spb));   // the last 8 bars
+    std::set<int> held;                                      // notes already sounding at the start
+    for (auto& e : ev) { if (e.t >= start) break; if (e.on) held.insert(e.note); else held.erase(e.note); }
+    if (held.empty())                                        // nothing held: start at the first note
+        for (auto& e : ev) if (e.t >= start && e.on) { start = e.t; break; }
+    start = (int64_t) (std::floor((double) start / spb) * spb);   // on a beat
+    auto ticks = [&](int64_t t) { return (double) (t - start) / spb * 960.0; };
+    juce::MidiMessageSequence seq;
+    seq.addEvent(juce::MidiMessage::tempoMetaEvent((int) (60000000.0 / bpm)), 0);
+    for (int m : held) seq.addEvent(juce::MidiMessage::noteOn(1, m, (juce::uint8) 90), 0);
+    std::set<int> on(held);
+    for (auto& e : ev) {
+        if (e.t < start) continue;
+        if (e.on) { seq.addEvent(juce::MidiMessage::noteOn(1, e.note, (juce::uint8) juce::jlimit(1, 127, e.vel)), ticks(e.t)); on.insert(e.note); }
+        else if (on.erase(e.note)) seq.addEvent(juce::MidiMessage::noteOff(1, e.note), ticks(e.t));
+    }
+    const double end = std::max(ticks(now), seq.getEndTime() + 240);
+    for (int m : on) seq.addEvent(juce::MidiMessage::noteOff(1, m), end);   // still sounding: they end where you are
+    seq.updateMatchedPairs();
+    juce::MidiFile mf;
+    mf.setTicksPerQuarterNote(960);
+    mf.addTrack(seq);
+    auto f = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("Bricklab Studio phrase.mid");
+    f.deleteFile();
+    juce::FileOutputStream os(f);
+    if (!os.openedOk() || !mf.writeTo(os)) return {};
+    os.flush();
+    return f;
+}
+
+// ---------------------------------------------------------------- factory presets
+namespace {
+struct Preset { const char* name; std::vector<std::pair<const char*, float>> set; };
+const std::vector<Preset>& presets() {
+    static const std::vector<Preset> p = {
+        {"Glide: Slow Bloom", {{"page", 3}, {"glidesound", 0}, {"glidechord", 1}, {"glidetime", 6}, {"glidepath", 2}, {"glidemove", 1}, {"glidefade", 3}, {"glidetone", 0.8f}}},
+        {"Glide: Choir Cascade", {{"page", 3}, {"glidesound", 1}, {"glidechord", 2}, {"glidetime", 5}, {"glidemove", 2}, {"glidetiming", 2}}},
+        {"Glide: Spiral Pads", {{"page", 3}, {"glidesound", 8}, {"glidechord", 9}, {"glidetime", 15}, {"glidemove", 4}}},
+        {"Glide: Bounce Strings", {{"page", 3}, {"glidesound", 9}, {"glidepath", 4}, {"glidetime", 3}}},
+        {"Glide: Scale Steps", {{"page", 3}, {"glidesound", 5}, {"glidechord", 6}, {"glidepath", 9}, {"glidetime", 16}}},
+        {"Glide: Dark Swoop", {{"page", 3}, {"glidesound", 4}, {"glidechord", 8}, {"glidemove", 5}, {"glidetime", 6}, {"glidetone", 0.55f}}},
+        {"Chord: Juno Pad", {{"page", 0}, {"sound", 0}}},
+        {"Chord: Folk Strum", {{"page", 0}, {"sound", 18}, {"mode", 2}, {"bassmode", 3}}},
+        {"Chord: Glass Arp", {{"page", 0}, {"sound", 9}, {"mode", 6}, {"arpoct", 2}, {"latch", 1}, {"bassmode", 6}}},
+        {"Chord: EP Sevenths", {{"page", 0}, {"sound", 8}, {"mod7", 1}}},
+        {"Drone: Deep Space Pulse", {{"page", 2}, {"dronesound", 0}, {"droney", -0.75f}, {"droneslide", 2}}},
+        {"Drone: Cathedral Bloom", {{"page", 2}, {"dronesound", 3}, {"dronex", 0.75f}, {"dronethird", 1}}},
+    };
+    return p;
+}
+}
+
+int BricklabStudioProcessor::getNumPrograms() { return (int) presets().size(); }
+const juce::String BricklabStudioProcessor::getProgramName(int i) { return i >= 0 && i < getNumPrograms() ? presets()[(size_t) i].name : ""; }
+
+void BricklabStudioProcessor::setCurrentProgram(int i) {
+    if (i < 0 || i >= getNumPrograms()) return;
+    currentProgram = i;
+    static const std::set<juce::String> keep = {"key", "scale", "octave", "volume", "glidempe", "page"};
+    for (auto* p : getParameters())                          // everything to its default, but your key, scale and level
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*>(p))
+            if (!keep.count(rp->getParameterID())) rp->setValueNotifyingHost(rp->getDefaultValue());
+    for (auto& [id, v] : presets()[(size_t) i].set)
+        if (auto* rp = params.getParameter(id)) rp->setValueNotifyingHost(rp->convertTo0to1(v));
 }
 
 void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
@@ -587,9 +733,14 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
     const bool internal = audio && !kMidiFx;
     const bool out = kMidiFx;
     const int pg = page();
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto b = pos->getBpm()) lastBpm = *b;
     juce::MidiBuffer flush;
     if (pg != lastPage) {                                    // a new page: the old one lets go
         if (lastPage >= 0) {
+            for (int m : std::vector<int>(capOpen.begin(), capOpen.end())) capture(false, m, 0, 0);
+            capGlide.clear(); capDrone.clear();
             sendOff(flush, 0);
             for (auto [ch, note] : sounding) flush.addEvent(juce::MidiMessage::noteOff(ch, note), 0);
             sounding.clear();

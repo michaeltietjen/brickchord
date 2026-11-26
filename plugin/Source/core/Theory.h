@@ -11,14 +11,17 @@ namespace brick {
 
 struct Mods { bool flip = false, seventh = false, sus = false, ninth = false, sus2 = false, dim = false, aug = false, maj7 = false; };
 
-enum class Scale { Major, Minor, Dorian, Mixolydian };
-inline const char* scaleName(Scale s) {
-    static const char* n[] = {"Major", "Minor", "Dorian", "Mixolydian"};
-    return n[(int) s];
-}
+enum class Scale { Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, HarmonicMinor, MelodicMinor };
+constexpr int kNumScales = 9;
+inline const char* const kScaleNames[] = {"Major", "Minor", "Dorian", "Mixolydian", "Lydian", "Phrygian", "Locrian",
+                                          "Harmonic minor", "Melodic minor"};
+inline const char* scaleName(Scale s) { return kScaleNames[(int) s]; }
 inline const std::array<int, 7>& scaleSteps(Scale s) {
     static const std::array<int, 7> t[] = {{0, 2, 4, 5, 7, 9, 11}, {0, 2, 3, 5, 7, 8, 10},
-                                           {0, 2, 3, 5, 7, 9, 10}, {0, 2, 4, 5, 7, 9, 10}};
+                                           {0, 2, 3, 5, 7, 9, 10}, {0, 2, 4, 5, 7, 9, 10},
+                                           {0, 2, 4, 6, 7, 9, 11}, {0, 1, 3, 5, 7, 8, 10},
+                                           {0, 1, 3, 5, 6, 8, 10}, {0, 2, 3, 5, 7, 8, 11},
+                                           {0, 2, 3, 5, 7, 9, 11}};
     return t[(int) s];
 }
 
@@ -27,7 +30,7 @@ inline std::string noteName(int pc, int key = -1, Scale scale = Scale::Major) {
     static const char* flat[] = {"C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"};
     pc = ((pc % 12) + 12) % 12;
     if (key >= 0) {
-        static const int parentOf[] = {0, 3, 10, 5};                 // Major, Minor, Dorian, Mixolydian
+        static const int parentOf[] = {0, 3, 10, 5, 7, 8, 1, 3, 3};   // the major key each scale's spelling follows
         int parent = (key + parentOf[(int) scale]) % 12;
         if (parent == 5 || parent == 10 || parent == 3 || parent == 8 || parent == 1 || parent == 6) return flat[pc];
     }

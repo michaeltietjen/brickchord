@@ -50,18 +50,29 @@ That choice is made before the first release.
 
 Each instance plays one page, saved with your project. Layer them on separate tracks.
 
-- **Chord**: the chord pads, play modes, bass modes, latch, octave (-2 to +2).
-- **Lead**: one note at a time with glide. Pads are the notes of the scale; a keyboard plays
-  as is. Mod wheel adds vibrato, pitch bend bends 2 semitones.
+- **Glide** (the default): five voices and a sub hold a chord and glide into the next one, each
+  on its own path. Pads play the scale's chords (the same one again lets go); a keyboard plays
+  one note as that degree's chord, or any chord you hold, and how hard you play sets its level.
+  Let go and the chord holds. Glide and fade times in seconds or bars of your tempo; path (Smooth,
+  Ease, Bounce, Scale steps...); moves (Bloom, Cascade, Spiral, Swoop...); chord type; sub; Tone, a
+  low-pass the mod wheel opens. Pitch bend bends the whole chord; the mod wheel stretches the glides
+  (up to 4x) and swells them. "more" holds the timing, bend range and MIDI out settings. The screen
+  draws each voice's path and where it's headed. After a wide glide a voice changes to a sound
+  rendered nearer its note, crossfading, so it doesn't end stretched.
+- **Chord**: the chord pads; 7th, sus4, 9th, flip (saved and automatable); eight play modes;
+  bass modes; latch; octave. Key velocity sets the level.
 - **Drone**: tap a pad or key to drone on it (root, fifth, octaves; 3rd adds the third), the
   same again to stop. Slide glides to the next drone. Pulse | Swell and Thin | Bloom shape it;
   the mod wheel pulses it and pitch bend thins or blooms it.
-- **Glide**: Brickglide's five voices and a sub hold a chord and glide into the next one, each
-  on its own path. Pads play chords on the scale's degrees (the same one again lets go); a
-  keyboard plays one note as that degree's chord, or any chord you hold. Let go and the chord
-  holds. Chord type, glide time, path (Smooth, Ease, Bounce, Scale steps...), timing (bass lags,
-  by distance...), moves (Bloom, Cascade, Spiral, Swoop...), fade and sub as on the Brick; bloom
-  fans the chord out of one note. Pitch bend bends the whole chord (Bend sets the range), the mod
-  wheel stretches the glides up to 4x and swells them. The screen draws the voices' paths.
-  The MIDI build sends Glide as MPE (each voice its own channel, its glide as pitch bend, a
-  48-semitone range) for MPE synths like Pigments or Vital, or as plain notes for the rest.
+
+Nine scales: Major, Minor, Dorian, Mixolydian, Lydian, Phrygian, Locrian, Harmonic and Melodic minor.
+Twelve presets (Presets menu, or your DAW's preset list) keep your key and scale. **drag MIDI**
+drags the last eight bars you played into your DAW as a clip. The window resizes.
+
+## MIDI out (Bricklab Studio MIDI)
+
+Glide goes out as MPE: each voice on its own channel (2 to 7) with a 48-semitone bend range, its
+glide as pitch bend, its fades and swells as pressure, the mod wheel's swell as timbre (CC 74).
+Turn MPE on in your synth (Pigments: Settings, MPE). Or set Out to notes for any synth: the chords
+as plain notes, the fades as expression (CC 11). Chord sends chords on channel 1 and the bass on
+channel 2; Drone sends its pulse as expression.

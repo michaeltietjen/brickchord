@@ -87,6 +87,8 @@ void GlideEngine::push(int i, double tgt, double glide, int shape, double delay,
         v.sampleMidi = m;
         v.note = cache_.get(m, v.r0);
         v.pos = 0;
+        v.old.reset();
+        if (v.lvl <= 0.001f) { v.z1[0] = v.z1[1] = v.z2[0] = v.z2[1] = 0; }
     }
 }
 
@@ -134,14 +136,14 @@ void GlideEngine::subFollow(const std::vector<int>& notes, double secs, bool jum
     }
     const int bass = *std::min_element(notes.begin(), notes.end());
     const bool was = s.on;
-    s.on = true; s.lvlT = s.level;
+    s.on = true; s.lvlT = levelOf(5);
     push(5, (bass - 12) * 100.0, secs, 2, 0, {}, jump || !was);
 }
 
 void GlideEngine::layOut(const std::vector<int>& notes) {   // from silence: the voices lay the chord out and fade in
     for (int i = 0; i < kNCH; ++i) {
         V& v = v_[i];
-        v.on = true; v.lvlT = v.level;
+        v.on = true; v.lvlT = levelOf(i);
         push(i, notes[(size_t) i] * 100.0, 0, 0, 0, {}, true);
     }
     subFollow(notes, 0.5, true);
@@ -194,7 +196,7 @@ void GlideEngine::glideAll(const std::vector<int>& notes, float glideX) {   // a
         }
         auto via = vias[(size_t) i];
         if (via.empty() && path == 9) via = scaleVia(from, to);
-        v_[i].on = true; v_[i].lvlT = v_[i].level;
+        v_[i].on = true; v_[i].lvlT = levelOf(i);
         push(i, to, g, shape, delays[(size_t) i], via, false);
     }
     subFollow(notes, secs, false);
@@ -298,36 +300,87 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
             const double vib = v.vib * (1 + 3 * sw);
             const double cents0 = c0 + v.dr + vib * std::sin(ph0) + bend;
             const double cents1 = v.cur + v.dr + vib * std::sin(v.ph) + bend;
-            const double base = v.sampleMidi * 100.0;
-            const double k = v.r0 * kSR / sr;
-            const double r0 = k * std::pow(2.0, (cents0 - base) / 1200.0), r1 = k * std::pow(2.0, (cents1 - base) / 1200.0);
             const float l0 = v.lvl;
             const float step = (float) (dt / std::max(0.05f, st_.fade));
             v.lvl = v.lvlT > v.lvl ? std::min(v.lvlT, v.lvl + step) : std::max(v.lvlT, v.lvl - step);
             const float g0 = l0 * 1.3f * (1 + 0.6f * sw), g1 = v.lvl * 1.3f * (1 + 0.6f * sw);
             const float lg = std::min(1.0f, 1.0f - kPans[i]), rg = std::min(1.0f, 1.0f + kPans[i]);
             if (!v.note) continue;                               // the voice still moves; it just makes no sound
-            const Note& nt = *v.note;
-            const int na = nt.attackFrames(), nl = nt.loopFrames();
-            for (int s = 0; s < N; ++s) {
-                const double f = (double) s / N;
-                int kk = (int) v.pos;
-                if (kk >= na && nl == 0) break;                     // a struck sound that has finished
+            // settled far from where its sound was rendered: change to a nearer one, crossfading inside the loop,
+            // so a wide glide doesn't end on a stretched (formant-shifted) sound
+            if (v.path.empty() && !v.old && std::abs(v.cur / 100.0 - v.sampleMidi) > 4.5) {
+                double rr = 1;
+                const int m = (int) std::lround(v.cur / 100.0);
+                if (auto nn = cache_.get(m, rr); nn && nn->loopFrames() > 0 && v.note->loopFrames() > 0) {
+                    v.old = v.note; v.oldMidi = v.sampleMidi; v.oldR0 = v.r0; v.oldPos = v.pos;
+                    v.note = nn; v.sampleMidi = m; v.r0 = rr; v.pos = nn->attackFrames();
+                    v.xfLen = std::max(1, (int) (0.25 * sr)); v.xf = v.xfLen;
+                }
+            }
+            // the tone: a low-pass (TPT state variable), opened further by the mod wheel's swell
+            const bool filt = st_.tone < 0.995f || sw > 0.001f;
+            float a1 = 0, a2 = 0, a3 = 0, kq = 1.2f;
+            if (filt) {
+                const double fc = std::min(sr * 0.45, 180.0 * std::pow(2.0, st_.tone * 7.0 + sw * 2.0));
+                const double gg = std::tan(3.14159265358979 * fc / sr);
+                a1 = (float) (1.0 / (1.0 + gg * (gg + kq))); a2 = (float) gg * a1; a3 = (float) gg * a2;
+            }
+            const double kOld = v.old ? v.oldR0 * kSR / sr : 0;
+            const double or0 = v.old ? kOld * std::pow(2.0, (cents0 - v.oldMidi * 100.0) / 1200.0) : 0;
+            const double or1 = v.old ? kOld * std::pow(2.0, (cents1 - v.oldMidi * 100.0) / 1200.0) : 0;
+            const double nr0 = v.r0 * kSR / sr * std::pow(2.0, (cents0 - v.sampleMidi * 100.0) / 1200.0);
+            const double nr1 = v.r0 * kSR / sr * std::pow(2.0, (cents1 - v.sampleMidi * 100.0) / 1200.0);
+            auto readAt = [](const Note& nt, double pos, float& l, float& r) {
+                const int na = nt.attackFrames(), nl = nt.loopFrames();
+                const int kk = (int) pos;
+                if (kk >= na && nl == 0) { l = r = 0; return false; }
                 auto get = [&](int idx, float& a, float& c) {
                     if (idx < na) { a = nt.attack[(size_t) idx * 2]; c = nt.attack[(size_t) idx * 2 + 1]; }
                     else if (nl) { idx = (idx - na) % nl; a = nt.loop[(size_t) idx * 2]; c = nt.loop[(size_t) idx * 2 + 1]; }
                     else a = c = 0;
                 };
-                float a0, c0_, a1, c1;
-                get(kk, a0, c0_);
-                get(kk + 1, a1, c1);
-                const float fr = (float) (v.pos - kk);
+                float a0, c0, a1_, c1;
+                get(kk, a0, c0);
+                get(kk + 1, a1_, c1);
+                const float fr = (float) (pos - kk);
+                l = a0 + (a1_ - a0) * fr; r = c0 + (c1 - c0) * fr;
+                return true;
+            };
+            for (int s = 0; s < N; ++s) {
+                const double f = (double) s / N;
+                float sl, sr2;
+                if (!readAt(*v.note, v.pos, sl, sr2) && !v.old) break;   // a struck sound that has finished
+                if (v.old) {                                     // equal-power crossfade from the old sound
+                    float ol, orr;
+                    readAt(*v.old, v.oldPos, ol, orr);
+                    const float x = (float) v.xf / (float) v.xfLen;   // 1 -> 0
+                    const float go = std::sin(x * 1.5707963f), gn = std::cos(x * 1.5707963f);
+                    sl = sl * gn + ol * go; sr2 = sr2 * gn + orr * go;
+                    v.oldPos += or0 + (or1 - or0) * f;
+                    if (--v.xf <= 0) v.old.reset();
+                }
+                if (filt) {
+                    float* io[2] = {&sl, &sr2};
+                    for (int c = 0; c < 2; ++c) {
+                        const float v3 = *io[c] - v.z2[c];
+                        const float v1 = a1 * v.z1[c] + a2 * v3, v2 = v.z2[c] + a2 * v.z1[c] + a3 * v3;
+                        v.z1[c] = 2 * v1 - v.z1[c]; v.z2[c] = 2 * v2 - v.z2[c];
+                        *io[c] = v2;
+                    }
+                }
                 const float g = g0 + (g1 - g0) * (float) f;
-                L[b0 + s] += (a0 + (a1 - a0) * fr) * g * lg;
-                R[b0 + s] += (c0_ + (c1 - c0_) * fr) * g * rg;
-                v.pos += r0 + (r1 - r0) * f;
+                L[b0 + s] += sl * g * lg;
+                R[b0 + s] += sr2 * g * rg;
+                v.pos += nr0 + (nr1 - nr0) * f;
             }
-            if (nl > 0 && v.pos > na + nl) v.pos = na + std::fmod(v.pos - na, (double) nl);
+            {
+                const int na = v.note->attackFrames(), nl = v.note->loopFrames();
+                if (nl > 0 && v.pos > na + nl) v.pos = na + std::fmod(v.pos - na, (double) nl);
+            }
+            if (v.old) {
+                const int na = v.old->attackFrames(), nl = v.old->loopFrames();
+                if (nl > 0 && v.oldPos > na + nl) v.oldPos = na + std::fmod(v.oldPos - na, (double) nl);
+            }
         }
         t_ += N;
     }
@@ -336,6 +389,7 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
         level[(size_t) i] = v_[i].lvl;
         on[(size_t) i] = v_[i].on;
         target[(size_t) i] = (float) v_[i].tgt;
+        pressure[(size_t) i] = std::clamp(v_[i].lvl / std::max(0.01f, v_[i].level) * (1 + 0.6f * swell_) / 1.6f, 0.0f, 1.0f);
     }
 }
 

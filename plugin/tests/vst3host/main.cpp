@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     juce::MidiBuffer pend;
     auto run = [&](double secs, const char* label) {
         juce::String s;
-        double sum = 0; long n = 0; int bends = 0;
+        double sum = 0; long n = 0; int bends = 0, press = 0;
         for (int b = 0; b < (int) (secs * 44100 / 512); ++b) {
             juce::MidiBuffer m;
             m.swapWith(pend);
@@ -40,13 +40,15 @@ int main(int argc, char** argv) {
                 if (msg.isNoteOn()) s << "on ch" << msg.getChannel() << " " << msg.getNoteNumber() << ", ";
                 else if (msg.isNoteOff()) s << "off ch" << msg.getChannel() << " " << msg.getNoteNumber() << ", ";
                 else if (msg.isPitchWheel()) ++bends;
+                else if (msg.isChannelPressure()) ++press;
             }
             for (int i = 0; i < 512; ++i) { float v = buf.getSample(0, i); sum += v * v; ++n; }
             juce::MessageManager::getInstance()->runDispatchLoopUntil(5);
         }
-        std::cout << juce::String(label).paddedRight(' ', 18) << " rms " << juce::String(std::sqrt(sum / (double) std::max(1L, n)), 4) << "  " << s << (bends ? juce::String(bends) + " pitch bends" : juce::String()) << "\n";
+        std::cout << juce::String(label).paddedRight(' ', 18) << " rms " << juce::String(std::sqrt(sum / (double) std::max(1L, n)), 4) << "  " << s << (bends ? juce::String(bends) + " pitch bends " : juce::String()) << (press ? juce::String(press) + " pressure" : juce::String()) << "\n";
     };
     auto key = [&](bool on, int k) { pend.addEvent(on ? juce::MidiMessage::noteOn(1, k, (juce::uint8) 100) : juce::MidiMessage::noteOff(1, k), 0); };
+    setPage(0);                                                           // the Glide page is the default
     juce::MessageManager::getInstance()->runDispatchLoopUntil(6000);       // the sounds render
     key(true, 62); run(0.5, "Chord page: D");
     key(false, 62); run(0.5, "released");
@@ -67,6 +69,11 @@ int main(int argc, char** argv) {
     key(true, 57); run(0.05, "A"); key(false, 57); run(1.5, "Am, let go: holds");
     key(true, 62); run(0.05, "D"); key(false, 62); run(0.4, "gliding to Dm"); run(1.2, "Dm");
     key(true, 55); key(true, 59); key(true, 62); run(0.05, "G B D"); key(false, 55); key(false, 59); key(false, 62); run(2.0, "G from keys");
+    if (auto* ap = dynamic_cast<juce::AudioPluginInstance*>(p.get())) {
+        std::cout << "presets:";
+        for (int i = 0; i < ap->getNumPrograms(); ++i) std::cout << " [" << ap->getProgramName(i) << "]";
+        std::cout << "\n";
+    }
     p->releaseResources();
     return 0;
 }
