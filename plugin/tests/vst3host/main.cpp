@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     int lastBend[17] = {};
     auto run = [&](double secs, const char* label) {
         juce::String s;
-        double sum = 0; long n = 0; int bends = 0, press = 0;
+        double sum = 0; long n = 0; int bends = 0, press = 0; float peak = 0; long hot = 0;
         for (int b = 0; b < (int) (secs * 44100 / 512); ++b) {
             juce::MidiBuffer m;
             m.swapWith(pend);
@@ -43,10 +43,10 @@ int main(int argc, char** argv) {
                 else if (msg.isPitchWheel()) { ++bends; lastBend[msg.getChannel()] = msg.getPitchWheelValue(); }
                 else if (msg.isChannelPressure()) ++press;
             }
-            for (int i = 0; i < 512; ++i) { float v = buf.getSample(0, i); sum += v * v; ++n; }
+            for (int i = 0; i < 512; ++i) { float v = buf.getSample(0, i); sum += v * v; ++n; peak = std::max(peak, std::abs(v)); if (std::abs(v) > 0.6f) ++hot; }
             juce::MessageManager::getInstance()->runDispatchLoopUntil(5);
         }
-        std::cout << juce::String(label).paddedRight(' ', 18) << " rms " << juce::String(std::sqrt(sum / (double) std::max(1L, n)), 4) << "  " << s << (bends ? juce::String(bends) + " pitch bends " : juce::String()) << (press ? juce::String(press) + " pressure" : juce::String()) << "\n";
+        std::cout << juce::String(label).paddedRight(' ', 18) << " rms " << juce::String(std::sqrt(sum / (double) std::max(1L, n)), 4) << " peak " << juce::String(peak, 2) << " hot " << juce::String(100.0 * (double) hot / (double) std::max(1L, n), 1) << "%  " << s << (bends ? juce::String(bends) + " pitch bends " : juce::String()) << (press ? juce::String(press) + " pressure" : juce::String()) << "\n";
         if (bends) { std::cout << "      bends now (st):"; for (int c = 2; c <= 7; ++c) std::cout << " " << juce::String((lastBend[c] - 8192) / 8191.0 * 48.0, 1); std::cout << "\n"; }
     };
     auto key = [&](bool on, int k) { pend.addEvent(on ? juce::MidiMessage::noteOn(1, k, (juce::uint8) 100) : juce::MidiMessage::noteOff(1, k), 0); };

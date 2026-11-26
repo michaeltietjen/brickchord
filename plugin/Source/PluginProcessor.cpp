@@ -64,7 +64,7 @@ static std::vector<std::pair<int, std::shared_ptr<Note>>> readSounds(const juce:
             const int xf = std::min((int) (0.8 * sr), (int) ((e - s) * 0.4)), N = e - s - xf;
             double sum = 0;
             for (int i = s; i < e; ++i) sum += 0.5 * ((double) x[0][i] * x[0][i] + (double) x[1][i] * x[1][i]);
-            const float g = 0.065f / (float) std::max(1e-6, std::sqrt(sum / (double) (e - s)));   // as loud as the rendered drones
+            const float g = 0.045f / (float) std::max(1e-6, std::sqrt(sum / (double) (e - s)));   // a little under the rendered drones: recordings peak higher
             note->attack.resize((size_t) (s + xf) * 2);
             note->loop.resize((size_t) N * 2);
             const int in = (int) (0.02 * sr);
@@ -503,7 +503,7 @@ void BricklabStudioProcessor::pluckNow(int index, float vel, int pos, juce::Midi
     const int m = strings[(size_t) index];
     const float level = params.getRawParameterValue("plucklevel")->load();
     const float pan = strings.size() > 1 ? -0.6f + 1.2f * (float) index / (float) (strings.size() - 1) : 0.0f;
-    if (internal) plucker.pluck(m, vel * level * 1.6f, pan, pos);
+    if (internal) plucker.pluck(m, vel * level * 1.1f, pan, pos);
     if (out) {
         for (auto it = pluckOffs.begin(); it != pluckOffs.end();)      // the same string again: its old note ends first
             if (it->second == m) { midi.addEvent(juce::MidiMessage::noteOff(3, m), pos); it = pluckOffs.erase(it); } else ++it;
@@ -602,14 +602,14 @@ void BricklabStudioProcessor::runPlucks(juce::AudioBuffer<float>& buffer, juce::
     }
     // strings tuned to the drone, set ringing by the strum
     const float ring = params.getRawParameterValue("pluckring")->load();
-    if (ring > 0.005f) symp.process(pbL.data(), pbR.data(), L, R, n, 0.5f * ring);
+    if (ring > 0.005f) symp.process(pbL.data(), pbR.data(), L, R, n, 0.3f * ring);
     // the cloud: the last second of all of it, in grains
     const float cl = params.getRawParameterValue("dronecloud")->load();
     if (cl > 0.005f) {
         if ((int) cbL.size() < n) { cbL.resize((size_t) n); cbR.resize((size_t) n); }
         std::copy(L, L + n, cbL.begin());
         std::copy(R, R + n, cbR.begin());
-        cloud.process(cbL.data(), cbR.data(), L, R, n, 1.6f * cl);
+        cloud.process(cbL.data(), cbR.data(), L, R, n, 1.0f * cl);
     }
 }
 
@@ -1176,7 +1176,10 @@ void BricklabStudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
     const float vol = params.getRawParameterValue("volume")->load();
     for (int c = 0; c < 2; ++c) {
         auto* d = buffer.getWritePointer(c);
-        for (int i = 0; i < n; ++i) d[i] = std::tanh(d[i] * vol * 1.2f) / 1.2f;     // never clips
+        for (int i = 0; i < n; ++i) {                        // clean up to 0.6, then a soft knee: never clips, and
+            const float x = d[i] * vol, a = std::abs(x);     // nothing is bent until it is nearly there
+            d[i] = a <= 0.6f ? x : std::copysign(0.6f + 0.35f * std::tanh((a - 0.6f) / 0.35f), x);
+        }
     }
 }
 
