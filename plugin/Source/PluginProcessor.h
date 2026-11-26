@@ -7,6 +7,7 @@
 #include "core/Engine.h"
 #include "core/Patterns.h"
 #include "core/Glide.h"
+#include "core/Hall.h"
 
 class BricklabStudioProcessor : public juce::AudioProcessor, private juce::Timer {
 public:
@@ -17,6 +18,7 @@ public:
     void releaseResources() override {}
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
     void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockBypassed(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;   // bypassed: everything lets go
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -106,7 +108,10 @@ public:
     static std::vector<int> glideSounds();    // the Glide page's sounds: the drones, then the chord sounds
 private:
     std::array<int, brick::kGlideVoices> mpeNote{}, mpeBend{}, mpePress{}, mpeTimbre{};
-    int mpeExpr = -1;
+    int mpeExpr = -1, lastOutMode = 0;
+    int64_t mpeRefreshAt = 0;
+    bool hostPlaying = false;
+    juce::String instanceId = juce::Uuid().toString();
     std::vector<int> glideNotesOut;           // the Notes mode's chord on MIDI out
     bool mpeReady = false, wasPlaying = false;
     float glideSwell = 0;
@@ -128,7 +133,7 @@ private:   // the free-running 16th clock (when the host isn't playing)
 
     brick::NoteCache cache;
     brick::Player player{cache};
-    juce::dsp::Reverb reverb;
+    brick::Hall hall;                         // the reverb (Space)
     std::set<int> held;                       // MIDI keys down
     int pending = -1;                         // samples until held keys are read (a chord's notes arrive one by one)
     int lastSound = -1, lastKey = -1, lastScale = -1, lastOct = 0;

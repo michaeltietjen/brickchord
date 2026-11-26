@@ -12,10 +12,11 @@ namespace brick {
 // the rate notes render at: the host's (44.1 or 48 kHz), so they play back untouched. The handheld
 // runs at 22050; rendering at the host rate keeps the top octave clean instead of resampled.
 // Changed only by the NoteCache thread between renders (NoteCache::setRate).
-inline int kSR = 44100;
+inline thread_local int kSR = 44100;          // per thread: each instance's cache thread sets its own
 
 struct Note {                                 // interleaved stereo float, L R L R
     std::vector<float> attack, loop;          // loop empty: the sound doesn't sustain
+    int rate = 44100;                         // the sample rate it was rendered at
     int attackFrames() const { return (int) attack.size() / 2; }
     int loopFrames() const { return (int) loop.size() / 2; }
 };

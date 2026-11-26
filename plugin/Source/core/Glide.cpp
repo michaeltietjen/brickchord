@@ -85,7 +85,7 @@ void GlideEngine::push(int i, double tgt, double glide, int shape, double delay,
     const int m = (int) std::lround(tgt / 100.0);
     if (!v.note || v.lvl <= 0.001f || std::abs(m - v.sampleMidi) > 24) {
         v.sampleMidi = m;
-        v.note = cache_.get(m, v.r0);
+        v.note = silent_ ? nullptr : cache_.get(m, v.r0);
         v.pos = 0;
         v.old.reset();
         if (v.lvl <= 0.001f) { v.z1[0] = v.z1[1] = v.z2[0] = v.z2[1] = 0; }
@@ -257,6 +257,11 @@ void GlideEngine::stop() {                                    // ambient.amb_sto
     curDeg_ = -1;
 }
 
+void GlideEngine::silence() {
+    for (auto& v : v_) { v.on = false; v.lvlT = 0; v.lvl = 0; v.path.clear(); v.old.reset(); }
+    curDeg_ = -1;
+}
+
 void GlideEngine::bloom() {                                   // ambient.amb_bloom: one note fanning out to the chord
     std::vector<int> on;
     for (int i = 0; i < kNCH; ++i) if (v_[i].on) on.push_back(i);
@@ -280,7 +285,7 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
         for (int i = 0; i < kGlideVoices; ++i) {
             V& v = v_[i];
             if (v.lvl <= 0 && v.lvlT <= 0) { v.path.clear(); continue; }
-            if (!v.note) {                                       // the sound wasn't ready (or there is none: MIDI out only)
+            if (!v.note && !silent_) {                           // the sound wasn't ready: try again
                 v.sampleMidi = (int) std::lround(v.tgt / 100.0);
                 v.note = cache_.get(v.sampleMidi, v.r0);
             }
@@ -325,11 +330,11 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
                 const double gg = std::tan(3.14159265358979 * fc / sr);
                 a1 = (float) (1.0 / (1.0 + gg * (gg + kq))); a2 = (float) gg * a1; a3 = (float) gg * a2;
             }
-            const double kOld = v.old ? v.oldR0 * kSR / sr : 0;
+            const double kOld = v.old ? v.oldR0 * v.old->rate / sr : 0;
             const double or0 = v.old ? kOld * std::pow(2.0, (cents0 - v.oldMidi * 100.0) / 1200.0) : 0;
             const double or1 = v.old ? kOld * std::pow(2.0, (cents1 - v.oldMidi * 100.0) / 1200.0) : 0;
-            const double nr0 = v.r0 * kSR / sr * std::pow(2.0, (cents0 - v.sampleMidi * 100.0) / 1200.0);
-            const double nr1 = v.r0 * kSR / sr * std::pow(2.0, (cents1 - v.sampleMidi * 100.0) / 1200.0);
+            const double nr0 = v.r0 * v.note->rate / sr * std::pow(2.0, (cents0 - v.sampleMidi * 100.0) / 1200.0);
+            const double nr1 = v.r0 * v.note->rate / sr * std::pow(2.0, (cents1 - v.sampleMidi * 100.0) / 1200.0);
             auto readAt = [](const Note& nt, double pos, float& l, float& r) {
                 const int na = nt.attackFrames(), nl = nt.loopFrames();
                 const int kk = (int) pos;
@@ -389,7 +394,7 @@ void GlideEngine::render(float* L, float* R, int n) {         // engine._amb_ren
         level[(size_t) i] = v_[i].lvl;
         on[(size_t) i] = v_[i].on;
         target[(size_t) i] = (float) v_[i].tgt;
-        pressure[(size_t) i] = std::clamp(v_[i].lvl / std::max(0.01f, v_[i].level) * (1 + 0.6f * swell_) / 1.6f, 0.0f, 1.0f);
+        pressure[(size_t) i] = std::clamp(v_[i].lvl / std::max(0.01f, levelOf(i)), 0.0f, 1.0f);   // 1 at full level
     }
 }
 

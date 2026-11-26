@@ -72,7 +72,8 @@ drags the last eight bars you played into your DAW as a clip. The window resizes
 ## MIDI out (Bricklab Studio MIDI)
 
 Glide goes out as MPE: each voice on its own channel (2 to 7) with a 48-semitone bend range, its
-glide as pitch bend, its fades and swells as pressure, the mod wheel's swell as timbre (CC 74).
-Turn MPE on in your synth (Pigments: Settings, MPE). Or set Out to notes for any synth: the chords
+glide as pitch bend, the mod wheel's swell as timbre (CC 74). "MPE + pressure" also sends each
+voice's fades and swells as pressure (for patches that map pressure to level). Turn MPE on in your
+synth (Pigments: Settings, MPE). Or set Out to notes for any synth: the chords
 as plain notes, the fades as expression (CC 11). Chord sends chords on channel 1 and the bass on
 channel 2; Drone sends its pulse as expression.

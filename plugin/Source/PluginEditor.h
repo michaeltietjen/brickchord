@@ -37,6 +37,8 @@ public:
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
     bool keyStateChanged(bool isKeyDown) override;
+    void focusLost(FocusChangeType) override { releaseKey(); }
+    void releaseKey();
 
 private:
     void timerCallback() override;

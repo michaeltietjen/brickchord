@@ -48,6 +48,17 @@ int main(int argc, char** argv) {
         std::cout << juce::String(label).paddedRight(' ', 18) << " rms " << juce::String(std::sqrt(sum / (double) std::max(1L, n)), 4) << "  " << s << (bends ? juce::String(bends) + " pitch bends " : juce::String()) << (press ? juce::String(press) + " pressure" : juce::String()) << "\n";
     };
     auto key = [&](bool on, int k) { pend.addEvent(on ? juce::MidiMessage::noteOn(1, k, (juce::uint8) 100) : juce::MidiMessage::noteOff(1, k), 0); };
+    if (argc > 2) {                                                       // vst3host plugin.vst3 long: hold each page 20 s
+        for (int pg : {3, 0, 2}) {
+            setPage(pg);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(8000);
+            if (pg == 2) { key(true, 62); key(false, 62); } else key(true, 62);
+            for (int sec = 0; sec < 20; ++sec) run(1.0, (juce::String("page ") + juce::String(pg) + " s" + juce::String(sec)).toRawUTF8());
+            if (pg == 2) { key(true, 62); key(false, 62); } else key(false, 62);
+            run(1.0, "released");
+        }
+        return 0;
+    }
     setPage(0);                                                           // the Glide page is the default
     juce::MessageManager::getInstance()->runDispatchLoopUntil(6000);       // the sounds render
     key(true, 62); run(0.5, "Chord page: D");

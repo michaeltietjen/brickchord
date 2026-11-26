@@ -69,6 +69,8 @@ public:
     std::string playDegree(int deg, const Mods& m, float glideX, bool toggle);
     std::string follow(std::vector<int> notes, float glideX);
     void stop();
+    void silence();                                      // everything off at once (a page change)
+    void setSilent(bool s) { silent_ = s; }              // the MIDI builds: voices move, no sound is fetched
     void bloom();
     void setBend(float semis) { bend_ = semis * 100.0f; }
     void setSwell(float x) { swell_ = x; }
@@ -124,6 +126,7 @@ private:
     float bend_ = 0, swell_ = 0, vel_ = 0.85f;
     float levelOf(int i) const { return v_[i].level * (0.45f + 0.55f * vel_ / 0.85f); }
     int curDeg_ = -1;
+    bool silent_ = false;
     uint32_t rng_ = 98765;
 };
 

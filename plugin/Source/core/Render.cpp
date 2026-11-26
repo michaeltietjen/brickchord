@@ -172,7 +172,7 @@ std::shared_ptr<Note> renderNote(int midi, const Patch& p, unsigned seed) {
     const double f0 = 440.0 * std::pow(2.0, (midi - 69) / 12.0);
     double attackLen = std::max({0.6, (double) p.a + p.d * 0.8, (double) p.fa + p.fd * 0.8}) + 0.2;
     attackLen = std::min(attackLen, 3.0);
-    const double loopLen = 2.0, xfade = 0.25, total = attackLen + loopLen + xfade;
+    const double loopLen = 3.0, xfade = 0.4, total = attackLen + loopLen + xfade;
     const int n = (int) (total * kSR), nb = n / BLOCK + 2;
     const double brate = (double) kSR / BLOCK;
 
@@ -185,7 +185,7 @@ std::shared_ptr<Note> renderNote(int midi, const Patch& p, unsigned seed) {
     for (int i = 0; i < nb; ++i) {
         fc[(size_t) i] = std::clamp(p.cutoff * keytrack * std::pow(2.0, p.fenv * fenv[(size_t) i]), 40.0, kSR * 0.45);
         double tb = i / brate;
-        duty[(size_t) i] = std::clamp(0.5 + 0.4 * p.pwm * std::sin(2 * PI * tb * (2.0 / loopLen)), 0.05, 0.95);
+        duty[(size_t) i] = std::clamp(0.5 + 0.4 * p.pwm * std::sin(2 * PI * tb * 1.0)   /* 1 Hz: whole cycles in the 3 s loop */, 0.05, 0.95);
     }
     const double q = std::max(0.5f, p.res);
 
@@ -282,6 +282,7 @@ std::shared_ptr<Note> renderNote(int midi, const Patch& p, unsigned seed) {
         }
         for (auto& v : note->loop) v *= g;
     }
+    note->rate = kSR;
     return note;
 }
 

@@ -21,6 +21,7 @@ static std::shared_ptr<Note> renderBass(int midi) {     // synth.render_bass
         float v = (float) (std::tanh(x * env * 1.6) * 0.62);
         note->attack[(size_t) i * 2] = note->attack[(size_t) i * 2 + 1] = v;
     }
+    note->rate = kSR;
     return note;
 }
 
@@ -175,7 +176,7 @@ void Player::noteOn(int ch, int midi, float gain, float pan) {
         v.note = cache_.get(midi, ratio);
         if (!v.note) return;
     }
-    v.rate = ratio * kSR / sr_;
+    v.rate = ratio * v.note->rate / sr_;
     v.gain = gain;
     v.lg = 1.0f - std::max(0.0f, pan);
     v.rg = 1.0f + std::min(0.0f, pan);
@@ -244,7 +245,7 @@ void Player::leadOn(int midi, float glide) {               // engine.c_lead_on
     if (!note) return;
     GVoice v;
     v.note = note;
-    v.baseRate = r0 * kSR / sr_;
+    v.baseRate = r0 * note->rate / sr_;
     v.base = v.target = v.midi = midi;
     v.glide = glide;
     gv_.push_back(v);
@@ -267,7 +268,7 @@ void Player::drone(const std::vector<int>& in, float slide) {   // engine.c_dron
         if (!note) return;
         GVoice v;
         v.note = note; v.drone = true; v.gain = 0.7f * 0.95f;
-        v.baseRate = r0 * kSR / sr_;
+        v.baseRate = r0 * note->rate / sr_;
         v.base = v.target = v.midi = m;
         v.fadeIn = fadeIn; v.env = fadeIn > 0 ? 0.0f : 1.0f;
         gv_.push_back(v);

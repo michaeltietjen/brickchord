@@ -93,7 +93,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     for (auto& t : brick::timeNames(brick::kGlideTimes, brick::kNumGlideTimes, "Glide")) glideTime.addItem(t, glideTime.getNumItems() + 1);
     for (auto& t : brick::timeNames(brick::kGlideFades, brick::kNumGlideFades, "Fade")) glideFade.addItem(t, glideFade.getNumItems() + 1);
     for (int i = 0; i < brick::kNumGlideBends; ++i) glideBend.addItem("Bend " + juce::String(brick::kGlideBends[i]) + " st", i + 1);
-    glideMpe.addItemList({"Out: MPE", "Out: notes"}, 1);
+    glideMpe.addItemList({"Out: MPE", "Out: notes", "Out: MPE + pressure"}, 1);
     for (auto* c : {&glideSound, &glideChord, &glidePath, &glideTiming, &glideMove, &glideTime, &glideFade, &glideBend, &glideMpe})
         addAndMakeVisible(c);
     glideSub.setClickingTogglesState(true);
@@ -223,7 +223,15 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     startTimerHz(15);
 }
 
-BricklabStudioEditor::~BricklabStudioEditor() { stopTimer(); }
+BricklabStudioEditor::~BricklabStudioEditor() { stopTimer(); releaseKey(); }
+
+void BricklabStudioEditor::releaseKey() {                 // a computer key held when the page loses focus or closes
+    if (keyDown < 0) return;
+    const int k = keyDown;
+    keyDown = -1;
+    if (k < pads.size()) { pads[k]->lit = false; pads[k]->repaint(); }
+    padPress(k, false);
+}
 
 void BricklabStudioEditor::showTab(int t) {
     tab = t;
@@ -263,8 +271,8 @@ void BricklabStudioEditor::showTab(int t) {
 void BricklabStudioEditor::padPress(int d, bool down) {
     const int pg = proc.page();
     if (pg == 0) {
-        if (down) { ++proc.padsDown; proc.padDown(d); }
-        else { proc.padsDown = std::max(0, proc.padsDown - 1); proc.padUp(); }
+        if (down) { ++proc.padsDown; proc.uiPad(d, true); }      // played on the audio thread, in order
+        else { proc.padsDown = std::max(0, proc.padsDown - 1); proc.uiPad(d, false); }
     } else if (pg == 1 || ((pg == 2 || pg == 3) && down))
         proc.uiPad(d, down);
 }
