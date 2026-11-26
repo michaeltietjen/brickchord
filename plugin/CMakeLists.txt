@@ -69,6 +69,20 @@ juce_add_plugin(BricklabStudioMIDIVST
     VST3_CATEGORIES Instrument Generator
     COPY_PLUGIN_AFTER_BUILD TRUE)
 
+# The Cloud and the sympathetic strings (Source/fx), built on open-source engines (MIT: third_party/eurorack).
+set(EURO ${CMAKE_CURRENT_SOURCE_DIR}/third_party/eurorack)
+add_library(BrickFx STATIC
+    ${EURO}/stmlib/utils/random.cc ${EURO}/stmlib/dsp/units.cc ${EURO}/stmlib/dsp/atan.cc
+    ${EURO}/rings/resources.cc ${EURO}/rings/dsp/fm_voice.cc ${EURO}/rings/dsp/part.cc ${EURO}/rings/dsp/resonator.cc
+    ${EURO}/rings/dsp/string.cc ${EURO}/rings/dsp/string_synth_part.cc
+    ${EURO}/clouds/resources.cc ${EURO}/clouds/dsp/correlator.cc ${EURO}/clouds/dsp/granular_processor.cc ${EURO}/clouds/dsp/mu_law.cc
+    ${EURO}/clouds/dsp/pvoc/frame_transformation.cc ${EURO}/clouds/dsp/pvoc/phase_vocoder.cc ${EURO}/clouds/dsp/pvoc/stft.cc
+    Source/fx/Fx.cpp)
+target_include_directories(BrickFx PRIVATE ${EURO})
+target_compile_definitions(BrickFx PRIVATE TEST=1)
+target_compile_options(BrickFx PRIVATE -w -O2)
+set_target_properties(BrickFx PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 foreach(t BricklabStudio BricklabStudioMIDI BricklabStudioMIDIVST)
     target_sources(${t} PRIVATE
         Source/PluginProcessor.cpp
@@ -82,7 +96,7 @@ foreach(t BricklabStudio BricklabStudioMIDI BricklabStudioMIDIVST)
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0)
     target_link_libraries(${t}
-        PRIVATE juce::juce_audio_utils juce::juce_dsp
+        PRIVATE juce::juce_audio_utils juce::juce_dsp BrickFx
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
 endforeach()
 target_compile_definitions(BricklabStudioMIDI PRIVATE BRICK_MIDI_FX=1)

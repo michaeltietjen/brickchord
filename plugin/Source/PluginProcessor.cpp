@@ -26,6 +26,70 @@ std::vector<int> BricklabStudioProcessor::glideSounds() {     // the sounds that
     return v;
 }
 
+// Reads a folder of recorded notes (<midi>.flac). Struck ones ring out and are kept whole; held ones get a
+// seamless loop: the body of the note, its end crossfaded back into its start, so a drone can hold forever.
+static std::vector<std::pair<int, std::shared_ptr<Note>>> readSounds(const juce::File& dir, bool held, int lo, int hi) {
+    juce::FlacAudioFormat flac;
+    std::vector<std::pair<int, std::shared_ptr<Note>>> rec;
+    for (const auto& f : dir.findChildFiles(juce::File::findFiles, false, "*.flac")) {
+        const int midi = f.getFileNameWithoutExtension().getIntValue();
+        if (midi < lo || midi > hi) continue;
+        std::unique_ptr<juce::AudioFormatReader> rd(flac.createReaderFor(f.createInputStream().release(), true));
+        if (!rd || rd->lengthInSamples < 64) continue;
+        const double sr = rd->sampleRate;
+        const int total = (int) std::min<juce::int64>(rd->lengthInSamples, (juce::int64) (sr * 10.0));
+        juce::AudioBuffer<float> b(2, total);
+        rd->read(&b, 0, total, 0, true, true);
+        if (rd->numChannels < 2) b.copyFrom(1, 0, b, 0, 0, total);
+        const float peak = std::max(1e-5f, b.getMagnitude(0, total));
+        int start = 0;                                       // the note itself, not the air before it
+        while (start < total - 1 && std::abs(b.getSample(0, start)) < 0.02f * peak && std::abs(b.getSample(1, start)) < 0.02f * peak) ++start;
+        start = std::max(0, start - (int) (0.002 * sr));
+        const float* x[2] = {b.getReadPointer(0) + start, b.getReadPointer(1) + start};
+        const int T = total - start;
+        auto note = std::make_shared<Note>();
+        note->rate = (int) std::lround(sr);
+        if (!held) {
+            const int n = std::min(T, (int) (sr * 4.5)), tail = std::min(n, (int) (sr * 0.4));
+            const float g = 0.2f / peak;
+            note->attack.resize((size_t) n * 2);
+            for (int i = 0; i < n; ++i) {
+                const float fade = i >= n - tail ? (float) (n - 1 - i) / (float) tail : 1.0f;
+                for (int c = 0; c < 2; ++c) note->attack[(size_t) i * 2 + (size_t) c] = x[c][i] * g * fade;
+            }
+        } else {
+            const int e = T - (int) (0.9 * sr);              // before the player lets the note go
+            const int s = std::min(std::max((int) (1.2 * sr), (int) (0.3 * T)), e - (int) (1.5 * sr));
+            if (s < (int) (0.3 * sr) || e - s < (int) (1.0 * sr)) continue;   // too short to loop
+            const int xf = std::min((int) (0.8 * sr), (int) ((e - s) * 0.4)), N = e - s - xf;
+            double sum = 0;
+            for (int i = s; i < e; ++i) sum += 0.5 * ((double) x[0][i] * x[0][i] + (double) x[1][i] * x[1][i]);
+            const float g = 0.065f / (float) std::max(1e-6, std::sqrt(sum / (double) (e - s)));   // as loud as the rendered drones
+            note->attack.resize((size_t) (s + xf) * 2);
+            note->loop.resize((size_t) N * 2);
+            const int in = (int) (0.02 * sr);
+            for (int i = 0; i < s + xf; ++i)
+                for (int c = 0; c < 2; ++c) note->attack[(size_t) i * 2 + (size_t) c] = x[c][i] * g * std::min(1.0f, (float) i / (float) in);
+            for (int i = 0; i < N; ++i)
+                for (int c = 0; c < 2; ++c) {
+                    float v = x[c][s + xf + i];
+                    if (i >= N - xf) {                       // the end, crossfaded into what comes before the loop's start
+                        const float t = (float) (i - (N - xf)) / (float) xf;
+                        v = v * std::cos(1.5707963f * t) + x[c][s + (i - (N - xf))] * std::sin(1.5707963f * t);
+                    }
+                    note->loop[(size_t) i * 2 + (size_t) c] = v * g;
+                }
+        }
+        rec.push_back({midi, note});
+    }
+    return rec;
+}
+
+static juce::File soundsDir() {                              // Resources/Sounds inside this plugin's own bundle
+    return juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory().getParentDirectory()
+        .getChildFile("Resources").getChildFile("Sounds");
+}
+
 static juce::StringArray namesOf(int group) {
     juce::StringArray s;
     for (int i : BricklabStudioProcessor::soundsOf(group)) s.add(kPatches[i].name);
@@ -38,7 +102,11 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"page", 1}, "Page", StringArray{"Chord", "Lead", "Drone", "Glide"}, 3));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"sound", 1}, "Sound", BricklabStudioProcessor::soundNames(), 0));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"leadsound", 1}, "Lead sound", namesOf(1), 0));
-    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dronesound", 1}, "Drone sound", namesOf(2), 0));
+    {
+        auto dn = namesOf(2);
+        for (auto& r : kDroneRecs) dn.add(r.name);            // the recorded ones follow the rendered ones
+        l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dronesound", 1}, "Drone sound", dn, 0));
+    }
     l.add(std::make_unique<AudioParameterInt>(ParameterID{"octave", 1}, "Octave", -2, 2, 0));
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"leadglide", 1}, "Lead glide", 0.f, 1.f, 0.25f));
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"droneslide", 1}, "Drone slide", StringArray{"Off (restrike)", "0.5 s", "1 s", "2 s", "4 s"}, 2));
@@ -55,6 +123,8 @@ static juce::AudioProcessorValueTreeState::ParameterLayout layout() {
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"plucksound", 1}, "Pluck sound", ps, 0));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"plucklevel", 1}, "Pluck level", 0.f, 1.f, 0.7f));
         l.add(std::make_unique<AudioParameterFloat>(ParameterID{"pluckecho", 1}, "Pluck echo", 0.f, 1.f, 0.35f));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"pluckring", 1}, "Sympathetic strings", 0.f, 1.f, 0.25f));
+        l.add(std::make_unique<AudioParameterFloat>(ParameterID{"dronecloud", 1}, "Drone cloud", 0.f, 1.f, 0.f));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"pluckarp", 1}, "Pluck arp", StringArray{"Off", "Up", "Down", "Bounce", "Random"}, 0));
         l.add(std::make_unique<AudioParameterChoice>(ParameterID{"pluckrate", 1}, "Pluck arp rate", StringArray{"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1));
     }
@@ -144,6 +214,10 @@ void BricklabStudioProcessor::prepareToPlay(double sampleRate, int) {
     }
     if (!kMidiFx) { cache.setRate((int) std::lround(sampleRate)); rateChanged = true; }   // notes render at the host's rate
     plucker.prepare(sampleRate);
+    cloud.prepare(sampleRate);
+    cloud.set(0.35f, 0.55f, 0.0f, 0.72f, 0.6f, 0.8f, 0.25f, 0.4f);
+    symp.prepare(sampleRate);
+    cbL.assign(8192, 0.0f); cbR.assign(8192, 0.0f);
     pbL.assign(8192, 0.0f); pbR.assign(8192, 0.0f);
     echoL.assign((size_t) (sampleRate * 2.0) + 16, 0.0f); echoR.assign(echoL.size(), 0.0f);
     echoAt = 0;
@@ -163,7 +237,8 @@ void BricklabStudioProcessor::applySoundAndKey() {
         static const auto leads = soundsOf(1), drones = soundsOf(2);
         const auto& list = pg == LeadPage ? leads : drones;
         int i = (int) params.getRawParameterValue(pg == LeadPage ? "leadsound" : "dronesound")->load();
-        snd = list[(size_t) juce::jlimit(0, (int) list.size() - 1, i)];
+        if (pg == DronePage && i >= (int) list.size()) snd = 1000 + juce::jlimit(0, kNumDroneRecs - 1, i - (int) list.size());   // a recorded one
+        else snd = list[(size_t) juce::jlimit(0, (int) list.size() - 1, i)];
     }
     int key = (int) params.getRawParameterValue("key")->load();
     int sc = (int) params.getRawParameterValue("scale")->load();
@@ -179,36 +254,9 @@ void BricklabStudioProcessor::applySoundAndKey() {
             pluckId = id;
             pluckBank.set(id, kPluckInsts[pi].synth, rate);
             if (const char* folder = kPluckInsts[pi].folder) {   // a recorded one: read its notes, off this thread
-                const auto dir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory()
-                                     .getParentDirectory().getChildFile("Resources").getChildFile("Sounds").getChildFile(folder);
+                const auto dir = soundsDir().getChildFile(folder);
                 pluckPool.addJob([this, id, dir] {
-                    juce::FlacAudioFormat flac;
-                    std::vector<std::pair<int, std::shared_ptr<Note>>> rec;
-                    for (const auto& f : dir.findChildFiles(juce::File::findFiles, false, "*.flac")) {
-                        const int midi = f.getFileNameWithoutExtension().getIntValue();
-                        if (midi < 40 || midi > 100) continue;                       // the strings sit between
-                        std::unique_ptr<juce::AudioFormatReader> rd(flac.createReaderFor(f.createInputStream().release(), true));
-                        if (!rd || rd->lengthInSamples < 64) continue;
-                        const int total = (int) std::min<juce::int64>(rd->lengthInSamples, (juce::int64) (rd->sampleRate * 7.0));
-                        juce::AudioBuffer<float> b(2, total);
-                        rd->read(&b, 0, total, 0, true, true);
-                        if (rd->numChannels < 2) b.copyFrom(1, 0, b, 0, 0, total);
-                        const float peak = std::max(1e-5f, b.getMagnitude(0, total));
-                        int start = 0;                                               // the note itself, not the air before it
-                        while (start < total - 1 && std::abs(b.getSample(0, start)) < 0.02f * peak && std::abs(b.getSample(1, start)) < 0.02f * peak) ++start;
-                        start = std::max(0, start - (int) (0.002 * rd->sampleRate));
-                        const int n = std::min(total - start, (int) (rd->sampleRate * 4.5)), tail = std::min(n, (int) (rd->sampleRate * 0.4));
-                        auto note = std::make_shared<Note>();
-                        note->rate = (int) std::lround(rd->sampleRate);
-                        note->attack.resize((size_t) n * 2);
-                        const float g = 0.2f / peak;
-                        for (int i = 0; i < n; ++i) {
-                            const float fade = i >= n - tail ? (float) (n - 1 - i) / (float) tail : 1.0f;
-                            note->attack[(size_t) i * 2] = b.getSample(0, start + i) * g * fade;
-                            note->attack[(size_t) i * 2 + 1] = b.getSample(1, start + i) * g * fade;
-                        }
-                        rec.push_back({midi, note});
-                    }
+                    const auto rec = readSounds(dir, false, 40, 100);
                     juce::Logger::writeToLog("Bricklab Studio: strum " + dir.getFileName() + ", " + juce::String((int) rec.size()) + " recorded notes read");
                     pluckBank.put(id, rec);
                 });
@@ -217,13 +265,26 @@ void BricklabStudioProcessor::applySoundAndKey() {
     }
     if (!fresh && snd == lastSound && key == lastKey && sc == lastScale && oct == lastOct) return;
     lastOct = oct;
-    if (snd != lastSound) {
+    if (snd >= 1000) {                                      // recordings: read off this thread, then swapped in whole
+        if (!kMidiFx && (fresh || snd != lastSound)) {
+            droneRecWanted = snd;
+            const auto dir = soundsDir().getChildFile(kDroneRecs[snd - 1000].folder);
+            pluckPool.addJob([this, snd, dir] {
+                const auto rec = readSounds(dir, true, 24, 100);
+                juce::Logger::writeToLog("Bricklab Studio: drone " + dir.getFileName() + ", " + juce::String((int) rec.size()) + " recorded notes looped");
+                if (droneRecWanted.load() == snd && !rec.empty()) cache.setRecorded(snd, rec);
+            });
+        }
+        player.setRelease(1.2f);
+    } else if (snd != lastSound) {
+        droneRecWanted = -1;
         cache.setSound(snd);
         player.setRelease(kPatches[snd].r);
     }
     player.setKey(key, (Scale) sc);
     lastSound = snd; lastKey = key; lastScale = sc;
     if (kMidiFx) return;                                  // nothing to render: it only sends notes
+    if (snd >= 1000) { wantedCount = 0; return; }
     std::vector<int> w;
     if (pg == LeadPage || pg == DronePage || pg == GlidePage) {   // the lead's range from the middle out; the drone's and glide's low
         const int mid = pg == LeadPage ? 64 : (pg == DronePage ? 50 : 52);
@@ -539,6 +600,17 @@ void BricklabStudioProcessor::runPlucks(juce::AudioBuffer<float>& buffer, juce::
         L[i] += pbL[(size_t) i] + dl * wet;
         R[i] += pbR[(size_t) i] + dr * wet;
     }
+    // strings tuned to the drone, set ringing by the strum
+    const float ring = params.getRawParameterValue("pluckring")->load();
+    if (ring > 0.005f) symp.process(pbL.data(), pbR.data(), L, R, n, 0.5f * ring);
+    // the cloud: the last second of all of it, in grains
+    const float cl = params.getRawParameterValue("dronecloud")->load();
+    if (cl > 0.005f) {
+        if ((int) cbL.size() < n) { cbL.resize((size_t) n); cbR.resize((size_t) n); }
+        std::copy(L, L + n, cbL.begin());
+        std::copy(R, R + n, cbR.begin());
+        cloud.process(cbL.data(), cbR.data(), L, R, n, 1.6f * cl);
+    }
 }
 
 void BricklabStudioProcessor::leadPlay(int m, int pos, juce::MidiBuffer& midi, bool internal, bool out) {
@@ -597,6 +669,7 @@ void BricklabStudioProcessor::droneToggle(int pc, int deg, int pos, juce::MidiBu
         for (int st : shapes[(size_t) shape]) notes.push_back(root + 12 + up(st));
     }
     setStrings(notes);
+    symp.setNote((float) (root + 12));
     static const float slides[] = {0.f, 0.5f, 1.f, 2.f, 4.f};
     const float slide = slides[juce::jlimit(0, 4, (int) params.getRawParameterValue("droneslide")->load())];
     droneNotesNow = notes;
@@ -990,6 +1063,8 @@ const std::vector<Preset>& presets() {
         {"Chord: EP Sevenths", {{"page", 0}, {"sound", 8}, {"mod7", 1}}},
         {"Drone: Deep Space Pulse", {{"page", 2}, {"dronesound", 0}, {"droney", -0.75f}, {"droneslide", 2}}},
         {"Drone: Cathedral Bloom", {{"page", 2}, {"dronesound", 3}, {"dronex", 0.75f}, {"dronethird", 1}}},
+        {"Drone: Cello Bed", {{"page", 2}, {"dronesound", 8}, {"dronechord", 1}, {"dronedrift", 0.3f}, {"droneair", 0.4f}, {"pluckring", 0.5f}}},
+        {"Drone: Flute Cloud", {{"page", 2}, {"dronesound", 11}, {"dronechord", 5}, {"dronecloud", 0.6f}, {"droneair", 0.2f}, {"plucksound", 1}, {"pluckarp", 4}, {"pluckrate", 1}}},
         {"Glide: Crossing Voices", {{"page", 3}, {"glidesound", 1}, {"glidechord", 0}, {"glidetime", 5}, {"glidepath", 2}, {"glidecross", 1}, {"glidefade", 2}}},
         {"Drone: Harp Over Quartal", {{"page", 2}, {"dronesound", 0}, {"dronechord", 7}, {"dronedrift", 0.5f}, {"droneair", 0.6f}, {"pluckarp", 1}, {"pluckrate", 3}, {"pluckecho", 0.5f}}},
         {"Drone: Drifting Ninth", {{"page", 2}, {"dronesound", 1}, {"dronechord", 4}, {"dronedrift", 0.8f}, {"droneair", 0.8f}, {"plucksound", 1}, {"pluckarp", 4}, {"pluckrate", 1}}},

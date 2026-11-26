@@ -65,6 +65,21 @@ int main(int argc, char** argv) {
         set("Pluck arp", 0.0f); run(2.0, "arp off");
         set("Drone chord", 7.0f / 8.0f); key(true, 57); key(false, 57); run(2.0, "A, quartal");
         key(true, 57); key(false, 57); run(1.0, "stopped");
+        set("Pluck level", 0.0f); set("Drone overtones", 0.0f); set("Sympathetic strings", 0.0f);
+        for (int k = 0; k < 7; ++k) {                                         // each recorded drone sound, held 8 s
+            set("Drone sound", (8.0f + (float) k) / 14.0f);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(2500);
+            key(true, 50); key(false, 50);
+            for (int sec = 0; sec < 8; ++sec) run(1.0, (juce::String("rec ") + juce::String(k) + " s" + juce::String(sec)).toRawUTF8());
+            key(true, 50); key(false, 50); run(1.5, "  stopped");
+        }
+        set("Drone sound", 8.0f / 14.0f);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(2500);
+        key(true, 50); key(false, 50); run(3.0, "cellos, dry");
+        set("Drone cloud", 1.0f); run(3.0, "cloud full");
+        set("Drone cloud", 0.0f); run(2.0, "cloud off");
+        set("Pluck level", 1.0f); set("Pluck arp", 0.25f); run(2.0, "arp, no ring");
+        set("Sympathetic strings", 1.0f); run(3.0, "arp, ring full");
         return 0;
     }
     if (argc > 2) {                                                       // vst3host plugin.vst3 long: hold each page 20 s

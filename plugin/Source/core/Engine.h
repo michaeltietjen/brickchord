@@ -27,6 +27,8 @@ public:
     void setRate(int sampleRate);                   // render at this rate (the host's, up to 48 kHz); clears everything
     int sound() const { return sound_.load(); }
     void want(const std::vector<int>& midis);       // render these next (most wanted first)
+    // recorded notes in place of a rendered sound (midi, note): every other note plays the nearest, pitched
+    void setRecorded(int id, const std::vector<std::pair<int, std::shared_ptr<Note>>>& rec);
     std::shared_ptr<Note> get(int midi, double& ratio) const;   // nearest ready note and the pitch ratio to it
     int ready() const { return ready_.load(); }
     // the synth bass under the chords (synth.render_bass): mono, no loop, 28..63
@@ -41,6 +43,7 @@ private:
     std::array<std::shared_ptr<Note>, 128> bass_{};
     std::atomic<int> sound_{0}, ready_{0}, gen_{0}, rate_{44100};
     std::atomic<bool> quit_{false};
+    bool recorded_ = false;
     std::thread th_;
 };
 

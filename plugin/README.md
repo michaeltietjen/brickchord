@@ -100,3 +100,9 @@ with your project. The pads are hidden while you edit: play from your keyboard, 
 ## Recorded strum instruments
 
 The Drone page's recorded strum instruments (Harp, Kalimba, Marimba, Vibraphone, Glockenspiel, Pizzicato, Chimes) are in `plugin/sounds`. They are recordings from VSCO 2 Community Edition and the Versilian Community Sample Library (Versilian Studios), both CC0, public domain. The build copies them into the instrument's `Resources/Sounds`.
+
+## Recorded drone sounds, the Cloud and the sympathetic strings
+
+The Drone page's recorded sounds (Cellos, Violas, Violins, Flute, Clarinet, Horn, Bowed Vibes) are held notes from VSCO 2 Community Edition (Versilian Studios, CC0), in `plugin/sounds`. The plugin loops each one when it reads it.
+
+The Cloud and Ring knobs on the Drone page (`Source/fx`) are built on open-source sound engines written by Emilie Gillet, from https://github.com/pichenettes/eurorack (commit f4cfa76; the parts used are in `plugin/third_party/eurorack`, copied there by `tools/vendor_eurorack.sh`). That code is under the MIT licence, Copyright 2012-2021 Emilie Gillet; each file carries the notice, and it has to travel with every copy of the plugin. Bricklab Studio uses the engine code only. It is not made, endorsed or supported by the original author or her company.

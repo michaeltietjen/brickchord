@@ -37,6 +37,7 @@ void NoteCache::setSound(int index) {
     std::lock_guard<std::mutex> l(mx_);
     if (index == sound_.load() && ready_.load() > 0) return;
     sound_ = std::clamp(index, 0, kNumPatches - 1);
+    recorded_ = false;
     ++gen_;
     for (auto& n : notes_) n.reset();
     ready_ = 0;
@@ -56,9 +57,22 @@ void NoteCache::setRate(int sampleRate) {
     cv_.notify_all();
 }
 
+void NoteCache::setRecorded(int id, const std::vector<std::pair<int, std::shared_ptr<Note>>>& rec) {
+    std::lock_guard<std::mutex> l(mx_);
+    sound_ = 100000 + id;                                  // no rendered sound has this number
+    recorded_ = true;
+    ++gen_;
+    todo_.clear();
+    for (auto& n : notes_) n.reset();
+    int k = 0;
+    for (auto& r : rec) if (r.first >= 0 && r.first < 128 && r.second) { notes_[(size_t) r.first] = r.second; ++k; }
+    ready_ = k;
+}
+
 void NoteCache::want(const std::vector<int>& midis) {
     {
         std::lock_guard<std::mutex> l(mx_);
+        if (recorded_) return;                             // nothing to render: the notes are recordings
         std::deque<int> q;
         for (int m : midis)                                // 1000 + m asks for the synth bass note m
             if ((m >= 1000 && m < 1128 && !bass_[(size_t) (m - 1000)]) || (m >= 0 && m < 128 && !notes_[(size_t) m])) q.push_back(m);

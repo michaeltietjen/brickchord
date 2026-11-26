@@ -10,6 +10,7 @@
 #include "core/Patterns.h"
 #include "core/Glide.h"
 #include "core/Pluck.h"
+#include "fx/Fx.h"
 #include "core/Hall.h"
 
 class BricklabStudioProcessor : public juce::AudioProcessor, private juce::Timer {
@@ -150,6 +151,10 @@ private:   // the free-running 16th clock (when the host isn't playing)
     brick::PluckBank pluckBank;               // the strum's own instruments (the handheld's), made apart from the drone's sound
     brick::Plucker plucker{pluckBank};
     int pluckId = -1;
+    std::atomic<int> droneRecWanted{-1};      // which recorded drone sound is being read (-1: a rendered one)
+    brick::Cloud cloud;                       // the granular texture over the drone
+    brick::SympStrings symp;                  // strings that ring when the strum plays into them
+    std::vector<float> cbL, cbR;
     juce::ThreadPool pluckPool{1};            // reads the recorded instruments (declared after the bank it fills)
     std::vector<int> strings;                 // the notes a strum crosses, low to high
     struct PluckLater { int wait, midi; float vel, pan; };

@@ -64,6 +64,11 @@ constexpr int kNumGlideBends = 7;
 // the drone's chords: what sounds over the root
 inline const char* const kDroneChords[] = {"Root and fifth", "Open", "Triad", "Seventh", "Ninth", "Sus2", "Sus4", "Quartal", "Fifths"};
 constexpr int kNumDroneChords = 9;
+// the drone's recorded sounds (folders of held notes in Resources/Sounds; CC0, from VSCO 2 Community Edition)
+struct RecInst { const char* name; const char* folder; };
+inline const RecInst kDroneRecs[] = {{"Cellos", "Cellos"}, {"Violas", "Violas"}, {"Violins", "Violins"}, {"Flute", "Flute"},
+                                     {"Clarinet", "Clarinet"}, {"Horn", "Horn"}, {"Bowed Vibes", "BowedVibes"}};
+constexpr int kNumDroneRecs = 7;
 constexpr int kGlideVoices = 6;                             // five chord voices and the sub
 
 struct GlideSettings {

@@ -245,6 +245,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     addAndMakeVisible(glideChordL);
     for (int i : BricklabStudioProcessor::soundsOf(1)) leadSound.addItem(brick::kPatches[i].name, leadSound.getNumItems() + 1);
     for (int i : BricklabStudioProcessor::soundsOf(2)) droneSound.addItem(brick::kPatches[i].name, droneSound.getNumItems() + 1);
+    for (auto& r : brick::kDroneRecs) droneSound.addItem(r.name, droneSound.getNumItems() + 1);
     octave.addItemList({"Oct -2", "Oct -1", "Oct 0", "Oct +1", "Oct +2"}, 1);
     droneSlide.addItemList({"Slide off", "Slide 0.5 s", "Slide 1 s", "Slide 2 s", "Slide 4 s"}, 1);
     for (int i = 0; i < brick::kNumDroneChords; ++i) droneChord.addItem(brick::kDroneChords[i], i + 1);
@@ -254,7 +255,7 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     pluckArp.addItemList({"Arp off", "Arp up", "Arp down", "Arp bounce", "Arp random"}, 1);
     pluckRate.addItemList({"1/4", "1/8", "1/8 T", "1/16", "1/32"}, 1);
     for (auto* c : {&droneChord, &pluckSound, &pluckArp, &pluckRate}) addAndMakeVisible(c);
-    for (auto* k : {&droneDrift, &droneAir, &pluckLevel, &pluckEcho}) { k->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0); addAndMakeVisible(k); }
+    for (auto* k : {&droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud}) { k->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0); addAndMakeVisible(k); }
     for (auto* c : {&leadSound, &droneSound, &octave, &droneSlide}) addAndMakeVisible(c);
     for (auto* s : {&leadGlide, &droneY, &droneX}) {
         s->setSliderStyle(juce::Slider::LinearHorizontal);
@@ -319,6 +320,8 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aDroneAir = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "droneair", droneAir);
     aPluckLevel = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "plucklevel", pluckLevel);
     aPluckEcho = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "pluckecho", pluckEcho);
+    aPluckRing = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "pluckring", pluckRing);
+    aDroneCloud = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "dronecloud", droneCloud);
     aDroneX = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "dronex", droneX);
     using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     aGlideSound = std::make_unique<CA>(ps, "glidesound", glideSound);
@@ -350,14 +353,14 @@ BricklabStudioEditor::BricklabStudioEditor(BricklabStudioProcessor& p) : AudioPr
     aVolume = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "volume", volume);
     aBassLvl = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(ps, "basslevel", bassLvl);
 
-    for (auto* k : {&glideTone, &space, &volume, &droneY, &droneX, &droneDrift, &droneAir, &pluckLevel, &pluckEcho}) {          // the knobs
+    for (auto* k : {&glideTone, &space, &volume, &droneY, &droneX, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud}) {          // the knobs
         k->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         k->setRotaryParameters(juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
         k->setMouseDragSensitivity(140);
     }
     glideTone.setName("Tone"); space.setName("Space"); volume.setName("Volume");
     droneY.setName("Pulse"); droneX.setName("Bloom"); droneDrift.setName("Drift"); droneAir.setName("Air");
-    pluckLevel.setName("Strum"); pluckEcho.setName("Echo");
+    pluckLevel.setName("Strum"); pluckEcho.setName("Echo"); pluckRing.setName("Ring"); droneCloud.setName("Cloud");
     canvas.pointer = [this](juce::Point<float> p, bool down) {   // Drone: the field is the strings; drag across to strum
         if (tab != 2 || !down || p.y < 150) { proc.uiStrum = -1.0f; return; }
         const float sc = (p.y - fieldHor) / fieldK;             // undo the perspective: which lane is under the pointer
@@ -417,7 +420,7 @@ void BricklabStudioEditor::showTab(int t) {
     show({&leadGlide, &glideL}, lead);
     third.setVisible(false);                                 // the Triad chord shape does this now
     show({&droneSlide, &droneChord, &droneY, &droneX, &pluckArp, &pluckRate}, drone);
-    show({&pluckSound, &droneDrift, &droneAir, &pluckLevel, &pluckEcho}, drone && sounds);
+    show({&pluckSound, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud}, drone && sounds);
     outNote.setText(chord ? (proc.kMidiFx ? "Chords on ch 1, bass on ch 2" : "") : (lead ? "Mod wheel: vibrato  Bend: 2 st" : ""),
                     juce::dontSendNotification);
     outNote.setVisible(chord || lead);
@@ -642,7 +645,7 @@ void BricklabStudioEditor::paintContent(juce::Graphics& g) {   // drawn at 900 x
     };
     const float dockTop = rowA ? 412.0f : 454.0f;
     glass({12, dockTop, kW - 24.0f, 582.0f - dockTop}, 18);
-    if (tab == 2) glass({740, 68, 146, sounds ? 268.0f : 76.0f}, 16);
+    if (tab == 2) glass({740, 68, 146, sounds ? 332.0f : 76.0f}, 16);
     else if (sounds) glass({810, 68, 76, gl ? 204.0f : 140.0f}, 16);
 }
 
@@ -673,7 +676,7 @@ void BricklabStudioEditor::layout() {
     int ky = 74;
     if (gl) { glideTone.setBounds(818, ky, 60, 62); ky += 64; } else glideTone.setBounds(none);
     if (drone) {                                             // two columns: the drone's motion, the strum, the room
-        juce::Slider* ks[] = {&droneY, &droneX, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &space, &volume};
+        juce::Slider* ks[] = {&droneY, &droneX, &droneDrift, &droneAir, &pluckLevel, &pluckEcho, &pluckRing, &droneCloud, &space, &volume};
         int k = 0;
         for (auto* sl : ks) {
             if (!sl->isVisible()) continue;

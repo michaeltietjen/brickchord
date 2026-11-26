@@ -85,10 +85,10 @@ private:
     juce::OwnedArray<juce::AudioProcessorValueTreeState::ButtonAttachment> modAttach;
     juce::TextButton latch{"latch"};
     juce::ComboBox sound, key, scale, mode, arpOct, bassMode, leadSound, droneSound, octave, droneSlide;
-    juce::Slider leadGlide, droneY, droneX, glideTone, droneDrift, droneAir, pluckLevel, pluckEcho;
+    juce::Slider leadGlide, droneY, droneX, glideTone, droneDrift, droneAir, pluckLevel, pluckEcho, pluckRing, droneCloud;
     juce::ComboBox droneChord, pluckSound, pluckArp, pluckRate;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> aDroneChord, aPluckSound, aPluckArp, aPluckRate;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aDroneDrift, aDroneAir, aPluckLevel, aPluckEcho;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> aDroneDrift, aDroneAir, aPluckLevel, aPluckEcho, aPluckRing, aDroneCloud;
     struct Spark { int midi; float age; };
     std::vector<Spark> sparks;                         // plucked notes, travelling away down their strings
     std::array<float, 128> stringGlow{};
