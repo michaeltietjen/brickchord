@@ -15,7 +15,9 @@ public:
     // size, pitch (octaves, -1..1), density, texture, spread, feedback, reverb: all 0..1 but pitch
     void set(float position, float size, float pitchOct, float density, float texture, float spread, float feedback, float reverb);
     void process(const float* inL, const float* inR, float* outL, float* outR, int n, float gain);   // adds the wet sound
+    void freeze(bool on) { frozen_ = on; }                  // hold what it has heard and keep making grains of that
 private:
+    bool frozen_ = false;
     void step(const float* inL, const float* inR, float* outL, float* outR, int n, float gain);
     struct Impl;
     std::unique_ptr<Impl> d;

@@ -68,7 +68,7 @@ void Cloud::set(float position, float size, float pitchOct, float density, float
     auto c = [](float x) { return x < 0 ? 0.0f : (x > 1 ? 1.0f : x); };
     p->position = c(position); p->size = c(size); p->pitch = 12.0f * (pitchOct < -2 ? -2 : (pitchOct > 2 ? 2 : pitchOct));
     p->density = c(density); p->texture = c(texture); p->stereo_spread = c(spread); p->feedback = c(feedback); p->reverb = c(reverb);
-    p->dry_wet = 1.0f; p->freeze = false; p->trigger = false; p->gate = false;
+    p->dry_wet = 1.0f; p->freeze = frozen_; p->trigger = false; p->gate = false;
 }
 void Cloud::process(const float* inL, const float* inR, float* outL, float* outR, int n, float gain) {
     // A little at a time: what goes in has to be read out before more goes in, or the short queue between the two
