@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.0 (Nov 27, 2026): colour chords and crossing voices
+- Brickchord and Bricklab: **Chord colour** (Settings > Chords; in Bricklab, a Chord track's tab). The buttons play Open, Sus2, Quartal, Lydian, Minor 11, Major 9, Fifths or Cluster on each chord's root, voiced as the shape itself and spread wide. A held modifier (7th, sus4, 9th, flip, a stick chord) still plays its own chord. The same shapes as Bricklab Studio's Chord page.
+- Brickglide: **Crossing** (Settings > Chords): No crossing, Auto cross, Swap middle, Outside in, Mirror, Rotate up, Rotate down and Mirror all. The next chord's notes are dealt out again, so some voices rise while others fall and pass through each other, and they land on the same chord. Auto cross holds the shared notes and makes the moving voices trade ends.
+- Brickglide: **Range** (Tight, Normal, Free): a pull toward each voice's home note and a ceiling over it, so the voices stay in their register over a long session. Normal is the new default; Free is how it played before.
+- Brickglide: **Sub floor** (Any, E1, A1, C2): the lowest note the sub voice plays.
+- Brickglide: when two voices land on the same note and the chord has a note nobody plays, one of them moves to it, so every note of the chord sounds when there are voices enough.
+- Brickglide: colour chords are named by their root, "E Open" rather than "Em Open", since the shape has its own third. Lydian chords no longer show as diminished.
+- Colours by chord: each chord of the key has its own colour, the same as Bricklab Studio's, on the chord buttons, Brickchord's bricks and numeral, and Brickglide's lines.
+- Bricklab web: the Glide tab has Crossing, Range and Sub floor too.
+
 ## v0.6.0 (Nov 26, 2026): Brickchop
 - **Brickchop** is out of beta, a fourth app on the same engine: a K.O. II-style sampler. Four groups of twelve pads (A drums, B bass, C keys, D your samples), each pad its own sound; chop a loop across a group at its hits; Keys plays the last pad chromatically (L3); the left stick tunes and levels the last pad; the right stick is eight punch-in effects that last while you hold it (stutter, beat repeat, filter sweep, bitcrush, tape stop, half speed, reverse, reverb throw); START plays and R3 records onto the nearest 16th of each group's pattern of one, two or four bars; Commit resamples every pattern into a new sound on group D; eight song slots; USB MIDI in; a guided demo on first launch and demos built on a robot voice saying the app's name.
 - Brickchop ships for every handheld the other apps do: its own KNULLI zip and PortMaster zip, and in the R36 family zip. `tools/build_knulli.sh` builds it by default (the WITH_CHOP switch is gone), and `r36/build_family.sh` and `tools/build_portmaster.sh` build it too. Tested on the TrimUI Brick Pro (KNULLI); new on R36 and PortMaster devices.

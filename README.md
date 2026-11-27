@@ -14,6 +14,7 @@ and everything plays on a single sample-accurate clock with a built-in drum mach
 ## Features
 - **7 chord buttons** (D-pad + X/A/B) play the diatonic chords of your key in Major, Minor, Dorian or Mixolydian
 - **Chord modifiers**: hold Y (flip major/minor), L1 (7th), R1 (sus4), L1+R1 (9th)
+- **Chord colour**: every button plays Open, Sus2, Quartal, Lydian, Minor 11, Major 9, Fifths or Cluster on its chord's root, voiced wide (Settings > Chords)
 - **Left stick** bends the held chord 8 ways: 7, maj7, 9, aug, flip, dim, sus4, sus2
 - **Right stick** for effects: up = wetter (reverb and delay together), down = dry; left = filter, right = resonance; click to hold
 - **Modes** on a wheel (click the left stick): Play, Lead (melodies with bend, vibrato and glide), Drone and Effects. Bricklab adds Drums (8 pads) and Song
@@ -39,7 +40,7 @@ Bricklab is the groovebox built on the same engine. It adds:
 It installs next to Brickchord: copy the `brickchord` folder to `ports/bricklab`, add a file `edition.txt` containing `lab`, and copy `Bricklab.sh` into `ports`. It shares Brickchord's sound cache when both are installed.
 
 ## Brickglide
-An ambient machine on the same engine. Six drone voices (D-pad, X, Y) fade in and glide between notes over seconds or minutes, two melodic voices (A, B) step through five notes, and the screen draws each voice's pitch as a line against guides for the scale. Scenes morph the whole texture (SELECT + a drone button saves, R1 + it recalls), R2 evolves every voice to a nearby note, START freezes the cloud, the left stick spreads and moves the voices, L2 + left stick plays Cloud. Settings has a page per voice: sound, note and cents, level, pan, glide, fade, vibrato, tremolo, drift.
+An ambient machine on the same engine. Six drone voices (D-pad, X, Y) fade in and glide between notes over seconds or minutes, two melodic voices (A, B) step through five notes, and the screen draws each voice's pitch as a line against guides for the scale. Scenes morph the whole texture (SELECT + a drone button saves, R1 + it recalls), R2 evolves every voice to a nearby note, START freezes the cloud, the left stick spreads and moves the voices, L2 + left stick plays Cloud. Settings has a page per voice: sound, note and cents, level, pan, glide, fade, vibrato, tremolo, drift. Settings > Chords > Crossing makes the voices trade places on the way to the next chord, so some rise while others fall and pass through each other; Range keeps them from creeping upward; Sub floor sets the lowest note of the sub.
 
 ## Brickchop
 A K.O. II-style sampler on the same engine. Four groups of twelve pads (A drums, B bass, C keys, D your samples), each pad its own sound: a kit part, a synth note, any WAV or a slice of one. Chop a loop across a group, play the last pad chromatically in keys (L3), and tune or level it with the left stick. The right stick is punch-in effects that last only while you hold it: stutter, beat repeat, filter sweep, bitcrush, tape stop, half speed, reverse and a reverb throw. START plays, R3 records onto the nearest 16th of the group's pattern, and Commit resamples every pattern, punch-ins included, into a new sound on group D. Eight song slots, USB MIDI in, and a guided demo on first launch. Page: https://michaeltietjen.github.io/brickchord/brickchop/

@@ -34,6 +34,8 @@ if "main" not in sys.modules:
                       ("1/8 triplet", 1 / 3.0), ("1/4 triplet", 2 / 3.0)]
     _m.DELAY_TYPES = ["Ping-Pong", "Straight", "Tape", "Dub", "Slapback", "Multi-Tap"]
     _m.BG, _m.DIM, _m.ACCENT, _m.ACCENT2, _m.INK = (18, 16, 22), (130, 122, 140), (255, 140, 66), (110, 200, 190), (236, 228, 214)
+    _m.CHORD_COLS = [(185, 166, 255), (110, 200, 190), (255, 196, 107), (120, 160, 255),
+                     (255, 120, 150), (140, 210, 120), (255, 170, 110)]
     sys.modules["main"] = _m
 
 import edition

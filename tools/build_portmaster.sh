@@ -11,7 +11,7 @@
 # Also writes dist/portmaster-new/ports/<name>/ folders laid out for a PortMaster-New PR.
 # Usage: tools/build_portmaster.sh [version]
 set -e
-VER="${1:-v0.6.0}"
+VER="${1:-v0.7.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 WORK="$(mktemp -d)"

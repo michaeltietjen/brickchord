@@ -103,7 +103,7 @@ def roman_for(degree, ivals):
     s = set(i % 12 for i in ivals)
     if 3 in s and 5 not in s:
         r = r.lower()
-    if 6 in s and 7 not in s:
+    if 6 in s and 7 not in s and 3 in s:       # a flat fifth over a minor third (Lydian's #4 is not one)
         r += "°"
     return r
 

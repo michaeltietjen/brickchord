@@ -71,14 +71,14 @@ MENU_PAGES = {
                "Click level",
                "Volume", "Latency",
                "Relearn buttons", "Learn sticks", "Sticks", "Stick buttons", "Quit"],
-    "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
-               "Lead glide", "Drone slide", "Bass", "Bass Level"],
+    "Chords": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Chord colour", "Play", "Arp Octaves", "Spread",
+               "Latch", "Lead glide", "Drone slide", "Bass", "Bass Level"],
     "Drums": None,
     "Sample": None,
     "Macro": None,
     # Bricklab: one tab for the selected track, holding only its machine's settings
-    "Chord": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Play", "Arp Octaves", "Spread", "Latch",
-              "Bass", "Bass Level"],
+    "Chord": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Chord colour", "Play", "Arp Octaves", "Spread",
+              "Latch", "Bass", "Bass Level"],
     "Lead": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Lead glide"],
     "Bass": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Lead glide"],
     "Drone": ["Sound", "Edit Sound", "Filter", "Resonance", "Octave", "Drone slide"],
@@ -104,6 +104,17 @@ elif edition.AMBIENT:                     # Brickambient is violet dusk, with pa
 elif edition.CHOP:                        # Brickchop is hot coral, with sodium yellow
     ACCENT, ACCENT2 = (255, 96, 72), (255, 206, 84)
 MOD_ON = (255, 200, 90)
+# Chord colour: the buttons play these shapes on each chord's root in place of the scale's own
+# chords (unless a modifier asks for something else). Voiced as the shape itself, spread wide:
+# the spacing is the colour. The same shapes as Brickglide's and Bricklab Studio's.
+CHORD_COLOURS = [("Scale chords", None), ("Open", [0, 7, 16, 19, 26]), ("Sus2", [0, 2, 7, 14]),
+                 ("Quartal", [0, 5, 10, 15, 20]), ("Lydian", [0, 4, 6, 11, 14, 18]),
+                 ("Minor 11", [0, 3, 7, 10, 14, 17]), ("Major 9", [0, 4, 7, 11, 14]),
+                 ("Fifths", [0, 7, 14, 21]), ("Cluster", [0, 2, 3, 5, 7])]
+# one colour per chord of the key (I to vii), the same as Bricklab Studio's: the tiles, the
+# bricks and Brickglide's lines take the colour of the chord they belong to
+CHORD_COLS = [(185, 166, 255), (110, 200, 190), (255, 196, 107), (120, 160, 255),
+              (255, 120, 150), (140, 210, 120), (255, 170, 110)]
 
 
 def clamp(v, lo, hi):
@@ -211,6 +222,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         self.beat = clamp(s.get("beat", 1), 0, len(synth.BEATS) - 1)
         self.play = clamp(s.get("play", 0), 0, len(PLAY_MODES) - 1)
         self.latch = s.get("latch", False)
+        self.ccolour = clamp(s.get("chord_colour", 0), 0, len(CHORD_COLOURS) - 1)
         self.spread = s.get("spread", 0)
         self.volume = s.get("volume", 0.8)
         self.base_rev = s.get("reverb", 0.25)
@@ -447,6 +459,8 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                 ns, up = voice(pc, iv, [], self.octave)
                 notes.update(ns)
                 notes.add(ns[1] + 12)
+            if getattr(self, "ccolour", 0):
+                notes.update(self.chord_of(deg, {})[3])
         # voice leading can put a chord tone anywhere in the upper range
         notes.update(m + o for m in range(55, 92))
         sc = set((self.key + i) % 12 for i in SCALES[self.scale])
@@ -719,13 +733,36 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
     def mode(self):
         return PLAY_MODES[self.play]
 
+    def chord_of(self, deg, m):
+        """The chord a button plays: the scale's, or with a Chord colour set (and no
+        modifier held), that shape on the chord's root. Returns (pc, iv, name, notes),
+        notes None when the usual voice leading should place it."""
+        pc, iv, name = build_chord(self.key, self.scale, deg, m)
+        cname, semis = CHORD_COLOURS[getattr(self, "ccolour", 0) % len(CHORD_COLOURS)]
+        if semis is None or any((m or {}).values()):
+            return pc, iv, name, None
+        root = pc % 12
+        n = 1 if name else 0                         # the root's own name, then the colour's:
+        while n < len(name) and name[n] in "#b\u266f\u266d":   # "D Open", not "Dm Open"
+            n += 1
+        bass = 36 + root
+        if bass < 40:
+            bass += 12
+        base = 43 + (root - 43) % 12                 # the root between G2 and F#3
+        upper = [base + x for x in semis if base + x != bass and base + x <= 84]
+        o = 12 * self.octave
+        return pc, sorted({x % 12 for x in semis}), name[:n] + " " + cname, [bass + o] + [u + o for u in upper]
+
     def play_chord(self, btn, revoice=False):
         deg = CHORD_BUTTONS.index(btn)
-        pc, iv, name = build_chord(self.key, self.scale, deg, self.mods())
-        self._play_voicing(deg, pc, iv, name, btn, revoice)
+        pc, iv, name, notes = self.chord_of(deg, self.mods())
+        self._play_voicing(deg, pc, iv, name, btn, revoice, notes=notes)
 
-    def _play_voicing(self, deg, pc, iv, name, btn, revoice=False):
-        notes, upper = voice(pc, iv, self.prev_upper, self.octave)
+    def _play_voicing(self, deg, pc, iv, name, btn, revoice=False, notes=None):
+        if notes is None:
+            notes, upper = voice(pc, iv, self.prev_upper, self.octave)
+        else:
+            upper = [n - 12 * self.octave for n in notes[1:]]
         self.prev_upper = upper
         revoice = revoice and self.cur_btn == btn
         self.cur = (deg, pc, iv, name)
@@ -862,6 +899,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         self.cfg["settings"] = dict(key=self.key, scale=self.scale, patch=self.patch, tone=self.tone, res=self.res,
                                     octave=self.octave, bpm=self.bpm, beat=self.beat, play=self.play,
                                     latch=self.latch, spread=self.spread, volume=self.volume,
+                                    chord_colour=getattr(self, "ccolour", 0),
                                     reverb=self.base_rev, delay=self.base_dly, delay_time=self.dly_time,
                                     reverb_type2=self.rev_type2, delay_type2=self.dly_type2, delay_time2=self.dly_time2,
                                     reverb_type=self.rev_type, delay_type=self.dly_type,
@@ -1225,6 +1263,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             ("Filter", "%+.1f oct" % self.tone),
             ("Resonance", "%+.1f" % self.res),
             ("Octave", "%+d" % self.octave),
+            ("Chord colour", CHORD_COLOURS[getattr(self, "ccolour", 0) % len(CHORD_COLOURS)][0]),
             ("Play", self.mode()),
             ("Arp Octaves", "%d" % self.arp_oct),
             ("Bass", synth.BASS_MODES[self.bass]),
@@ -1316,6 +1355,11 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         elif name == "Octave":
             self.octave = clamp(self.octave + d, -2, 2)
             recache = True
+        elif name == "Chord colour":
+            self.ccolour = (getattr(self, "ccolour", 0) + d) % len(CHORD_COLOURS)
+            self.queue_precache()
+            if self.cur_btn in CHORD_BUTTONS and self.cur_btn in self.inp.held:
+                self.play_chord(self.cur_btn)        # hear it on the chord you're holding
         elif name == "Arp Octaves":
             self.arp_oct = clamp(self.arp_oct + d, 1, 4)
             self.push_bass()
@@ -1816,7 +1860,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                 font = self.f_huge if self.f_huge.size(name)[0] < 330 else self.f_big
                 self.draw_name(c, name, font, BASE_W // 2 - 10, L["name_y"], x)
                 ry = int(14 * (1 - min(1, x * 1.6)) ** 3)
-                self.text(c, roman_for(deg, iv), self.f_big, ACCENT, (BASE_W // 2, L["roman_y"] + ry), center=True)
+                self.text(c, roman_for(deg, iv), self.f_big, CHORD_COLS[deg % 7], (BASE_W // 2, L["roman_y"] + ry), center=True)
             else:
                 if edition.LAB:
                     self.draw_mark(c, BASE_W // 2, L["mark_y"], 13)
@@ -1851,10 +1895,10 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
             # ---- chord buttons: press down, flash, glow off slowly
             tw, gap = 82, 6
             x0 = (BASE_W - (7 * tw + 6 * gap)) // 2
-            ck = (self.key, self.scale, tuple(sorted(k for k, v in m.items() if v)))
+            ck = (self.key, self.scale, tuple(sorted(k for k, v in m.items() if v)), getattr(self, "ccolour", 0))
             if self.anim.get("_ck") != ck:
                 self.anim["_ck"] = ck
-                self.anim["_chords"] = [build_chord(self.key, self.scale, i, m) for i in range(7)]
+                self.anim["_chords"] = [self.chord_of(i, m)[:3] for i in range(7)]
             chords = self.anim["_chords"]
             for i, btn in enumerate(CHORD_BUTTONS):
                 pc, iv, name = chords[i]
@@ -1870,9 +1914,9 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
                 r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"] + dip, tw, th)
                 if dip:
                     pygame.draw.rect(c, (8, 7, 10), (r.x, L["tiles_y"] + th - 4, tw, 4 + dip), border_radius=10)
-                col = self.mix(PANEL, ACCENT, lv)
+                col = self.mix(PANEL, CHORD_COLS[i % 7], lv)
                 if hit:
-                    col = self.mix((255, 226, 200), ACCENT, self.since(self.hit_t, 0.16))
+                    col = self.mix((255, 226, 200), CHORD_COLS[i % 7], self.since(self.hit_t, 0.16))
                     if self.anim.get("_shatter") != self.hit_t:        # strike: tile throws bricks
                         self.anim["_shatter"] = self.hit_t
                         for _ in range(10 if self.hit_big else 4):
@@ -2039,8 +2083,7 @@ class App(ambient.AmbientMixin, chop.ChopMixin, chop.ChopIntroMixin, modes.Modes
         [(0, 0), (0, 1), (1, 1), (2, 1)],      # J
         [(2, 0), (0, 1), (1, 1), (2, 1)],      # L
     ]
-    PIECE_COL = [(110, 200, 190), (255, 200, 90), (255, 140, 66), (140, 210, 120),
-                 (240, 100, 110), (120, 150, 255), (200, 140, 255)]
+    PIECE_COL = CHORD_COLS                  # a chord's brick is that chord's colour
     WC, WR, CELL = 24, 15, 12
     WX, WY = (640 - 24 * 12) // 2, 46
 

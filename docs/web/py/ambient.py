@@ -57,6 +57,14 @@ TIMINGS = ["Together", "By distance", "Bass lags", "Bass leads", "Loose"]
 # Moves: how the voices travel into the next chord when you ask for more than a plain glide
 MOVES = ["Bloom", "Cascade up", "Cascade down", "Spiral", "Swoop", "Scatter", "Converge", "Fall"]
 ORDERS = ["Together", "Low first", "High first", "Outside in", "Random"]
+# Crossing: which voice takes which note of the next chord. The nearest, or trading places
+# so that some rise while others fall and they pass through each other on the way
+CROSSINGS = ["No crossing", "Auto cross", "Swap middle", "Outside in", "Mirror", "Rotate up", "Rotate down", "Mirror all"]
+# Range: how far the voices may wander from where a fresh chord puts them. Left free, they
+# creep upward change after change
+RANGES = ["Tight", "Normal", "Free"]
+# Sub floor: the lowest the sub voice goes (small speakers can't play much under A1)
+SUB_FLOORS = [("Any", 0), ("E1", 28), ("A1", 33), ("C2", 36)]
 STAGGERS = [0, 0.5, 1, 2, 3, 5, 8]
 CHORD_TIMES = [0.25, 0.4, 0.6, 1, 2, 4, 6, 8, 12, 20, 30, 60]
 PROG_TIMES = [1, 2, 3, 4, 6, 8, 12, 16]
@@ -239,6 +247,10 @@ class AmbientMixin:
             self.achord.update(v4=True)
         self.achord.setdefault("timing", 0)
         self.achord.setdefault("sub", True)      # a sub voice an octave under the bass
+        self.achord.setdefault("cross", 0)       # No crossing
+        self.achord.setdefault("range", 1)       # Normal: the voices stay near home
+        self.achord.setdefault("subfloor", 0)    # Any
+        self._cross_turn = 0
         # a chord progression that steps by itself: every voice glides into each chord
         self.aprog = dict({"steps": [5, 0, 4, 3, None, None, None, None], "time": 4}, **(st.get("prog") or {}))
         self.aprog.update(run=False, i=-1, next=0.0)
@@ -792,7 +804,7 @@ class AmbientMixin:
             v["base"] = None
             v["level"], v["pan"], v["vib"], v["drift"], v["fade"] = 0.6, 0.0, 0, 0, 1.0
         was_on = v["on"]
-        v["note"], v["cents"], v["on"] = int(bass) - 12, 0, True
+        v["note"], v["cents"], v["on"] = self.amb_sub_note(bass), 0, True
         if v["base"] is None:
             self.amb_render(5)
         self.amb_push(5, jump=not was_on, glide=secs, shape=2)
@@ -816,13 +828,101 @@ class AmbientMixin:
             c0 = cur[0][0]
             b = min((n for n in range(36, 48) if n % 12 == root_pc), key=lambda n: abs(n - c0))   # bass stays C2..B2
             best, used, prev, rest = [b], {root_pc}, b, cur[1:]
+        # home: where each voice sits in a fresh chord. Left alone the voices creep upward,
+        # change after change; a pull towards home and a ceiling over it keep them in their register
+        rng = self.achord.get("range", 1) % len(RANGES)
+        pull = (0.32, 0.16, 0.0)[rng]
+        lift = (6, 10, None)[rng]
+        homes = [n + self.key for n in (36, 43, 48, 55, 60)]
         for c, _ in rest:
+            k = len(best)
+            home = homes[min(k, len(homes) - 1)]
+            roof = home + lift if lift is not None else 999
             opts = [n for n in cand if n > prev] or [cand[-1]]
-            n = min(opts, key=lambda n: abs(n - c) + (2.5 if n % 12 in used and len(used) < len(pcs) else 0))
+            n = min(opts, key=lambda n: abs(n - c) + (2.5 if n % 12 in used and len(used) < len(pcs) else 0)
+                    + pull * abs(n - home) + (4.0 * (n - roof) if n > roof else 0.0))
             best.append(n)
             used.add(n % 12)
             prev = n
+        # every note of the chord, when there are voices enough: a voice doubling a note another
+        # already has moves to the nearest note of one that is missing (a colour chord with its
+        # third left out is hollow). Never the bass.
+        for _ in range(6):
+            miss = next((p for p in sorted(pcs) if all(n % 12 != p for n in best)), None)
+            if miss is None:
+                break
+            who = None
+            for k in range(1, len(best)):
+                n0 = best[k]
+                if sum(1 for n in best if n % 12 == n0 % 12) < 2:
+                    continue
+                lo = best[k - 1]
+                hi = best[k + 1] if k + 1 < len(best) else 200
+                for n in range(n0 - 11, n0 + 12):
+                    if n % 12 != miss or n < 24 or n > 96:
+                        continue
+                    d = abs(n - n0) + (0.0 if lo < n < hi else 6.0) + (0.5 * (54 - n) if n < 54 else 0.0)
+                    if who is None or d < who[0]:
+                        who = (d, k, n)
+            if who is None:
+                break                                    # nothing doubled: more notes than voices
+            best[who[1]] = who[2]
         return {i: n for n, (_, i) in zip(best, cur)}
+
+    def amb_cross(self, moves):
+        """The crossing: voicelead gives each voice the nearest note. Here the same notes
+        are dealt out again, so some voices rise while others fall and pass through each
+        other, and the chord they land on is the very same chord. The bass keeps the root
+        unless everything mirrors."""
+        mode = self.achord.get("cross", 0) % len(CROSSINGS)
+        ids = sorted(moves)
+        if mode == 0 or len(ids) < 3:
+            return moves
+
+        def now_of(i):
+            u = self.aui[i]
+            return u["cur"] if u["cur"] is not None else self.av[i]["note"] * 100.0
+        by_now = sorted(ids, key=now_of)                 # the voices, low to high
+        tg = sorted(moves[i] for i in ids)               # the notes, low to high
+        n = len(ids)
+        p = list(range(n))                               # voice k (from the bottom) takes note p[k]
+        if mode == 2 and n >= 4:                         # the two middle voices trade
+            a, b = n // 2 - 1, n // 2
+            p[a], p[b] = p[b], p[a]
+        elif mode == 3:                                  # the outer two trade (not the bass), the middle holds
+            p[1], p[n - 1] = p[n - 1], p[1]
+        elif mode == 4:                                  # every upper voice to its mirror
+            p[1:] = p[1:][::-1]
+        elif mode == 5:                                  # each up a place, the top drops under
+            p[1:] = p[2:] + p[1:2]
+        elif mode == 6:                                  # each down a place, the lowest leaps over
+            p[1:] = p[-1:] + p[1:-1]
+        elif mode == 7:                                  # the bass too
+            p = p[::-1]
+        elif mode == 1:                                  # auto: shared notes hold, the voices that move trade ends
+            movers = [k for k in range(1, n) if abs(now_of(by_now[k]) - tg[k] * 100.0) > 50.0]
+            turn = self._cross_turn
+            if len(movers) < 2:                          # nearly nothing moves: two neighbours trade instead
+                k = (2 + turn % 2) if not movers else max(2, min(movers[0], n - 1))
+                k = min(k, n - 1)
+                j = k - 1 if k - 1 >= 1 else k + 1
+                p[k], p[j] = p[j], p[k]
+            elif len(movers) > 2 and turn % 3 == 1:      # now and then they go round instead of across
+                for j, k in enumerate(movers):
+                    p[k] = movers[(j + 1) % len(movers)]
+            else:
+                for j, k in enumerate(movers):
+                    p[k] = movers[len(movers) - 1 - j]
+            self._cross_turn = turn + 1
+        return {by_now[k]: tg[p[k]] for k in range(n)}
+
+    def amb_sub_note(self, bass):
+        """The sub's note: an octave under the bass, but not below the Sub floor."""
+        s = int(bass) - 12
+        floor = SUB_FLOORS[self.achord.get("subfloor", 0) % len(SUB_FLOORS)][1]
+        while s < floor:
+            s += 12
+        return s
 
     # ------------------------------------------------------------ playing chords, Brickchord-style
     NCH = 5                     # how many drone voices a chord button plays
@@ -848,7 +948,14 @@ class AmbientMixin:
             sc = mm.SCALES[self.scale]
             pcs = ({(self.key + sc[(deg + s) % 7]) % 12 for s in steps} if kind == "deg"
                    else {(root_pc + s) % 12 for s in steps})
-            cname = cname + " " + name
+            # the root's own name, then the colour's: these shapes are not the scale's major
+            # or minor, so "D Open", not "Dm Open"
+            n = 1 if cname else 0
+            while n < len(cname) and cname[n] in "#b♯♭":
+                n += 1
+            cname = cname[:n] + " " + name
+            if kind == "semi":
+                iv = sorted({(p - root_pc) % 12 for p in pcs})
         key = (deg, tuple(sorted(k for k, v in m.items() if v)), name)
         return root_pc, pcs, mm.roman_for(deg, iv) + "  " + cname, key
 
@@ -878,7 +985,7 @@ class AmbientMixin:
             for i in fresh:
                 self.av[i]["on"] = True
                 self.amb_push(i, jump=True)
-            moves = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
+            moves = self.amb_cross(self.amb_voicelead(list(range(self.NCH)), pcs, root_pc))
             self.amb_glide_all(moves, MOVES[move % len(MOVES)].upper() if move is not None else "",
                                move=move, glide_x=glide_x)
         if getattr(self, "acur_deg", None) is not None and self.acur_deg != deg:
@@ -930,7 +1037,7 @@ class AmbientMixin:
         to = self.amb_voicelead(list(range(self.NCH)), pcs, root_pc)
         tgt = {i: n * 100.0 for i, n in to.items()}
         if self.av[5]["on"] and self.achord.get("sub"):
-            tgt[5] = (min(to.values()) - 12) * 100.0
+            tgt[5] = self.amb_sub_note(min(to.values())) * 100.0
         self.ascrub = {"btn": btn, "deg": deg, "mods": held, "key": key, "label": label, "from": frm,
                        "to": tgt, "notes": to, "p": 0.0, "active": False, "sent": None, "r2": via_r2}
         return True
@@ -1502,10 +1609,20 @@ class AmbientMixin:
         self.sounding = [v["note"] for v in self.av if v["on"]]          # the keyboard lights them
         if now - self.ahist_t > 0.08:
             self.ahist_t = now
+            # the chord's colour, eased so the lines blend from one chord into the next
+            deg = getattr(self, "acur_deg", None)
+            cols = getattr(M(), "CHORD_COLS", None)
+            want = cols[deg % 7] if deg is not None and cols else None
+            had = getattr(self, "_acol", None)
+            if want is None or had is None:
+                acol = had if want is None else want      # stopped: the last chord's colour as it fades
+            else:
+                acol = tuple(int(round(a + (b - a) * 0.3)) for a, b in zip(had, want))
+            self._acol = acol
             for i in range(NV):
                 h = self.ahist[i]
                 u = self.aui[i]
-                h.append((now, u["cur"], u["lvl"]))
+                h.append((now, u["cur"], u["lvl"], acol))
                 while h and now - h[0][0] > HIST_SECS:
                     h.pop(0)
 
@@ -1673,8 +1790,11 @@ class AmbientMixin:
                     ("Glide timing", TIMINGS[ch.get("timing", 0) % len(TIMINGS)]),
                     ("Glide time", "%g s" % ch["time"]), ("Stagger", ("%g s apart" % ch["stagger"]) if ch["stagger"] else "Off"),
                     ("Order", ORDERS[ch["order"]]),
+                    ("Crossing", CROSSINGS[ch.get("cross", 0) % len(CROSSINGS)]),
+                    ("Range", RANGES[ch.get("range", 1) % len(RANGES)]),
                     ("Bass on root", "On" if ch.get("root") else "Off"),
                     ("Sub bass", "On" if ch.get("sub") else "Off"),
+                    ("Sub floor", SUB_FLOORS[ch.get("subfloor", 0) % len(SUB_FLOORS)][0]),
                     ("Scrub release", self.SCRUB_RELEASE[ch.get("scrub_release", 0) % 3]),
                     ("Move", "%s   (R2 + chord)" % MOVES[ch["move"] % len(MOVES)]),
                     ("Progression moves", "On" if ch.get("prog_move") else "Off"),
@@ -1850,6 +1970,17 @@ class AmbientMixin:
             elif name == "Glide timing":
                 ch["timing"] = (ch.get("timing", 0) + d) % len(TIMINGS)
                 self.amb_preview_path()
+            elif name == "Crossing":
+                ch["cross"] = (ch.get("cross", 0) + d) % len(CROSSINGS)
+                self.amb_preview_path()
+            elif name == "Range":
+                ch["range"] = (ch.get("range", 1) + d) % len(RANGES)
+            elif name == "Sub floor":
+                ch["subfloor"] = (ch.get("subfloor", 0) + d) % len(SUB_FLOORS)
+                ons = [self.av[k]["note"] for k in range(self.NCH) if self.av[k]["on"]]
+                if self.av[5]["on"] and ons:
+                    self.av[5]["note"] = self.amb_sub_note(min(ons))
+                    self.amb_push(5, glide=0.5, shape=2)
             elif name == "Bass on root":
                 ch["root"] = not ch.get("root")
             elif name == "Sub bass":
@@ -2085,16 +2216,28 @@ class AmbientMixin:
             if len(h) < 2:
                 continue
             col = VCOL[i]
-            pts = []
-            for (t, cents, lvl) in h:
+            wid = 2 if i < 6 else 3
+            pts, seg = [], None
+            # each stretch of the line takes the colour of the chord it was playing (a voice
+            # keeps a little of its own colour, so you can still tell them apart)
+            for (t, cents, lvl, acol) in h:
                 if lvl < 0.01:
                     if len(pts) > 1:
-                        pygame.draw.lines(c, self.mix(mm.BG, col, 0.85), False, pts, 2)
+                        pygame.draw.lines(c, self.mix(mm.BG, seg, 0.85), False, pts, wid)
                     pts = []
                     continue
-                pts.append((int(gx1 - (now - t) / span * (gx1 - gx0)), int(ypos(cents))))
+                here = col if acol is None or i >= 6 else self.mix(col, acol, 0.65)
+                pt = (int(gx1 - (now - t) / span * (gx1 - gx0)), int(ypos(cents)))
+                if pts and here != seg:
+                    if len(pts) > 1:
+                        pygame.draw.lines(c, self.mix(mm.BG, seg, 0.85), False, pts, wid)
+                    pts = [pts[-1]]
+                pts.append(pt)
+                seg = here
             if len(pts) > 1:
-                pygame.draw.lines(c, self.mix(mm.BG, col, 0.85), False, pts, 2 if i < 6 else 3)
+                pygame.draw.lines(c, self.mix(mm.BG, seg, 0.85), False, pts, wid)
+            if seg is not None and h[-1][2] >= 0.01:
+                col = seg
             u = self.aui[i]
             v = self.av[i]
             if u["lvl"] > 0.01:
@@ -2153,7 +2296,7 @@ class AmbientMixin:
                 elif active:
                     lv = 1.0 - sc["p"]
             r = pygame.Rect(x0 + i * (tw + gap), L["tiles_y"], tw, th)
-            pygame.draw.rect(c, self.mix(mm.PANEL, mm.ACCENT, lv), r, border_radius=10)
+            pygame.draw.rect(c, self.mix(mm.PANEL, mm.CHORD_COLS[i], lv), r, border_radius=10)
             self.text(c, mm.roman_for(i, iv), self.f_med, self.mix(mm.ACCENT2, mm.BG, lv), (r.centerx, r.y + th * 21 // 100),
                       center=True)
             self.text(c, name, self.f_med if len(name) < 6 else self.f_small, self.mix(mm.INK, mm.BG, lv),

@@ -5,7 +5,7 @@
 # aarch64), its launcher and its menu artwork, laid out like roms/ports.
 # Usage: tools/build_knulli.sh [version]
 set -e
-VER="${1:-v0.6.0}"
+VER="${1:-v0.7.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
 mkdir -p "$OUT"
